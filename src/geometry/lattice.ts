@@ -8,6 +8,46 @@ import type { LatticeParams, LatticeType } from '../types/project';
 
 const TWO_PI = 2 * Math.PI;
 
+type StrutCache = {
+  L: number;
+  h: number;
+  q: number;
+  corners: Vec3[];
+  edges: [Vec3, Vec3][];
+  faceCenters: Vec3[];
+  fcc: Vec3[];
+  offsets: Vec3[];
+};
+
+let strutCache: StrutCache | null = null;
+
+function getStrutCache(L: number): StrutCache {
+  if (strutCache && strutCache.L === L) return strutCache;
+  const h = L / 2;
+  const q = L / 4;
+  const corners: Vec3[] = [
+    [0, 0, 0], [L, 0, 0], [0, L, 0], [L, L, 0],
+    [0, 0, L], [L, 0, L], [0, L, L], [L, L, L],
+  ];
+  const edges: [Vec3, Vec3][] = [
+    [[0, 0, 0], [L, 0, 0]], [[0, L, 0], [L, L, 0]], [[0, 0, L], [L, 0, L]], [[0, L, L], [L, L, L]],
+    [[0, 0, 0], [0, L, 0]], [[L, 0, 0], [L, L, 0]], [[0, 0, L], [0, L, L]], [[L, 0, L], [L, L, L]],
+    [[0, 0, 0], [0, 0, L]], [[L, 0, 0], [L, 0, L]], [[0, L, 0], [0, L, L]], [[L, L, 0], [L, L, L]],
+  ];
+  const faceCenters: Vec3[] = [
+    [h, h, 0], [h, 0, h], [0, h, h], [h, h, L], [h, L, h], [L, h, h],
+  ];
+  const fcc: Vec3[] = [
+    [0, 0, 0], [L / 2, L / 2, 0], [L / 2, 0, L / 2], [0, L / 2, L / 2],
+  ];
+  const offsets: Vec3[] = [
+    [q, q, q], [-q, -q, q], [-q, q, -q], [q, -q, -q],
+  ];
+
+  strutCache = { L, h, q, corners, edges, faceCenters, fcc, offsets };
+  return strutCache;
+}
+
 // ═══════════════════════════════════════════════════════════
 //  TPMS Lattice Functions
 //  All return a sheet-type SDF: |f(p)| - c  where c sets thickness
@@ -76,14 +116,12 @@ export function iwpSDF(x: number, y: number, z: number, cellSize: number, wallTh
 export function bccStrutSDF(x: number, y: number, z: number, cellSize: number, strutDiameter: number): number {
   const r = strutDiameter / 2;
   const L = cellSize;
+  const { corners, edges } = getStrutCache(L);
   const lx = ((x % L) + L) % L;
   const ly = ((y % L) + L) % L;
   const lz = ((z % L) + L) % L;
 
   const center: Vec3 = [L/2, L/2, L/2];
-  const corners: Vec3[] = [
-    [0,0,0],[L,0,0],[0,L,0],[L,L,0],[0,0,L],[L,0,L],[0,L,L],[L,L,L],
-  ];
 
   let minDist = Infinity;
   for (const corner of corners) {
@@ -91,12 +129,7 @@ export function bccStrutSDF(x: number, y: number, z: number, cellSize: number, s
     if (d < minDist) minDist = d;
   }
   // Edge struts
-  const E: [Vec3,Vec3][] = [
-    [[0,0,0],[L,0,0]],[[0,L,0],[L,L,0]],[[0,0,L],[L,0,L]],[[0,L,L],[L,L,L]],
-    [[0,0,0],[0,L,0]],[[L,0,0],[L,L,0]],[[0,0,L],[0,L,L]],[[L,0,L],[L,L,L]],
-    [[0,0,0],[0,0,L]],[[L,0,0],[L,0,L]],[[0,L,0],[0,L,L]],[[L,L,0],[L,L,L]],
-  ];
-  for (const [a,b] of E) {
+  for (const [a, b] of edges) {
     const d = distToSegment([lx,ly,lz], a, b);
     if (d < minDist) minDist = d;
   }
@@ -108,26 +141,17 @@ export function bccStrutSDF(x: number, y: number, z: number, cellSize: number, s
 export function octetSDF(x: number, y: number, z: number, cellSize: number, strutDiameter: number): number {
   const r = strutDiameter / 2;
   const L = cellSize;
-  const h = L / 2;
+  const { h, corners, faceCenters } = getStrutCache(L);
   const lx = ((x % L) + L) % L;
   const ly = ((y % L) + L) % L;
   const lz = ((z % L) + L) % L;
-
-  // Corners of the unit cell
-  const corners: Vec3[] = [
-    [0,0,0],[L,0,0],[0,L,0],[L,L,0],[0,0,L],[L,0,L],[0,L,L],[L,L,L],
-  ];
-  // Face centres
-  const faces: Vec3[] = [
-    [h,h,0],[h,0,h],[0,h,h],[h,h,L],[h,L,h],[L,h,h],
-  ];
 
   let minDist = Infinity;
   const p: Vec3 = [lx, ly, lz];
 
   // Each face centre connects to its 4 adjacent corners
   // +X face (L,h,h): corners with x=L
-  for (const fc of faces) {
+  for (const fc of faceCenters) {
     for (const cn of corners) {
       // A face centre at (fx,fy,fz) connects to corner (cx,cy,cz) if they
       // share two coordinates within h of each other — i.e. they're on the
@@ -149,26 +173,14 @@ export function octetSDF(x: number, y: number, z: number, cellSize: number, stru
 export function diamondStrutSDF(x: number, y: number, z: number, cellSize: number, strutDiameter: number): number {
   const r = strutDiameter / 2;
   const L = cellSize;
+  const { fcc, offsets } = getStrutCache(L);
   const lx = ((x % L) + L) % L;
   const ly = ((y % L) + L) % L;
   const lz = ((z % L) + L) % L;
-  const q = L / 4;
-
-  // FCC sites (in unit cell [0,L))
-  const fcc: Vec3[] = [
-    [0,0,0], [L/2,L/2,0], [L/2,0,L/2], [0,L/2,L/2],
-  ];
-  // Offset sites (shifted by (L/4,L/4,L/4))
-  const off: Vec3[] = [
-    [q, q, q], [q+L/2, q+L/2, q], [q+L/2, q, q+L/2], [q, q+L/2, q+L/2],
-  ];
 
   // Each FCC node connects to 4 nearest offset nodes (tetrahedral).
   // Connection pattern: FCC node at (a,b,c) connects to offset nodes at
   // (a±q, b±q, c±q) where an even number of signs are negative.
-  const offsets: Vec3[] = [
-    [q, q, q], [-q, -q, q], [-q, q, -q], [q, -q, -q],
-  ];
 
   let minDist = Infinity;
   const p: Vec3 = [lx, ly, lz];
@@ -295,28 +307,92 @@ export function smoothMax(a: number, b: number, k: number): number {
 //  Unified lattice evaluator
 // ═══════════════════════════════════════════════════════════
 
-/** Evaluate the raw lattice SDF for any lattice type at a point. */
-function evalLattice(
-  x: number, y: number, z: number,
-  latticeType: LatticeType,
-  cellSize: number,
-  wallThickness: number,
-  strutDiameter: number,
-): number {
+function buildLatticeEvaluator(params: LatticeParams): (x: number, y: number, z: number) => number {
+  const { latticeType, cellSize, wallThickness, strutDiameter } = params;
   switch (latticeType) {
-    // TPMS (use wallThickness)
-    case 'gyroid':   return gyroidSDF(x, y, z, cellSize, wallThickness);
-    case 'schwarzP': return schwarzPSDF(x, y, z, cellSize, wallThickness);
-    case 'schwarzD': return schwarzDSDF(x, y, z, cellSize, wallThickness);
-    case 'neovius':  return neoviusSDF(x, y, z, cellSize, wallThickness);
-    case 'iwp':      return iwpSDF(x, y, z, cellSize, wallThickness);
-    case 'spinodal': return spinodalSDF(x, y, z, cellSize, wallThickness);
-    // Strut (use strutDiameter)
-    case 'bcc':      return bccStrutSDF(x, y, z, cellSize, strutDiameter);
-    case 'octet':    return octetSDF(x, y, z, cellSize, strutDiameter);
-    case 'diamond':  return diamondStrutSDF(x, y, z, cellSize, strutDiameter);
-    // Stochastic (use strutDiameter)
-    case 'voronoi':  return voronoiSDF(x, y, z, cellSize, strutDiameter);
+    case 'gyroid': {
+      const k = TWO_PI / cellSize;
+      const c = wallThickness * Math.PI / cellSize;
+      return (x, y, z) => {
+        const kx = k * x;
+        const ky = k * y;
+        const kz = k * z;
+        const val = Math.sin(kx) * Math.cos(ky)
+          + Math.sin(ky) * Math.cos(kz)
+          + Math.sin(kz) * Math.cos(kx);
+        return Math.abs(val) - c;
+      };
+    }
+    case 'schwarzP': {
+      const k = TWO_PI / cellSize;
+      const c = wallThickness * Math.PI / cellSize;
+      return (x, y, z) => {
+        const val = Math.cos(k * x) + Math.cos(k * y) + Math.cos(k * z);
+        return Math.abs(val) - c * 3;
+      };
+    }
+    case 'schwarzD': {
+      const k = TWO_PI / cellSize;
+      const c = wallThickness * Math.PI / cellSize;
+      return (x, y, z) => {
+        const sx = Math.sin(k * x), sy = Math.sin(k * y), sz = Math.sin(k * z);
+        const cx = Math.cos(k * x), cy = Math.cos(k * y), cz = Math.cos(k * z);
+        const val = sx * sy * sz + sx * cy * cz + cx * sy * cz + cx * cy * sz;
+        return Math.abs(val) - c * 1.4;
+      };
+    }
+    case 'neovius': {
+      const k = TWO_PI / cellSize;
+      const c = wallThickness * Math.PI / cellSize;
+      return (x, y, z) => {
+        const cx = Math.cos(k * x), cy = Math.cos(k * y), cz = Math.cos(k * z);
+        const val = 3 * (cx + cy + cz) + 4 * cx * cy * cz;
+        return Math.abs(val) - c * 13;
+      };
+    }
+    case 'iwp': {
+      const k = TWO_PI / cellSize;
+      const k2 = 2 * k;
+      const c = wallThickness * Math.PI / cellSize;
+      return (x, y, z) => {
+        const cx = Math.cos(k * x), cy = Math.cos(k * y), cz = Math.cos(k * z);
+        const val = 2 * (cx * cy + cy * cz + cz * cx)
+          - (Math.cos(k2 * x) + Math.cos(k2 * y) + Math.cos(k2 * z));
+        return Math.abs(val) - c * 5;
+      };
+    }
+    case 'spinodal': {
+      const k0 = TWO_PI / cellSize;
+      const waves = Array.from({ length: N_WAVES }, (_, i) => {
+        const phi = TWO_PI * hashF(i, 0);
+        const cosTheta = 1 - 2 * hashF(i, 1);
+        const sinTheta = Math.sqrt(1 - cosTheta * cosTheta);
+        return {
+          kx: k0 * sinTheta * Math.cos(phi),
+          ky: k0 * sinTheta * Math.sin(phi),
+          kz: k0 * cosTheta,
+          phase: TWO_PI * hashF(i, 2),
+        };
+      });
+      const c = wallThickness * 0.6 / cellSize;
+      return (x, y, z) => {
+        let sum = 0;
+        for (let i = 0; i < waves.length; i++) {
+          const w = waves[i];
+          sum += Math.cos(w.kx * x + w.ky * y + w.kz * z + w.phase);
+        }
+        sum /= Math.sqrt(N_WAVES);
+        return Math.abs(sum) - c * 2;
+      };
+    }
+    case 'bcc':
+      return (x, y, z) => bccStrutSDF(x, y, z, cellSize, strutDiameter);
+    case 'octet':
+      return (x, y, z) => octetSDF(x, y, z, cellSize, strutDiameter);
+    case 'diamond':
+      return (x, y, z) => diamondStrutSDF(x, y, z, cellSize, strutDiameter);
+    case 'voronoi':
+      return (x, y, z) => voronoiSDF(x, y, z, cellSize, strutDiameter);
   }
 }
 
@@ -338,15 +414,16 @@ export interface LatticeSdfOptions {
 
 export function buildCombinedSDF(opts: LatticeSdfOptions): (x: number, y: number, z: number) => number {
   const { bvh, params } = opts;
-  const { shellThickness, noShell, surfaceOnly, surfaceDepth, cellSize, wallThickness, strutDiameter, latticeType, variant, gradientEnabled, gradientStrength } = params;
+  const { shellThickness, noShell, surfaceOnly, surfaceDepth, cellSize, wallThickness, strutDiameter, variant, gradientEnabled, gradientStrength } = params;
   const blendK = Math.min(wallThickness, strutDiameter) * 0.3;
+  const latticeFn = buildLatticeEvaluator(params);
 
   // ── Surface-only mode ──
   if (surfaceOnly) {
     return (x, y, z) => {
       const dObj = bvh.signedDistance([x, y, z]);
       const bandSdf = Math.max(dObj, -(dObj + surfaceDepth));
-      let lat = evalLattice(x, y, z, latticeType, cellSize, wallThickness, strutDiameter);
+      let lat = latticeFn(x, y, z);
       if (gradientEnabled) {
         lat *= 1.0 - gradientStrength * Math.exp(-Math.max(0, -dObj) / (cellSize * 3));
       }
@@ -358,7 +435,7 @@ export function buildCombinedSDF(opts: LatticeSdfOptions): (x: number, y: number
   if (noShell) {
     return (x, y, z) => {
       const dObj = bvh.signedDistance([x, y, z]);
-      let lat = evalLattice(x, y, z, latticeType, cellSize, wallThickness, strutDiameter);
+      let lat = latticeFn(x, y, z);
       if (gradientEnabled) {
         lat *= 1.0 - gradientStrength * Math.exp(-Math.max(0, -dObj) / (cellSize * 3));
       }
@@ -371,7 +448,7 @@ export function buildCombinedSDF(opts: LatticeSdfOptions): (x: number, y: number
       const dObj = bvh.signedDistance([x, y, z]);
       const shellSdf = Math.max(dObj, -(dObj + shellThickness));
       const coreSdf = -(dObj + shellThickness);
-      let lat = evalLattice(x, y, z, latticeType, cellSize, wallThickness, strutDiameter);
+      let lat = latticeFn(x, y, z);
       if (gradientEnabled) {
         lat *= 1.0 - gradientStrength * Math.exp(-Math.max(0, -(dObj + shellThickness)) / (cellSize * 3));
       }
@@ -380,7 +457,7 @@ export function buildCombinedSDF(opts: LatticeSdfOptions): (x: number, y: number
   } else {
     return (x, y, z) => {
       const dObj = bvh.signedDistance([x, y, z]);
-      let lat = evalLattice(x, y, z, latticeType, cellSize, wallThickness, strutDiameter);
+      let lat = latticeFn(x, y, z);
       if (gradientEnabled) {
         lat *= 1.0 - gradientStrength * Math.exp(-Math.max(0, -dObj) / (cellSize * 3));
       }
@@ -399,13 +476,14 @@ export function buildAnalyticLattice(
   objectSdf: (x: number, y: number, z: number) => number,
   params: LatticeParams,
 ): (x: number, y: number, z: number) => number {
-  const { shellThickness, noShell, surfaceOnly, surfaceDepth, cellSize, wallThickness, strutDiameter, latticeType, variant, gradientEnabled, gradientStrength } = params;
+  const { shellThickness, noShell, surfaceOnly, surfaceDepth, cellSize, wallThickness, strutDiameter, variant, gradientEnabled, gradientStrength } = params;
   const blendK = Math.min(wallThickness, strutDiameter) * 0.3;
+  const latticeFn = buildLatticeEvaluator(params);
 
   return (x, y, z) => {
     const dObj = objectSdf(x, y, z);
 
-    let lat = evalLattice(x, y, z, latticeType, cellSize, wallThickness, strutDiameter);
+    let lat = latticeFn(x, y, z);
     if (gradientEnabled) {
       const gd = (noShell || surfaceOnly) ? Math.max(0, -dObj) : Math.max(0, -(dObj + shellThickness));
       lat *= 1.0 - gradientStrength * Math.exp(-gd / (cellSize * 3));
