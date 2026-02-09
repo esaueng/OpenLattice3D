@@ -409,15 +409,21 @@ export function LeftPanel() {
 
           <div className="row">
             <label>Export Resolution:</label>
-             <input
-              type="range"
+            <select
               value={store.params.exportResolution}
-              min={1} max={10} step={1}
               onChange={(e) => store.updateParams({ exportResolution: parseInt(e.target.value) || 3 })}
-            />
-            <span>{store.params.exportResolution} ({
-              ['Min', 'Low', 'Med', 'Good', 'High', 'Fine', 'Ultra', 'Extreme', '9', 'Max'][store.params.exportResolution - 1]
-            })</span>
+            >
+              {['Min', 'Low', 'Med', 'Good', 'High', 'Fine', 'Ultra', 'Extreme', '9', 'Max'].map(
+                (label, index) => {
+                  const value = index + 1;
+                  return (
+                    <option key={label} value={value}>
+                      {value} - {label}
+                    </option>
+                  );
+                }
+              )}
+            </select>
           </div>
 
           <div className="row checkbox-row">
