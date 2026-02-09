@@ -347,33 +347,45 @@ function sdHexagon2D(px: number, py: number, radius: number): number {
   return inside ? -minDist : minDist;
 }
 
-function hexCellCenter(x: number, y: number, radius: number): [number, number] {
-  const q = (SQRT3 / 3 * x - (1 / 3) * y) / radius;
-  const r = (2 / 3 * y) / radius;
-  let rx = Math.round(q);
-  let ry = Math.round(r);
-  let rz = Math.round(-q - r);
+function hexCellCenter(x: number, y: number, side: number): [number, number] {
+  const hexRadius = Math.cos(Math.PI / 6) * side;
+  const hexWidth = 2 * hexRadius;
+  const verticalSpacing = 1.5 * side;
 
-  const xDiff = Math.abs(rx - q);
-  const yDiff = Math.abs(ry - r);
-  const zDiff = Math.abs(rz + q + r);
+  const approxRow = Math.round(y / verticalSpacing);
+  const baseOffset = (approxRow % 2) * hexRadius;
+  const approxCol = Math.round((x - baseOffset) / hexWidth);
 
-  if (xDiff > yDiff && xDiff > zDiff) rx = -ry - rz;
-  else if (yDiff > zDiff) ry = -rx - rz;
-  else rz = -rx - ry;
+  let bestX = 0;
+  let bestY = 0;
+  let bestDist = Infinity;
 
-  const cx = radius * SQRT3 * (rx + ry / 2);
-  const cy = radius * 1.5 * ry;
-  return [cx, cy];
+  for (let row = approxRow - 1; row <= approxRow + 1; row++) {
+    const rowOffset = (row % 2) * hexRadius;
+    for (let col = approxCol - 1; col <= approxCol + 1; col++) {
+      const cx = col * hexWidth + rowOffset;
+      const cy = row * verticalSpacing;
+      const dx = x - cx;
+      const dy = y - cy;
+      const dist = dx * dx + dy * dy;
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestX = cx;
+        bestY = cy;
+      }
+    }
+  }
+
+  return [bestX, bestY];
 }
 
 export function hexagonPrismSDF(x: number, y: number, z: number, cellSize: number, strutDiameter: number): number {
   const r = strutDiameter / 2;
-  const radius = cellSize / SQRT3;
-  const [cx, cy] = hexCellCenter(x, y, radius);
+  const side = cellSize / SQRT3;
+  const [cx, cy] = hexCellCenter(x, y, side);
   const lx = x - cx;
   const ly = y - cy;
-  const d = Math.abs(sdHexagon2D(lx, ly, radius));
+  const d = Math.abs(sdHexagon2D(lx, ly, side));
   return d - r;
 }
 
