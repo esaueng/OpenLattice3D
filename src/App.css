@@ -168,6 +168,14 @@ html, body, #root {
   color: var(--accent);
 }
 
+.notification-test-btn {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 60;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
 /* Buttons */
 .btn {
   display: inline-block;
