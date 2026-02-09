@@ -25,12 +25,26 @@ The Worker serves files from `dist/` and falls back to `index.html` for client-s
 
 ### Feedback storage (optional)
 
-The feedback form posts to `/api/feedback`. To persist reports, create a KV namespace and update
-`wrangler.jsonc` with the namespace IDs:
+The feedback form posts to `/api/feedback`. To persist reports, create a KV namespace and add the
+binding to your Wrangler config or deploy command:
 
 ```bash
 npx wrangler kv namespace create FEEDBACK_KV
 npx wrangler kv namespace create FEEDBACK_KV --preview
+```
+
+Then add the namespace binding (example):
+
+```jsonc
+{
+  "kv_namespaces": [
+    {
+      "binding": "FEEDBACK_KV",
+      "id": "YOUR_KV_NAMESPACE_ID",
+      "preview_id": "YOUR_PREVIEW_KV_NAMESPACE_ID"
+    }
+  ]
+}
 ```
 
 To receive email notifications, set `FEEDBACK_EMAIL_TO` and `FEEDBACK_EMAIL_FROM` in `wrangler.jsonc`
