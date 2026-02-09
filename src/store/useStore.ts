@@ -245,7 +245,14 @@ export const useStore = create<AppState>((set) => ({
     },
   })),
 
-  setVariant: (variant) => set((s) => ({ params: { ...s.params, variant } })),
+  setVariant: (variant) => set((s) => ({
+    params: {
+      ...s.params,
+      variant,
+      surfaceOnly: variant === 'implicit_conformal' ? true : s.params.surfaceOnly,
+      noShell: variant === 'implicit_conformal' ? false : s.params.noShell,
+    },
+  })),
 
   setGenerating: (generating) => set({ generating }),
 
