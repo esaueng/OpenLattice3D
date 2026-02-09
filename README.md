@@ -23,33 +23,10 @@ npx wrangler deploy
 
 The Worker serves files from `dist/` and falls back to `index.html` for client-side routing.
 
-### Feedback storage (optional)
+### Feedback form
 
-The feedback form posts to `/api/feedback`. By default, submissions are cached for up to 24 hours
-using the Workers Cache API. For durable storage, create a KV namespace and add the binding to your
-Wrangler config or deploy command:
-
-```bash
-npx wrangler kv namespace create FEEDBACK_KV
-npx wrangler kv namespace create FEEDBACK_KV --preview
-```
-
-Then add the namespace binding (example):
-
-```jsonc
-{
-  "kv_namespaces": [
-    {
-      "binding": "FEEDBACK_KV",
-      "id": "YOUR_KV_NAMESPACE_ID",
-      "preview_id": "YOUR_PREVIEW_KV_NAMESPACE_ID"
-    }
-  ]
-}
-```
-
-To receive email notifications, set `FEEDBACK_EMAIL_TO` and `FEEDBACK_EMAIL_FROM` in `wrangler.jsonc`
-or via `wrangler secret put`/`wrangler vars set` (MailChannels must be enabled for your account).
+Feedback is collected through an embedded Tally form, which handles storage and notifications
+outside of the Worker.
 
 ## How to Use
 
