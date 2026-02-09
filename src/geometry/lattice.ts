@@ -659,7 +659,7 @@ export function buildSurfaceHexLattice(
 ): (x: number, y: number, z: number) => number {
   const { surfaceDepth, cellSize, strutDiameter, shellThickness } = params;
   const shellDepth = shellThickness > 0 ? Math.min(surfaceDepth, shellThickness) : surfaceDepth;
-  const targetDepth = Math.max(shellDepth, cellSize * 0.5);
+  const targetDepth = Math.max(0.1, shellDepth);
   const wallThickness = Math.max(strutDiameter, cellSize * 0.05);
   const inRadius = Math.max(0.1, (cellSize - wallThickness) * 0.5);
   const grid = buildSpatialHash(samples, cellSize);
