@@ -1,8 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 export function FeedbackWidget() {
   const [isOpen, setIsOpen] = useState(false);
-  const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
   useEffect(() => {
     const scriptSrc = 'https://tally.so/widgets/embed.js';
@@ -12,8 +11,6 @@ export function FeedbackWidget() {
       if (typeof window !== 'undefined' && 'Tally' in window) {
         // @ts-expect-error - Tally is a global injected by the embed script
         window.Tally.loadEmbeds();
-      } else if (iframeRef.current && !iframeRef.current.src) {
-        iframeRef.current.src = iframeRef.current.dataset.tallySrc ?? '';
       }
     };
 
@@ -50,8 +47,8 @@ export function FeedbackWidget() {
       {isOpen ? (
         <div className="feedback-panel">
           <iframe
-            ref={iframeRef}
             data-tally-src="https://tally.so/embed/rjAOQ2?alignLeft=1&hideTitle=1&transparentBackground=1&dynamicHeight=1"
+            src="https://tally.so/embed/rjAOQ2?alignLeft=1&hideTitle=1&transparentBackground=1&dynamicHeight=1"
             loading="lazy"
             title="Feedback - OpenLattice3D"
           />
