@@ -1,4 +1,11 @@
 {
+  "name": "openlattice3d",
+  "main": "worker/index.ts",
+  "compatibility_date": "2024-12-01",
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS"
+  },
   "observability": {
     "enabled": false,
     "head_sampling_rate": 1,
