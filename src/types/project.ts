@@ -11,6 +11,8 @@ export type LatticeType =
   | 'bcc'
   | 'octet'
   | 'diamond'
+  | 'hexagon'
+  | 'triangle'
   | 'voronoi'
   | 'spinodal';
 
