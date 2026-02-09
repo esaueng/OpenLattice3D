@@ -12,7 +12,18 @@ const VIEW_LABELS: Record<ViewMode, string> = {
 
 export function RightPanel() {
   const store = useStore();
-  const { validation, resultMesh, params, viewMode, clipPlane, logs, meshFileName, keepOutTris, keepInTris } = store;
+  const {
+    validation,
+    resultMesh,
+    params,
+    viewMode,
+    clipPlane,
+    logs,
+    meshFileName,
+    keepOutTris,
+    keepInTris,
+    viewerBackground,
+  } = store;
 
   return (
     <div className="panel right-panel">
@@ -85,6 +96,23 @@ export function RightPanel() {
             Shell rendered transparent. Orbit to see internal lattice structure.
           </div>
         )}
+
+        <div className="row" style={{ marginTop: 8 }}>
+          <label>Background:</label>
+          <input
+            type="color"
+            value={viewerBackground}
+            onChange={(e) => store.setViewerBackground(e.target.value)}
+            aria-label="Viewer background color"
+          />
+          <button
+            className="btn btn-tiny"
+            onClick={() => store.setViewerBackground('#1a1a2e')}
+            type="button"
+          >
+            Reset
+          </button>
+        </div>
       </section>
 
       {/* Validation Panel */}
