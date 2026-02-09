@@ -15,6 +15,24 @@ export function LeftPanel() {
   const jsonRef = useRef<HTMLInputElement>(null);
   const workerRef = useRef<Worker | null>(null);
 
+  const requestNotificationPermission = useCallback(async (): Promise<NotificationPermission | null> => {
+    if (!('Notification' in window)) return null;
+    if (Notification.permission === 'default') {
+      return Notification.requestPermission();
+    }
+    return Notification.permission;
+  }, []);
+
+  const notifyGenerationComplete = useCallback(async (triCount: number) => {
+    if (!('Notification' in window)) return;
+    const permission = await requestNotificationPermission();
+    if (permission === 'granted') {
+      new Notification('Lattice generation complete', {
+        body: `${triCount.toLocaleString()} triangles generated.`,
+      });
+    }
+  }, [requestNotificationPermission]);
+
   const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -85,6 +103,7 @@ export function LeftPanel() {
 
   const startGeneration = useCallback(() => {
     if (store.generating) return;
+    void requestNotificationPermission();
     store.setGenerating(true);
     store.setProgress(0, 'Starting...');
     store.addLog('Starting lattice generation...');
@@ -134,6 +153,7 @@ export function LeftPanel() {
         store.setGenerating(false);
         store.setProgress(1, 'Complete');
         store.addLog(`Generation complete: ${resp.triCount} triangles`);
+        void notifyGenerationComplete(resp.triCount || 0);
         worker.terminate();
       } else if (resp.type === 'error') {
         store.addLog(`Error: ${resp.message}`, 'error');
@@ -143,7 +163,7 @@ export function LeftPanel() {
     };
 
     worker.postMessage(msg);
-  }, [store]);
+  }, [notifyGenerationComplete, requestNotificationPermission, store]);
 
   const cancelGeneration = useCallback(() => {
     if (workerRef.current) {
