@@ -11,6 +11,18 @@ npm run dev
 
 Open http://localhost:5173 in your browser.
 
+## Deploy to Cloudflare Workers
+
+This app can be deployed as a static Workers site using Wrangler assets.
+
+```bash
+npm install
+npm run build
+npx wrangler deploy
+```
+
+The Worker serves files from `dist/` and falls back to `index.html` for client-side routing.
+
 ## How to Use
 
 ### 1. Import a Model
