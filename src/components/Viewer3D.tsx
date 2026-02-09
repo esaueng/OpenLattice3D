@@ -254,7 +254,7 @@ export function Viewer3D() {
   const {
     originalMesh, sphereMode, sphereRadius, sampleShape, viewMode, clipPlane,
     keepOutTris, keepInTris, selectionMode, resultMesh,
-    toggleKeepOut, toggleKeepIn,
+    toggleKeepOut, toggleKeepIn, viewerBackground,
   } = useStore();
 
   const handleFaceClick = useCallback((triIdx: number) => {
@@ -268,7 +268,7 @@ export function Viewer3D() {
   const hasContent = originalMesh || sphereMode;
 
   return (
-    <div style={{ width: '100%', height: '100%', background: '#1a1a2e' }}>
+    <div style={{ width: '100%', height: '100%', background: viewerBackground }}>
       <Canvas camera={{ fov: 50, near: 0.1, far: 10000 }} gl={{ localClippingEnabled: true }}>
         <ambientLight intensity={0.4} />
         <directionalLight position={[50, 50, 50]} intensity={0.8} />
