@@ -554,13 +554,13 @@ export interface LatticeSdfOptions {
 
 export function buildCombinedSDF(opts: LatticeSdfOptions): (x: number, y: number, z: number) => number {
   const { bvh, params } = opts;
-  const { shellThickness, noShell, surfaceOnly, surfaceDepth, cellSize, wallThickness, strutDiameter, variant, gradientEnabled, gradientStrength } = params;
+  const { shellThickness, noShell, surfaceOnly, surfaceDepth, cellSize, wallThickness, strutDiameter, variant, latticeType, gradientEnabled, gradientStrength } = params;
   const blendK = Math.min(wallThickness, strutDiameter) * 0.3;
   const latticeFn = buildLatticeEvaluator(params);
   const sdf = (x: number, y: number, z: number) => bvh.signedDistance([x, y, z]);
 
   const sampleLattice = (x: number, y: number, z: number, dObj: number) => {
-    if (variant !== 'implicit_conformal') {
+    if (variant !== 'implicit_conformal' || (latticeType !== 'hexagon' && latticeType !== 'triangle')) {
       return latticeFn(x, y, z);
     }
     const [u, v, w] = conformalCoords(sdf, x, y, z, dObj, cellSize);
@@ -625,7 +625,7 @@ export function buildAnalyticLattice(
   objectSdf: (x: number, y: number, z: number) => number,
   params: LatticeParams,
 ): (x: number, y: number, z: number) => number {
-  const { shellThickness, noShell, surfaceOnly, surfaceDepth, cellSize, wallThickness, strutDiameter, variant, gradientEnabled, gradientStrength } = params;
+  const { shellThickness, noShell, surfaceOnly, surfaceDepth, cellSize, wallThickness, strutDiameter, variant, latticeType, gradientEnabled, gradientStrength } = params;
   const blendK = Math.min(wallThickness, strutDiameter) * 0.3;
   const latticeFn = buildLatticeEvaluator(params);
 
@@ -633,7 +633,7 @@ export function buildAnalyticLattice(
     const dObj = objectSdf(x, y, z);
 
     let lat = latticeFn(x, y, z);
-    if (variant === 'implicit_conformal') {
+    if (variant === 'implicit_conformal' && (latticeType === 'hexagon' || latticeType === 'triangle')) {
       const [u, v, w] = conformalCoords(objectSdf, x, y, z, dObj, cellSize);
       lat = latticeFn(u, v, w);
     }
