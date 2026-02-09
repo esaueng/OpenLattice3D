@@ -13,7 +13,11 @@ function App() {
       </div>
       <RightPanel />
       <FeedbackWidget />
-      <div className="watermark">Built by Esau Engineering</div>
+      <div className="watermark">
+        <a href="https://esauengineering.com/" target="_blank" rel="noreferrer">
+          Built by Esau Engineering
+        </a>
+      </div>
     </div>
   );
 }
