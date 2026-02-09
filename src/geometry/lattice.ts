@@ -321,9 +321,19 @@ function conformalCoords(
   const px = x - n[0] * dObj;
   const py = y - n[1] * dObj;
   const pz = z - n[2] * dObj;
-  const u = dot([px, py, pz], t1);
-  const v = dot([px, py, pz], t2);
-  return [u, v, dObj];
+  const projectedU = dot([px, py, pz], t1);
+  const projectedV = dot([px, py, pz], t2);
+  const pLen = Math.sqrt(px * px + py * py + pz * pz);
+  if (pLen > 1e-6) {
+    const align = Math.abs((px / pLen) * n[0] + (py / pLen) * n[1] + (pz / pLen) * n[2]);
+    if (align > 0.95) {
+      const u = Math.atan2(n[1], n[0]) * pLen;
+      const clampedNz = Math.max(-1, Math.min(1, n[2]));
+      const v = Math.asin(clampedNz) * pLen;
+      return [u, v, dObj];
+    }
+  }
+  return [projectedU, projectedV, dObj];
 }
 
 function sdHexagon2D(px: number, py: number, radius: number): number {
