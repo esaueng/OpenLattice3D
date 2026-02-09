@@ -257,6 +257,8 @@ export function LeftPanel() {
                 <option value="bcc">BCC</option>
                 <option value="octet">Octet Truss (FCC)</option>
                 <option value="diamond">Diamond</option>
+                <option value="hexagon">Hexagon</option>
+                <option value="triangle">Triangle</option>
               </optgroup>
               <optgroup label="Stochastic">
                 <option value="voronoi">Voronoi Foam</option>

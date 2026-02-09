@@ -43,6 +43,8 @@ const LATTICE_COMPLEXITY: Record<LatticeParams['latticeType'], number> = {
   bcc: 1.1,
   octet: 1.2,
   diamond: 1.25,
+  hexagon: 1.15,
+  triangle: 1.1,
   voronoi: 1.7,
   spinodal: 2.0,
 };

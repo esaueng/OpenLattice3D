@@ -7,6 +7,7 @@ import type { MeshBVH } from './bvh';
 import type { LatticeParams, LatticeType } from '../types/project';
 
 const TWO_PI = 2 * Math.PI;
+const SQRT3 = Math.sqrt(3);
 
 type StrutCache = {
   L: number;
@@ -259,6 +260,89 @@ export function spinodalSDF(x: number, y: number, z: number, cellSize: number, w
 }
 
 // ═══════════════════════════════════════════════════════════
+//  2D Lattice Helpers (extruded to 3D)
+// ═══════════════════════════════════════════════════════════
+
+function distToSegment2D(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
+  const abx = bx - ax;
+  const aby = by - ay;
+  const apx = px - ax;
+  const apy = py - ay;
+  const t = Math.max(0, Math.min(1, (apx * abx + apy * aby) / (abx * abx + aby * aby + 1e-20)));
+  const dx = ax + t * abx - px;
+  const dy = ay + t * aby - py;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+function sdHexagon2D(px: number, py: number, radius: number): number {
+  const verts = Array.from({ length: 6 }, (_, i) => {
+    const angle = (Math.PI / 3) * i;
+    return [radius * Math.cos(angle), radius * Math.sin(angle)] as const;
+  });
+
+  let minDist = Infinity;
+  let inside = true;
+
+  for (let i = 0; i < verts.length; i++) {
+    const [ax, ay] = verts[i];
+    const [bx, by] = verts[(i + 1) % verts.length];
+    const cross = (bx - ax) * (py - ay) - (by - ay) * (px - ax);
+    if (cross < 0) inside = false;
+    const d = distToSegment2D(px, py, ax, ay, bx, by);
+    if (d < minDist) minDist = d;
+  }
+
+  return inside ? -minDist : minDist;
+}
+
+function hexCellCenter(x: number, y: number, radius: number): [number, number] {
+  const q = (SQRT3 / 3 * x - (1 / 3) * y) / radius;
+  const r = (2 / 3 * y) / radius;
+  let rx = Math.round(q);
+  let ry = Math.round(r);
+  let rz = Math.round(-q - r);
+
+  const xDiff = Math.abs(rx - q);
+  const yDiff = Math.abs(ry - r);
+  const zDiff = Math.abs(rz + q + r);
+
+  if (xDiff > yDiff && xDiff > zDiff) rx = -ry - rz;
+  else if (yDiff > zDiff) ry = -rx - rz;
+  else rz = -rx - ry;
+
+  const cx = radius * SQRT3 * (rx + ry / 2);
+  const cy = radius * 1.5 * ry;
+  return [cx, cy];
+}
+
+export function hexagonPrismSDF(x: number, y: number, z: number, cellSize: number, strutDiameter: number): number {
+  const r = strutDiameter / 2;
+  const radius = cellSize / SQRT3;
+  const [cx, cy] = hexCellCenter(x, y, radius);
+  const lx = x - cx;
+  const ly = y - cy;
+  const d = Math.abs(sdHexagon2D(lx, ly, radius));
+  return d - r;
+}
+
+export function trianglePrismSDF(x: number, y: number, z: number, cellSize: number, strutDiameter: number): number {
+  const r = strutDiameter / 2;
+  const spacing = cellSize * SQRT3 / 2;
+  const n0 = [0, 1];
+  const n1 = [-SQRT3 / 2, 0.5];
+  const n2 = [SQRT3 / 2, 0.5];
+
+  const distFamily = (nx: number, ny: number) => {
+    const proj = x * nx + y * ny;
+    const m = ((proj % spacing) + spacing) % spacing;
+    return Math.min(m, spacing - m);
+  };
+
+  const d = Math.min(distFamily(n0[0], n0[1]), distFamily(n1[0], n1[1]), distFamily(n2[0], n2[1]));
+  return d - r;
+}
+
+// ═══════════════════════════════════════════════════════════
 //  Hash / Helper Functions
 // ═══════════════════════════════════════════════════════════
 
@@ -391,6 +475,10 @@ function buildLatticeEvaluator(params: LatticeParams): (x: number, y: number, z:
       return (x, y, z) => octetSDF(x, y, z, cellSize, strutDiameter);
     case 'diamond':
       return (x, y, z) => diamondStrutSDF(x, y, z, cellSize, strutDiameter);
+    case 'hexagon':
+      return (x, y, z) => hexagonPrismSDF(x, y, z, cellSize, strutDiameter);
+    case 'triangle':
+      return (x, y, z) => trianglePrismSDF(x, y, z, cellSize, strutDiameter);
     case 'voronoi':
       return (x, y, z) => voronoiSDF(x, y, z, cellSize, strutDiameter);
   }
