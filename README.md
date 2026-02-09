@@ -23,6 +23,19 @@ npx wrangler deploy
 
 The Worker serves files from `dist/` and falls back to `index.html` for client-side routing.
 
+### Feedback storage (optional)
+
+The feedback form posts to `/api/feedback`. To persist reports, create a KV namespace and update
+`wrangler.jsonc` with the namespace IDs:
+
+```bash
+npx wrangler kv namespace create FEEDBACK_KV
+npx wrangler kv namespace create FEEDBACK_KV --preview
+```
+
+To receive email notifications, set `FEEDBACK_EMAIL_TO` and `FEEDBACK_EMAIL_FROM` in `wrangler.jsonc`
+or via `wrangler secret put`/`wrangler vars set` (MailChannels must be enabled for your account).
+
 ## How to Use
 
 ### 1. Import a Model
