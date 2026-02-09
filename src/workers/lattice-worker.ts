@@ -156,10 +156,11 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
       }
 
       const estimateSeconds = estimateGenerationSeconds(params, resolution, !shape);
+      const estimateLabel = formatDuration(estimateSeconds);
       postMessage({
         type: 'progress',
         progress: 0.12,
-        message: `Estimated generation time: ~${formatDuration(estimateSeconds)}`
+        message: `Estimated generation time: ~${estimateLabel}`
       } as WorkerResponse);
 
       // Run marching cubes
@@ -168,7 +169,7 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
         postMessage({
           type: 'progress',
           progress: 0.1 + frac * 0.7,
-          message: `Marching cubes: ${Math.round(frac * 100)}%`
+          message: `Marching cubes: ${Math.round(frac * 100)}% (~${estimateLabel})`
         } as WorkerResponse);
       });
 
