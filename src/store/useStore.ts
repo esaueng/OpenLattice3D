@@ -237,7 +237,13 @@ export const useStore = create<AppState>((set) => ({
     params: { ...s.params, processPreset: preset, ...PROCESS_DEFAULTS[preset] },
   })),
 
-  setLatticeType: (type) => set((s) => ({ params: { ...s.params, latticeType: type } })),
+  setLatticeType: (type) => set((s) => ({
+    params: {
+      ...s.params,
+      latticeType: type,
+      variant: (type === 'hexagon' || type === 'triangle') ? s.params.variant : 'shell_core',
+    },
+  })),
 
   setVariant: (variant) => set((s) => ({ params: { ...s.params, variant } })),
 
