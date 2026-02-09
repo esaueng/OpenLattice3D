@@ -580,6 +580,97 @@ export interface LatticeSdfOptions {
   keepOutTris: Set<number>;
 }
 
+export interface SurfaceHexSample {
+  pos: Vec3;
+  normal: Vec3;
+}
+
+type SpatialHash = Map<string, SurfaceHexSample[]>;
+
+function hashCell(p: Vec3, cellSize: number): string {
+  return `${Math.floor(p[0] / cellSize)},${Math.floor(p[1] / cellSize)},${Math.floor(p[2] / cellSize)}`;
+}
+
+function buildSpatialHash(samples: SurfaceHexSample[], cellSize: number): SpatialHash {
+  const grid: SpatialHash = new Map();
+  for (const sample of samples) {
+    const key = hashCell(sample.pos, cellSize);
+    const bucket = grid.get(key);
+    if (bucket) bucket.push(sample);
+    else grid.set(key, [sample]);
+  }
+  return grid;
+}
+
+function basisFromNormal(n: Vec3): { t: Vec3; b: Vec3; n: Vec3 } {
+  const normal = normalize(n);
+  const ref: Vec3 = Math.abs(normal[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0];
+  const t = normalize(cross(ref, normal));
+  const b = normalize(cross(normal, t));
+  return { t, b, n: normal };
+}
+
+function hexPrismSdf(local: Vec3, inRadius: number, depth: number): number {
+  const circumRadius = inRadius / Math.cos(Math.PI / 6);
+  const d2 = sdHexagon2D(local[0], local[1], circumRadius);
+  const dz = Math.abs(local[2]) - depth * 0.5;
+  return Math.max(d2, dz);
+}
+
+function surfaceHexHolesSdf(
+  p: Vec3,
+  grid: SpatialHash,
+  cellSize: number,
+  inRadius: number,
+  depth: number
+): number {
+  if (grid.size === 0) return Infinity;
+  const cx = Math.floor(p[0] / cellSize);
+  const cy = Math.floor(p[1] / cellSize);
+  const cz = Math.floor(p[2] / cellSize);
+  let minD = Infinity;
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dz = -1; dz <= 1; dz++) {
+        const key = `${cx + dx},${cy + dy},${cz + dz}`;
+        const bucket = grid.get(key);
+        if (!bucket) continue;
+        for (const sample of bucket) {
+          const delta: Vec3 = [
+            p[0] - sample.pos[0],
+            p[1] - sample.pos[1],
+            p[2] - sample.pos[2],
+          ];
+          const { t, b, n } = basisFromNormal(sample.normal);
+          const local: Vec3 = [dot(delta, t), dot(delta, b), dot(delta, n)];
+          const d = hexPrismSdf(local, inRadius, depth);
+          if (d < minD) minD = d;
+        }
+      }
+    }
+  }
+  return minD;
+}
+
+export function buildSurfaceHexLattice(
+  objectSdf: (x: number, y: number, z: number) => number,
+  params: LatticeParams,
+  samples: SurfaceHexSample[]
+): (x: number, y: number, z: number) => number {
+  const { surfaceDepth, cellSize, strutDiameter } = params;
+  const targetDepth = Math.max(surfaceDepth, cellSize * 0.5);
+  const wallThickness = Math.max(strutDiameter, cellSize * 0.05);
+  const inRadius = Math.max(0.1, (cellSize - wallThickness) * 0.5);
+  const grid = buildSpatialHash(samples, cellSize);
+
+  return (x: number, y: number, z: number) => {
+    const dObj = objectSdf(x, y, z);
+    const bandSdf = Math.max(dObj, -(dObj + surfaceDepth));
+    const holeSdf = surfaceHexHolesSdf([x, y, z], grid, cellSize, inRadius, targetDepth * 1.6);
+    return Math.max(bandSdf, -holeSdf);
+  };
+}
+
 export function buildCombinedSDF(opts: LatticeSdfOptions): (x: number, y: number, z: number) => number {
   const { bvh, params } = opts;
   const { shellThickness, noShell, surfaceOnly, surfaceDepth, cellSize, wallThickness, strutDiameter, variant, latticeType, gradientEnabled, gradientStrength } = params;
