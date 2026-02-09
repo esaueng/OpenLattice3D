@@ -327,10 +327,16 @@ function conformalCoords(
   if (pLen > 1e-6) {
     const align = Math.abs((px / pLen) * n[0] + (py / pLen) * n[1] + (pz / pLen) * n[2]);
     if (align > 0.95) {
-      const u = Math.atan2(n[1], n[0]) * pLen;
-      const clampedNz = Math.max(-1, Math.min(1, n[2]));
-      const v = Math.asin(clampedNz) * pLen;
-      return [u, v, dObj];
+      const ax = Math.abs(n[0]);
+      const ay = Math.abs(n[1]);
+      const az = Math.abs(n[2]);
+      if (ax >= ay && ax >= az) {
+        return [py, pz, dObj];
+      }
+      if (ay >= ax && ay >= az) {
+        return [px, pz, dObj];
+      }
+      return [px, py, dObj];
     }
   }
   return [projectedU, projectedV, dObj];
