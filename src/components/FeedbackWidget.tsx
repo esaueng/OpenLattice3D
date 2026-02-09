@@ -1,67 +1,40 @@
-import { useMemo, useState } from 'react';
-
-type FeedbackStatus = 'idle' | 'sending' | 'success' | 'error';
+import { useEffect, useRef, useState } from 'react';
 
 export function FeedbackWidget() {
   const [isOpen, setIsOpen] = useState(false);
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [issue, setIssue] = useState('');
-  const [status, setStatus] = useState<FeedbackStatus>('idle');
-  const [message, setMessage] = useState('');
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
-  const canSubmit = useMemo(() => {
-    return name.trim().length > 0 && issue.trim().length > 0 && status !== 'sending';
-  }, [name, issue, status]);
+  useEffect(() => {
+    const scriptSrc = 'https://tally.so/widgets/embed.js';
+    const existing = document.querySelector(`script[src="${scriptSrc}"]`);
 
-  const resetForm = () => {
-    setName('');
-    setEmail('');
-    setIssue('');
-  };
+    const loadEmbeds = () => {
+      if (typeof window !== 'undefined' && 'Tally' in window) {
+        // @ts-expect-error - Tally is a global injected by the embed script
+        window.Tally.loadEmbeds();
+      } else if (iframeRef.current && !iframeRef.current.src) {
+        iframeRef.current.src = iframeRef.current.dataset.tallySrc ?? '';
+      }
+    };
 
-  const submitFeedback = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!canSubmit) {
+    if (existing) {
+      loadEmbeds();
       return;
     }
 
-    setStatus('sending');
-    setMessage('');
+    const script = document.createElement('script');
+    script.src = scriptSrc;
+    script.async = true;
+    script.onload = loadEmbeds;
+    script.onerror = loadEmbeds;
+    document.body.appendChild(script);
 
-    const payload = {
-      name: name.trim(),
-      email: email.trim() || undefined,
-      issue: issue.trim(),
-      userAgent: navigator.userAgent,
-      url: window.location.href,
-      createdAt: new Date().toISOString(),
-    };
-
-    try {
-      const response = await fetch('/api/feedback', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        setStatus('error');
-        setMessage(errorText || 'Unable to submit feedback.');
-        return;
+    return () => {
+      if (script.parentNode) {
+        script.parentNode.removeChild(script);
       }
-
-      setStatus('success');
-      setMessage('Thanks! Your feedback was sent.');
-      resetForm();
-    } catch (error) {
-      setStatus('error');
-      setMessage('Network error. Please try again.');
-    }
-  };
+    };
+  }, []);
 
   return (
     <div className="feedback-widget">
@@ -75,55 +48,14 @@ export function FeedbackWidget() {
       </button>
 
       {isOpen ? (
-        <form className="feedback-panel" onSubmit={submitFeedback}>
-          <h3>Report a bug</h3>
-          <label>
-            Name
-            <input
-              type="text"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              placeholder="Jane Doe"
-              required
-            />
-          </label>
-          <label>
-            Email (optional)
-            <input
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder="jane@example.com"
-            />
-          </label>
-          <label>
-            Issue
-            <textarea
-              value={issue}
-              onChange={(event) => setIssue(event.target.value)}
-              placeholder="Describe the issue you hit..."
-              rows={4}
-              required
-            />
-          </label>
-          <div className="feedback-actions">
-            <button className="btn btn-primary" type="submit" disabled={!canSubmit}>
-              {status === 'sending' ? 'Sending...' : 'Send feedback'}
-            </button>
-            <button
-              className="btn"
-              type="button"
-              onClick={() => {
-                resetForm();
-                setStatus('idle');
-                setMessage('');
-              }}
-            >
-              Clear
-            </button>
-          </div>
-          {message ? <p className={`feedback-message ${status}`}>{message}</p> : null}
-        </form>
+        <div className="feedback-panel">
+          <iframe
+            ref={iframeRef}
+            data-tally-src="https://tally.so/embed/rjAOQ2?alignLeft=1&hideTitle=1&transparentBackground=1&dynamicHeight=1"
+            loading="lazy"
+            title="Feedback - OpenLattice3D"
+          />
+        </div>
       ) : null}
     </div>
   );
