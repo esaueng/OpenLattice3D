@@ -7,7 +7,7 @@ import './App.css';
 function App() {
   const handleTestNotification = async () => {
     if (!('Notification' in window)) {
-      window.alert('Notifications are not supported in this browser.');
+      globalThis.alert?.('Notifications are not supported in this browser.');
       return;
     }
 
@@ -16,7 +16,7 @@ function App() {
       : Notification.permission;
 
     if (permission !== 'granted') {
-      window.alert('Notification permission was not granted.');
+      globalThis.alert?.('Notification permission was not granted.');
       return;
     }
 
