@@ -125,6 +125,13 @@ html, body, #root {
 
 .feedback-toggle {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  text-decoration: none;
+}
+
+.feedback-toggle:hover,
+.feedback-toggle:focus,
+.feedback-toggle:visited {
+  text-decoration: none;
 }
 
 .feedback-panel {
