@@ -31,6 +31,7 @@ interface PersistedState {
   sphereRadius: number;
   viewMode: ViewMode;
   clipPlane: ClipPlaneState;
+  viewerBackground: string;
 }
 
 function loadPersistedState(): Partial<PersistedState> | null {
@@ -83,6 +84,7 @@ interface AppState {
   // View
   viewMode: ViewMode;
   clipPlane: ClipPlaneState;
+  viewerBackground: string;
 
   // Logs
   logs: LogEntry[];
@@ -107,6 +109,7 @@ interface AppState {
   setValidation: (validation: ValidationResult | null) => void;
   setViewMode: (mode: ViewMode) => void;
   setClipPlane: (partial: Partial<ClipPlaneState>) => void;
+  setViewerBackground: (color: string) => void;
   importParams: (imported: Partial<LatticeParams>) => void;
   addLog: (message: string, level?: 'info' | 'warn' | 'error') => void;
   clearLogs: () => void;
@@ -140,7 +143,8 @@ export const useStore = create<AppState>((set) => ({
   resultMesh: null,
   validation: null,
   viewMode: persisted?.viewMode ?? 'original',
-  clipPlane: persisted?.clipPlane ?? { axis: 'y', position: 0.5, flipped: true },
+  clipPlane: persisted?.clipPlane ?? { axis: 'y', position: 0.5, flipped: false },
+  viewerBackground: persisted?.viewerBackground ?? '#1a1a2e',
   logs: [],
 
   setOriginalMesh: (mesh, info, fileName) => set({
@@ -255,6 +259,8 @@ export const useStore = create<AppState>((set) => ({
 
   setClipPlane: (partial) => set((s) => ({ clipPlane: { ...s.clipPlane, ...partial } })),
 
+  setViewerBackground: (color) => set({ viewerBackground: color }),
+
   addLog: (message, level = 'info') => set((s) => ({
     logs: [...s.logs.slice(-200), { time: Date.now(), message, level }],
   })),
@@ -286,7 +292,8 @@ export const useStore = create<AppState>((set) => ({
       progress: 0,
       progressMessage: '',
       viewMode: 'original',
-      clipPlane: { axis: 'y', position: 0.5, flipped: true },
+      clipPlane: { axis: 'y', position: 0.5, flipped: false },
+      viewerBackground: '#1a1a2e',
       logs: [],
     });
   },
@@ -301,5 +308,6 @@ useStore.subscribe((state) => {
     sphereRadius: state.sphereRadius,
     viewMode: state.viewMode,
     clipPlane: state.clipPlane,
+    viewerBackground: state.viewerBackground,
   });
 });
