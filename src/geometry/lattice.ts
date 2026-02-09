@@ -274,6 +274,58 @@ function distToSegment2D(px: number, py: number, ax: number, ay: number, bx: num
   return Math.sqrt(dx * dx + dy * dy);
 }
 
+function cross(a: Vec3, b: Vec3): Vec3 {
+  return [
+    a[1] * b[2] - a[2] * b[1],
+    a[2] * b[0] - a[0] * b[2],
+    a[0] * b[1] - a[1] * b[0],
+  ];
+}
+
+function normalize(v: Vec3): Vec3 {
+  const len = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+  if (len < 1e-8) return [0, 0, 1];
+  return [v[0] / len, v[1] / len, v[2] / len];
+}
+
+function dot(a: Vec3, b: Vec3): number {
+  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+function estimateNormal(
+  sdf: (x: number, y: number, z: number) => number,
+  x: number,
+  y: number,
+  z: number,
+  eps: number
+): Vec3 {
+  const dx = sdf(x + eps, y, z) - sdf(x - eps, y, z);
+  const dy = sdf(x, y + eps, z) - sdf(x, y - eps, z);
+  const dz = sdf(x, y, z + eps) - sdf(x, y, z - eps);
+  return normalize([dx, dy, dz]);
+}
+
+function conformalCoords(
+  sdf: (x: number, y: number, z: number) => number,
+  x: number,
+  y: number,
+  z: number,
+  dObj: number,
+  cellSize: number
+): Vec3 {
+  const eps = Math.max(0.05, cellSize * 0.02);
+  const n = estimateNormal(sdf, x, y, z, eps);
+  const up: Vec3 = Math.abs(n[2]) > 0.9 ? [0, 1, 0] : [0, 0, 1];
+  const t1 = normalize(cross(up, n));
+  const t2 = cross(n, t1);
+  const px = x - n[0] * dObj;
+  const py = y - n[1] * dObj;
+  const pz = z - n[2] * dObj;
+  const u = dot([px, py, pz], t1);
+  const v = dot([px, py, pz], t2);
+  return [u, v, dObj];
+}
+
 function sdHexagon2D(px: number, py: number, radius: number): number {
   const verts = Array.from({ length: 6 }, (_, i) => {
     const angle = (Math.PI / 3) * i;
@@ -505,13 +557,22 @@ export function buildCombinedSDF(opts: LatticeSdfOptions): (x: number, y: number
   const { shellThickness, noShell, surfaceOnly, surfaceDepth, cellSize, wallThickness, strutDiameter, variant, gradientEnabled, gradientStrength } = params;
   const blendK = Math.min(wallThickness, strutDiameter) * 0.3;
   const latticeFn = buildLatticeEvaluator(params);
+  const sdf = (x: number, y: number, z: number) => bvh.signedDistance([x, y, z]);
+
+  const sampleLattice = (x: number, y: number, z: number, dObj: number) => {
+    if (variant !== 'implicit_conformal') {
+      return latticeFn(x, y, z);
+    }
+    const [u, v, w] = conformalCoords(sdf, x, y, z, dObj, cellSize);
+    return latticeFn(u, v, w);
+  };
 
   // ── Surface-only mode ──
   if (surfaceOnly) {
     return (x, y, z) => {
-      const dObj = bvh.signedDistance([x, y, z]);
+      const dObj = sdf(x, y, z);
       const bandSdf = Math.max(dObj, -(dObj + surfaceDepth));
-      let lat = latticeFn(x, y, z);
+      let lat = sampleLattice(x, y, z, dObj);
       if (gradientEnabled) {
         lat *= 1.0 - gradientStrength * Math.exp(-Math.max(0, -dObj) / (cellSize * 3));
       }
@@ -522,8 +583,8 @@ export function buildCombinedSDF(opts: LatticeSdfOptions): (x: number, y: number
   // ── No-shell mode ──
   if (noShell) {
     return (x, y, z) => {
-      const dObj = bvh.signedDistance([x, y, z]);
-      let lat = latticeFn(x, y, z);
+      const dObj = sdf(x, y, z);
+      let lat = sampleLattice(x, y, z, dObj);
       if (gradientEnabled) {
         lat *= 1.0 - gradientStrength * Math.exp(-Math.max(0, -dObj) / (cellSize * 3));
       }
@@ -533,10 +594,10 @@ export function buildCombinedSDF(opts: LatticeSdfOptions): (x: number, y: number
 
   if (variant === 'shell_core') {
     return (x, y, z) => {
-      const dObj = bvh.signedDistance([x, y, z]);
+      const dObj = sdf(x, y, z);
       const shellSdf = Math.max(dObj, -(dObj + shellThickness));
       const coreSdf = -(dObj + shellThickness);
-      let lat = latticeFn(x, y, z);
+      let lat = sampleLattice(x, y, z, dObj);
       if (gradientEnabled) {
         lat *= 1.0 - gradientStrength * Math.exp(-Math.max(0, -(dObj + shellThickness)) / (cellSize * 3));
       }
@@ -544,8 +605,8 @@ export function buildCombinedSDF(opts: LatticeSdfOptions): (x: number, y: number
     };
   } else {
     return (x, y, z) => {
-      const dObj = bvh.signedDistance([x, y, z]);
-      let lat = latticeFn(x, y, z);
+      const dObj = sdf(x, y, z);
+      let lat = sampleLattice(x, y, z, dObj);
       if (gradientEnabled) {
         lat *= 1.0 - gradientStrength * Math.exp(-Math.max(0, -dObj) / (cellSize * 3));
       }
@@ -572,6 +633,10 @@ export function buildAnalyticLattice(
     const dObj = objectSdf(x, y, z);
 
     let lat = latticeFn(x, y, z);
+    if (variant === 'implicit_conformal') {
+      const [u, v, w] = conformalCoords(objectSdf, x, y, z, dObj, cellSize);
+      lat = latticeFn(u, v, w);
+    }
     if (gradientEnabled) {
       const gd = (noShell || surfaceOnly) ? Math.max(0, -dObj) : Math.max(0, -(dObj + shellThickness));
       lat *= 1.0 - gradientStrength * Math.exp(-gd / (cellSize * 3));
