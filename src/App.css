@@ -119,21 +119,23 @@ html, body, #root {
 }
 
 .feedback-panel {
-  width: 280px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 12px;
+  width: 360px;
+  background: linear-gradient(180deg, rgba(30, 36, 48, 0.92), rgba(20, 24, 33, 0.92));
+  border: 1px solid rgba(88, 166, 255, 0.25);
+  border-radius: 12px;
+  padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4);
+  gap: 0;
+  overflow: hidden;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
 }
 
 .feedback-panel iframe {
   width: 100%;
-  height: 342px;
+  height: 520px;
   border: 0;
+  background: transparent;
 }
 
 /* Buttons */
