@@ -118,7 +118,7 @@ export function RightPanel() {
       {/* Validation Panel */}
       {validation && (
         <section>
-          <h3>Step E: Validation</h3>
+          <h3>Validation</h3>
           <div className={`validation-status ${validation.passed ? 'pass' : 'fail'}`}>
             {validation.passed ? 'ALL CHECKS PASSED' : 'SOME CHECKS FAILED'}
           </div>
@@ -171,7 +171,7 @@ export function RightPanel() {
       {/* Export */}
       {resultMesh && (
         <section>
-          <h3>Step F: Export</h3>
+          <h3>Export</h3>
           <button
             className="btn btn-primary"
             onClick={() => downloadSTL(resultMesh, `${meshFileName.replace(/\.stl$/i, '')}-lattice.stl`)}

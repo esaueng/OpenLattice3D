@@ -13,6 +13,7 @@ function App() {
       </div>
       <RightPanel />
       <FeedbackWidget />
+      <div className="watermark">Built by Esau Engineering</div>
     </div>
   );
 }

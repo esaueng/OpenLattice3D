@@ -159,11 +159,11 @@ export function LeftPanel() {
 
   return (
     <div className="panel left-panel">
-      <h2>OpenLattice3D</h2>
+      <h2 className="app-title">OpenLattice3D</h2>
 
       {/* Import Section */}
       <section>
-        <h3>Step A: Import</h3>
+        <h3>Import</h3>
         <input
           ref={fileRef}
           type="file"
@@ -225,7 +225,7 @@ export function LeftPanel() {
       {/* Lattice Parameters */}
       {hasModel && (
         <section>
-          <h3>Step C: Lattice Parameters</h3>
+          <h3>Lattice Parameters</h3>
 
           <div className="row">
             <label>Lattice Type:</label>
@@ -399,7 +399,7 @@ export function LeftPanel() {
       {/* Generate */}
       {hasModel && (
         <section>
-          <h3>Step D: Generate</h3>
+          <h3>Generate</h3>
           {!store.generating ? (
             <button className="btn btn-primary btn-large" onClick={startGeneration}>
               Generate Lattice
