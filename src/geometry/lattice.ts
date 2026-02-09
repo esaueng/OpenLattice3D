@@ -657,15 +657,16 @@ export function buildSurfaceHexLattice(
   params: LatticeParams,
   samples: SurfaceHexSample[]
 ): (x: number, y: number, z: number) => number {
-  const { surfaceDepth, cellSize, strutDiameter } = params;
-  const targetDepth = Math.max(surfaceDepth, cellSize * 0.5);
+  const { surfaceDepth, cellSize, strutDiameter, shellThickness } = params;
+  const shellDepth = shellThickness > 0 ? Math.min(surfaceDepth, shellThickness) : surfaceDepth;
+  const targetDepth = Math.max(shellDepth, cellSize * 0.5);
   const wallThickness = Math.max(strutDiameter, cellSize * 0.05);
   const inRadius = Math.max(0.1, (cellSize - wallThickness) * 0.5);
   const grid = buildSpatialHash(samples, cellSize);
 
   return (x: number, y: number, z: number) => {
     const dObj = objectSdf(x, y, z);
-    const bandSdf = Math.max(dObj, -(dObj + surfaceDepth));
+    const bandSdf = Math.max(dObj, -(dObj + shellDepth));
     const holeSdf = surfaceHexHolesSdf([x, y, z], grid, cellSize, inRadius, targetDepth * 1.6);
     return Math.max(bandSdf, -holeSdf);
   };
