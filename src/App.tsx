@@ -1,28 +1,24 @@
+import { useEffect } from 'react';
 import { LeftPanel } from './components/LeftPanel';
 import { Viewer3D } from './components/Viewer3D';
 import { RightPanel } from './components/RightPanel';
 import { FeedbackWidget } from './components/FeedbackWidget';
+import { registerNotificationServiceWorker, sendNotification } from './utils/notifications';
 import './App.css';
 
 function App() {
+  useEffect(() => {
+    void registerNotificationServiceWorker();
+  }, []);
+
   const handleTestNotification = async () => {
-    if (!('Notification' in window)) {
-      globalThis.alert?.('Notifications are not supported in this browser.');
-      return;
-    }
-
-    const permission = Notification.permission === 'default'
-      ? await Notification.requestPermission()
-      : Notification.permission;
-
-    if (permission !== 'granted') {
-      globalThis.alert?.('Notification permission was not granted.');
-      return;
-    }
-
-    new Notification('Notification test', {
+    const sent = await sendNotification('Notification test', {
       body: 'If you can read this, notifications are working.',
     });
+
+    if (!sent) {
+      globalThis.alert?.('Notification permission was not granted or notifications are unsupported.');
+    }
   };
 
   return (
