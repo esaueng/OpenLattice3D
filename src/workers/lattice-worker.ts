@@ -47,7 +47,18 @@ const LATTICE_COMPLEXITY: Record<LatticeParams['latticeType'], number> = {
   spinodal: 2.0,
 };
 
-function estimateGenerationSeconds(params: LatticeParams, resolution: number, hasCustomMesh: boolean): number {
+type GenerationEstimate = {
+  preSeconds: number;
+  marchSeconds: number;
+  validationSeconds: number;
+  totalSeconds: number;
+};
+
+function estimateGenerationTimings(
+  params: LatticeParams,
+  resolution: number,
+  hasCustomMesh: boolean
+): GenerationEstimate {
   const samples = Math.pow(resolution + 1, 3);
   const cubes = Math.pow(resolution, 3);
   const latticeFactor = LATTICE_COMPLEXITY[params.latticeType] ?? 1.0;
@@ -55,11 +66,18 @@ function estimateGenerationSeconds(params: LatticeParams, resolution: number, ha
 
   const sdfCost = 2.2e-6 * latticeFactor * gradientFactor;
   const cubeCost = 0.9e-6;
-  let seconds = samples * sdfCost + cubes * cubeCost;
+  const preSeconds = samples * sdfCost;
+  const marchSeconds = cubes * cubeCost;
 
   const validationFactor = hasCustomMesh ? 0.55 : 0.35;
-  seconds *= 1 + validationFactor;
-  return Math.max(0.5, seconds);
+  const validationSeconds = (preSeconds + marchSeconds) * validationFactor;
+  const totalSeconds = Math.max(0.5, preSeconds + marchSeconds + validationSeconds);
+  return {
+    preSeconds,
+    marchSeconds,
+    validationSeconds,
+    totalSeconds,
+  };
 }
 
 function formatDuration(seconds: number): string {
@@ -157,9 +175,9 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
         sdf = buildCombinedSDF({ bvh, params, keepOutTris: keepOutSet });
       }
 
-      let estimateSeconds = estimateGenerationSeconds(params, resolution, !shape);
-      let smoothedEstimateSeconds = estimateSeconds;
-      let estimateLabel = formatDuration(estimateSeconds);
+      const initialEstimate = estimateGenerationTimings(params, resolution, !shape);
+      let smoothedMarchSeconds = initialEstimate.marchSeconds;
+      let estimateLabel = formatDuration(initialEstimate.totalSeconds);
       postMessage({
         type: 'progress',
         progress: 0.12,
@@ -167,15 +185,21 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
       } as WorkerResponse);
 
       // Run marching cubes
+      const marchingStart = performance.now();
+      const preSecondsActual = (marchingStart - generationStart) / 1000;
       const result = marchingCubes(sdf, bounds, resolution, 0, (frac) => {
         if (cancelled) throw new Error('Cancelled');
         const overallProgress = 0.1 + frac * 0.7;
         const elapsedSeconds = (performance.now() - generationStart) / 1000;
-        if (overallProgress > 0.05) {
-          const dynamicTotalSeconds = elapsedSeconds / overallProgress;
-          smoothedEstimateSeconds = smoothedEstimateSeconds * 0.7 + dynamicTotalSeconds * 0.3;
+        const marchElapsedSeconds = Math.max(0, elapsedSeconds - preSecondsActual);
+        if (frac > 0.02) {
+          const dynamicMarchTotal = marchElapsedSeconds / frac;
+          smoothedMarchSeconds = smoothedMarchSeconds * 0.7 + dynamicMarchTotal * 0.3;
         }
-        const remainingSeconds = Math.max(0, smoothedEstimateSeconds - elapsedSeconds);
+        const remainingSeconds = Math.max(
+          0,
+          preSecondsActual + smoothedMarchSeconds + initialEstimate.validationSeconds - elapsedSeconds
+        );
         estimateLabel = formatDuration(remainingSeconds);
         postMessage({
           type: 'progress',
@@ -184,7 +208,12 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
         } as WorkerResponse);
       });
 
-      postMessage({ type: 'progress', progress: 0.85, message: 'Running validation...' } as WorkerResponse);
+      const remainingValidation = Math.max(0, initialEstimate.validationSeconds);
+      postMessage({
+        type: 'progress',
+        progress: 0.85,
+        message: `Running validation... (~${formatDuration(remainingValidation)} remaining)`
+      } as WorkerResponse);
 
       // Run validation
       let validation: ValidationResult;
