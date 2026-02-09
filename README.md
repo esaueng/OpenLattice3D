@@ -1,4 +1,4 @@
-# Generative Lattice Design
+# OpenLattice3D
 
 A web-based tool for generating 3D-printable lattice structures inside arbitrary meshes. Supports TPMS Gyroid and BCC strut lattices with SDF-based geometry processing and marching cubes mesh extraction.
 
@@ -10,6 +10,23 @@ npm run dev
 ```
 
 Open http://localhost:5173 in your browser.
+
+## Deploy to Cloudflare Workers
+
+This app can be deployed as a static Workers site using Wrangler assets.
+
+```bash
+npm install
+npm run build
+npx wrangler deploy
+```
+
+The Worker serves files from `dist/` and falls back to `index.html` for client-side routing.
+
+### Feedback form
+
+Feedback is collected through an embedded Tally form, which handles storage and notifications
+outside of the Worker.
 
 ## How to Use
 

@@ -3,7 +3,7 @@ import { useCallback, useRef } from 'react';
 import { useStore } from '../store/useStore';
 import { parseSTL } from '../geometry/stl-parser';
 import { analyzeMesh, repairMesh } from '../geometry/mesh-analysis';
-import type { ProcessPreset, LatticeType, GenerationVariant, SampleShape, LatticeParams } from '../types/project';
+import type { LatticeType, SampleShape, LatticeParams } from '../types/project';
 import { DEFAULT_PARAMS } from '../types/project';
 import { isSheetType } from '../geometry/lattice';
 import { SAMPLE_SHAPE_INFO } from '../store/useStore';
@@ -159,11 +159,11 @@ export function LeftPanel() {
 
   return (
     <div className="panel left-panel">
-      <h2>Generative Lattice Design</h2>
+      <h2 className="app-title">Open Lattice 3D</h2>
 
       {/* Import Section */}
       <section>
-        <h3>Step A: Import</h3>
+        <h3>Import</h3>
         <input
           ref={fileRef}
           type="file"
@@ -222,51 +222,10 @@ export function LeftPanel() {
         )}
       </section>
 
-      {/* Constraints Section */}
-      {hasModel && (
-        <section>
-          <h3>Step B: Constraints</h3>
-          <div className="row">
-            <label>Selection Mode:</label>
-            <select
-              value={store.selectionMode}
-              onChange={(e) => store.setSelectionMode(e.target.value as 'none' | 'keep_out' | 'keep_in')}
-            >
-              <option value="none">None (orbit)</option>
-              <option value="keep_out">Paint Keep-Out</option>
-              <option value="keep_in">Paint Keep-In</option>
-            </select>
-          </div>
-          <div className="row">
-            <button className="btn btn-small" onClick={store.selectAllKeepOut}>
-              Select All Keep-Out
-            </button>
-            <button className="btn btn-small" onClick={store.clearSelection}>
-              Clear Selection
-            </button>
-          </div>
-          <div className="info-text">
-            Keep-Out: {store.keepOutTris.size} faces |
-            Keep-In: {store.keepInTris.size} faces
-          </div>
-        </section>
-      )}
-
       {/* Lattice Parameters */}
       {hasModel && (
         <section>
-          <h3>Step C: Lattice Parameters</h3>
-
-          <div className="row">
-            <label>Variant:</label>
-            <select
-              value={store.params.variant}
-              onChange={(e) => store.setVariant(e.target.value as GenerationVariant)}
-            >
-              <option value="shell_core">Shell + Core (Variant 1)</option>
-              <option value="implicit_conformal">Implicit Conformal (Variant 2)</option>
-            </select>
-          </div>
+          <h3>Lattice Parameters</h3>
 
           <div className="row">
             <label>Lattice Type:</label>
@@ -292,22 +251,6 @@ export function LeftPanel() {
               </optgroup>
             </select>
           </div>
-
-          <div className="row">
-            <label>Process Preset:</label>
-            <select
-              value={store.params.processPreset}
-              onChange={(e) => store.setProcessPreset(e.target.value as ProcessPreset)}
-            >
-              <option value="SLS_MJF">SLS / MJF</option>
-              <option value="SLA_DLP">SLA / DLP</option>
-              <option value="FDM">FDM</option>
-            </select>
-          </div>
-
-          {store.params.processPreset === 'FDM' && store.params.variant === 'implicit_conformal' && (
-            <div className="warning">FDM with open lattice exterior can be difficult to print</div>
-          )}
 
           <div className="row">
             <label>Cell Size (mm):</label>
@@ -409,15 +352,21 @@ export function LeftPanel() {
 
           <div className="row">
             <label>Export Resolution:</label>
-             <input
-              type="range"
+            <select
               value={store.params.exportResolution}
-              min={1} max={10} step={1}
               onChange={(e) => store.updateParams({ exportResolution: parseInt(e.target.value) || 3 })}
-            />
-            <span>{store.params.exportResolution} ({
-              ['Min', 'Low', 'Med', 'Good', 'High', 'Fine', 'Ultra', 'Extreme', '9', 'Max'][store.params.exportResolution - 1]
-            })</span>
+            >
+              {['Min', 'Low', 'Med', 'Good', 'High', 'Fine', 'Ultra', 'Extreme', 'Hyper', 'Max'].map(
+                (label, index) => {
+                  const value = index + 1;
+                  return (
+                    <option key={label} value={value}>
+                      {value} - {label}
+                    </option>
+                  );
+                }
+              )}
+            </select>
           </div>
 
           <div className="row checkbox-row">
@@ -444,54 +393,13 @@ export function LeftPanel() {
             </div>
           )}
 
-          <h4>Manufacturing</h4>
-
-          <div className="row checkbox-row">
-            <label>
-              <input
-                type="checkbox"
-                checked={store.params.escapeHoles}
-                onChange={(e) => store.updateParams({ escapeHoles: e.target.checked })}
-              />
-              Add escape/drain holes
-            </label>
-          </div>
-
-          {!store.params.escapeHoles && store.params.variant === 'shell_core' && (
-            <div className="warning">
-              Escape holes disabled - trapped powder/resin likely!
-            </div>
-          )}
-
-          {store.params.escapeHoles && (
-            <>
-              <div className="row">
-                <label>Hole Diameter (mm):</label>
-                <input
-                  type="number"
-                  value={store.params.escapeHoleDiameter}
-                  min={2} max={15} step={0.5}
-                  onChange={(e) => store.updateParams({ escapeHoleDiameter: parseFloat(e.target.value) || 5 })}
-                />
-              </div>
-              <div className="row">
-                <label>Number of Holes:</label>
-                <input
-                  type="number"
-                  value={store.params.escapeHoleCount}
-                  min={1} max={10} step={1}
-                  onChange={(e) => store.updateParams({ escapeHoleCount: parseInt(e.target.value) || 2 })}
-                />
-              </div>
-            </>
-          )}
         </section>
       )}
 
       {/* Generate */}
       {hasModel && (
         <section>
-          <h3>Step D: Generate</h3>
+          <h3>Generate</h3>
           {!store.generating ? (
             <button className="btn btn-primary btn-large" onClick={startGeneration}>
               Generate Lattice

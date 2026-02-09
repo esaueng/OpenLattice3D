@@ -34,6 +34,42 @@ export interface WorkerResponse {
 
 let cancelled = false;
 
+const LATTICE_COMPLEXITY: Record<LatticeParams['latticeType'], number> = {
+  gyroid: 1.0,
+  schwarzP: 1.0,
+  schwarzD: 1.15,
+  neovius: 1.2,
+  iwp: 1.25,
+  bcc: 1.1,
+  octet: 1.2,
+  diamond: 1.25,
+  voronoi: 1.7,
+  spinodal: 2.0,
+};
+
+function estimateGenerationSeconds(params: LatticeParams, resolution: number, hasCustomMesh: boolean): number {
+  const samples = Math.pow(resolution + 1, 3);
+  const cubes = Math.pow(resolution, 3);
+  const latticeFactor = LATTICE_COMPLEXITY[params.latticeType] ?? 1.0;
+  const gradientFactor = params.gradientEnabled ? 1.1 : 1.0;
+
+  const baseSampleCost = 0.7e-6;
+  const baseCubeCost = 0.35e-6;
+  let seconds = samples * baseSampleCost * latticeFactor * gradientFactor;
+  seconds += cubes * baseCubeCost;
+
+  const validationFactor = hasCustomMesh ? 0.25 : 0.15;
+  seconds *= 1 + validationFactor;
+  return Math.max(1, seconds);
+}
+
+function formatDuration(seconds: number): string {
+  if (seconds < 10) return `${seconds.toFixed(1)}s`;
+  if (seconds < 90) return `${Math.round(seconds)}s`;
+  const minutes = Math.round(seconds / 60);
+  return `${minutes}m`;
+}
+
 self.onmessage = (e: MessageEvent<WorkerMessage>) => {
   const msg = e.data;
 
@@ -121,13 +157,21 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
         sdf = buildCombinedSDF({ bvh, params, keepOutTris: keepOutSet });
       }
 
+      const estimateSeconds = estimateGenerationSeconds(params, resolution, !shape);
+      const estimateLabel = formatDuration(estimateSeconds);
+      postMessage({
+        type: 'progress',
+        progress: 0.12,
+        message: `Estimated generation time: ~${estimateLabel}`
+      } as WorkerResponse);
+
       // Run marching cubes
       const result = marchingCubes(sdf, bounds, resolution, 0, (frac) => {
         if (cancelled) throw new Error('Cancelled');
         postMessage({
           type: 'progress',
           progress: 0.1 + frac * 0.7,
-          message: `Marching cubes: ${Math.round(frac * 100)}%`
+          message: `Marching cubes: ${Math.round(frac * 100)}% (~${estimateLabel})`
         } as WorkerResponse);
       });
 
