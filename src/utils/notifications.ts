@@ -6,13 +6,21 @@ export async function requestNotificationPermission(): Promise<NotificationPermi
   return Notification.permission;
 }
 
-export async function registerNotificationServiceWorker(): Promise<void> {
-  if (!('serviceWorker' in navigator)) return;
-  try {
-    await navigator.serviceWorker.register('/notification-sw.js');
-  } catch {
-    // Ignore registration failures; fallback to page notifications.
+let notificationRegistrationPromise: Promise<ServiceWorkerRegistration | null> | null = null;
+
+async function getNotificationRegistration(): Promise<ServiceWorkerRegistration | null> {
+  if (!('serviceWorker' in navigator)) return null;
+  if (!notificationRegistrationPromise) {
+    notificationRegistrationPromise = navigator.serviceWorker.getRegistration().then((registration) => {
+      if (registration) return registration;
+      return navigator.serviceWorker.register('/notification-sw.js');
+    }).catch(() => null);
   }
+  return notificationRegistrationPromise;
+}
+
+export async function registerNotificationServiceWorker(): Promise<void> {
+  await getNotificationRegistration();
 }
 
 export async function sendNotification(
@@ -23,9 +31,9 @@ export async function sendNotification(
   const permission = await requestNotificationPermission();
   if (permission !== 'granted') return false;
 
-  if ('serviceWorker' in navigator) {
+  const registration = await getNotificationRegistration();
+  if (registration?.showNotification) {
     try {
-      const registration = await navigator.serviceWorker.ready;
       await registration.showNotification(title, options);
       return true;
     } catch {
