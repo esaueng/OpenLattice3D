@@ -70,9 +70,18 @@ export default {
         receivedAt: new Date().toISOString(),
       };
 
+      const kvKey = `feedback:${feedbackEntry.receivedAt}:${feedbackEntry.id}`;
       if (env.FEEDBACK_KV) {
-        const key = `feedback:${feedbackEntry.receivedAt}:${feedbackEntry.id}`;
-        await env.FEEDBACK_KV.put(key, JSON.stringify(feedbackEntry));
+        await env.FEEDBACK_KV.put(kvKey, JSON.stringify(feedbackEntry));
+      } else {
+        const cacheKey = new Request(`https://feedback.local/${kvKey}`);
+        const cacheValue = new Response(JSON.stringify(feedbackEntry), {
+          headers: {
+            "content-type": "application/json",
+            "cache-control": "max-age=86400",
+          },
+        });
+        ctx.waitUntil(caches.default.put(cacheKey, cacheValue));
       }
 
       if (env.FEEDBACK_EMAIL_TO && env.FEEDBACK_EMAIL_FROM) {
@@ -107,13 +116,6 @@ export default {
             ],
           }),
         });
-      }
-
-      if (!env.FEEDBACK_KV && !(env.FEEDBACK_EMAIL_TO && env.FEEDBACK_EMAIL_FROM)) {
-        return new Response(
-          "Feedback received, but storage is not configured.",
-          { status: 501 }
-        );
       }
 
       return new Response("OK", { status: 200 });

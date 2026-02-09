@@ -25,8 +25,9 @@ The Worker serves files from `dist/` and falls back to `index.html` for client-s
 
 ### Feedback storage (optional)
 
-The feedback form posts to `/api/feedback`. To persist reports, create a KV namespace and add the
-binding to your Wrangler config or deploy command:
+The feedback form posts to `/api/feedback`. By default, submissions are cached for up to 24 hours
+using the Workers Cache API. For durable storage, create a KV namespace and add the binding to your
+Wrangler config or deploy command:
 
 ```bash
 npx wrangler kv namespace create FEEDBACK_KV
