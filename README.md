@@ -1,4 +1,4 @@
-# Generative Lattice Design
+# OpenLattice3D
 
 A web-based tool for generating 3D-printable lattice structures inside arbitrary meshes. Supports TPMS Gyroid and BCC strut lattices with SDF-based geometry processing and marching cubes mesh extraction.
 

@@ -159,7 +159,7 @@ export function LeftPanel() {
 
   return (
     <div className="panel left-panel">
-      <h2>Generative Lattice Design</h2>
+      <h2>OpenLattice3D</h2>
 
       {/* Import Section */}
       <section>

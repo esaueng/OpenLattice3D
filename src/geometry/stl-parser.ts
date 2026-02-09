@@ -88,7 +88,7 @@ export function exportBinarySTL(positions: Float32Array, normals: Float32Array, 
   const buffer = new ArrayBuffer(bufSize);
   const view = new DataView(buffer);
   // header - 80 bytes
-  const headerBytes = new TextEncoder().encode('Generative Lattice Design Export');
+  const headerBytes = new TextEncoder().encode('OpenLattice3D Export');
   new Uint8Array(buffer, 0, headerBytes.length).set(headerBytes);
   view.setUint32(80, triCount, true);
 
