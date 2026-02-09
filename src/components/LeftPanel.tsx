@@ -3,7 +3,7 @@ import { useCallback, useRef } from 'react';
 import { useStore } from '../store/useStore';
 import { parseSTL } from '../geometry/stl-parser';
 import { analyzeMesh, repairMesh } from '../geometry/mesh-analysis';
-import type { ProcessPreset, LatticeType, GenerationVariant, SampleShape, LatticeParams } from '../types/project';
+import type { LatticeType, SampleShape, LatticeParams } from '../types/project';
 import { DEFAULT_PARAMS } from '../types/project';
 import { isSheetType } from '../geometry/lattice';
 import { SAMPLE_SHAPE_INFO } from '../store/useStore';
@@ -258,17 +258,6 @@ export function LeftPanel() {
           <h3>Step C: Lattice Parameters</h3>
 
           <div className="row">
-            <label>Variant:</label>
-            <select
-              value={store.params.variant}
-              onChange={(e) => store.setVariant(e.target.value as GenerationVariant)}
-            >
-              <option value="shell_core">Shell + Core (Variant 1)</option>
-              <option value="implicit_conformal">Implicit Conformal (Variant 2)</option>
-            </select>
-          </div>
-
-          <div className="row">
             <label>Lattice Type:</label>
             <select
               value={store.params.latticeType}
@@ -292,22 +281,6 @@ export function LeftPanel() {
               </optgroup>
             </select>
           </div>
-
-          <div className="row">
-            <label>Process Preset:</label>
-            <select
-              value={store.params.processPreset}
-              onChange={(e) => store.setProcessPreset(e.target.value as ProcessPreset)}
-            >
-              <option value="SLS_MJF">SLS / MJF</option>
-              <option value="SLA_DLP">SLA / DLP</option>
-              <option value="FDM">FDM</option>
-            </select>
-          </div>
-
-          {store.params.processPreset === 'FDM' && store.params.variant === 'implicit_conformal' && (
-            <div className="warning">FDM with open lattice exterior can be difficult to print</div>
-          )}
 
           <div className="row">
             <label>Cell Size (mm):</label>
@@ -450,47 +423,6 @@ export function LeftPanel() {
             </div>
           )}
 
-          <h4>Manufacturing</h4>
-
-          <div className="row checkbox-row">
-            <label>
-              <input
-                type="checkbox"
-                checked={store.params.escapeHoles}
-                onChange={(e) => store.updateParams({ escapeHoles: e.target.checked })}
-              />
-              Add escape/drain holes
-            </label>
-          </div>
-
-          {!store.params.escapeHoles && store.params.variant === 'shell_core' && (
-            <div className="warning">
-              Escape holes disabled - trapped powder/resin likely!
-            </div>
-          )}
-
-          {store.params.escapeHoles && (
-            <>
-              <div className="row">
-                <label>Hole Diameter (mm):</label>
-                <input
-                  type="number"
-                  value={store.params.escapeHoleDiameter}
-                  min={2} max={15} step={0.5}
-                  onChange={(e) => store.updateParams({ escapeHoleDiameter: parseFloat(e.target.value) || 5 })}
-                />
-              </div>
-              <div className="row">
-                <label>Number of Holes:</label>
-                <input
-                  type="number"
-                  value={store.params.escapeHoleCount}
-                  min={1} max={10} step={1}
-                  onChange={(e) => store.updateParams({ escapeHoleCount: parseInt(e.target.value) || 2 })}
-                />
-              </div>
-            </>
-          )}
         </section>
       )}
 
