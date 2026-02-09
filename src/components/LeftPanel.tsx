@@ -356,7 +356,7 @@ export function LeftPanel() {
               value={store.params.exportResolution}
               onChange={(e) => store.updateParams({ exportResolution: parseInt(e.target.value) || 3 })}
             >
-              {['Min', 'Low', 'Med', 'Good', 'High', 'Fine', 'Ultra', 'Extreme', '9', 'Max'].map(
+              {['Min', 'Low', 'Med', 'Good', 'High', 'Fine', 'Ultra', 'Extreme', 'Hyper', 'Max'].map(
                 (label, index) => {
                   const value = index + 1;
                   return (
