@@ -1,5 +1,8 @@
 interface Env {
   ASSETS: Fetcher;
+  FEEDBACK_KV?: KVNamespace;
+  FEEDBACK_EMAIL_TO?: string;
+  FEEDBACK_EMAIL_FROM?: string;
 }
 
 const ASSET_EXTENSIONS = new Set([
@@ -31,6 +34,90 @@ function hasAssetExtension(pathname: string) {
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext) {
     const url = new URL(request.url);
+
+    if (url.pathname === "/api/feedback") {
+      if (request.method !== "POST") {
+        return new Response("Method not allowed", { status: 405 });
+      }
+
+      const contentType = request.headers.get("content-type") ?? "";
+      if (!contentType.includes("application/json")) {
+        return new Response("Expected JSON body", { status: 400 });
+      }
+
+      const { name, email, issue, userAgent, url: pageUrl, createdAt } =
+        (await request.json()) as {
+          name?: string;
+          email?: string;
+          issue?: string;
+          userAgent?: string;
+          url?: string;
+          createdAt?: string;
+        };
+
+      if (!name?.trim() || !issue?.trim()) {
+        return new Response("Name and issue are required.", { status: 400 });
+      }
+
+      const feedbackEntry = {
+        id: crypto.randomUUID(),
+        name: name.trim(),
+        email: email?.trim() || null,
+        issue: issue.trim(),
+        userAgent: userAgent ?? null,
+        pageUrl: pageUrl ?? null,
+        createdAt: createdAt ?? new Date().toISOString(),
+        receivedAt: new Date().toISOString(),
+      };
+
+      if (env.FEEDBACK_KV) {
+        const key = `feedback:${feedbackEntry.receivedAt}:${feedbackEntry.id}`;
+        await env.FEEDBACK_KV.put(key, JSON.stringify(feedbackEntry));
+      }
+
+      if (env.FEEDBACK_EMAIL_TO && env.FEEDBACK_EMAIL_FROM) {
+        await fetch("https://api.mailchannels.net/tx/v1/send", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            personalizations: [
+              {
+                to: [{ email: env.FEEDBACK_EMAIL_TO }],
+              },
+            ],
+            from: {
+              email: env.FEEDBACK_EMAIL_FROM,
+              name: "OpenLattice3D Feedback",
+            },
+            subject: `New feedback from ${feedbackEntry.name}`,
+            content: [
+              {
+                type: "text/plain",
+                value: [
+                  `Name: ${feedbackEntry.name}`,
+                  `Email: ${feedbackEntry.email ?? "n/a"}`,
+                  `Issue: ${feedbackEntry.issue}`,
+                  `Page: ${feedbackEntry.pageUrl ?? "unknown"}`,
+                  `User Agent: ${feedbackEntry.userAgent ?? "unknown"}`,
+                  `Submitted: ${feedbackEntry.createdAt}`,
+                ].join("\n"),
+              },
+            ],
+          }),
+        });
+      }
+
+      if (!env.FEEDBACK_KV && !(env.FEEDBACK_EMAIL_TO && env.FEEDBACK_EMAIL_FROM)) {
+        return new Response(
+          "Feedback received, but storage is not configured.",
+          { status: 501 }
+        );
+      }
+
+      return new Response("OK", { status: 200 });
+    }
 
     let response = await env.ASSETS.fetch(request);
     if (response.status !== 404 || hasAssetExtension(url.pathname)) {
