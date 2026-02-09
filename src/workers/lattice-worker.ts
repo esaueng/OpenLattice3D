@@ -160,16 +160,16 @@ function sampleSurfacePointsForShape(
   const samples: SurfaceHexSample[] = [];
   if (shape === 'sphere') {
     const r = params.radius ?? 25;
+    const goldenAngle = Math.PI * (3 - Math.sqrt(5));
     for (let i = 0; i < count; i++) {
-      const u = Math.random();
-      const v = Math.random();
-      const theta = 2 * Math.PI * u;
-      const phi = Math.acos(2 * v - 1);
-      const x = r * Math.sin(phi) * Math.cos(theta);
-      const y = r * Math.sin(phi) * Math.sin(theta);
-      const z = r * Math.cos(phi);
-      const normal = normalize([x, y, z]);
-      samples.push({ pos: [x, y, z], normal });
+      const t = (i + 0.5) / count;
+      const y = 1 - 2 * t;
+      const radius = Math.sqrt(1 - y * y);
+      const theta = goldenAngle * i;
+      const x = Math.cos(theta) * radius;
+      const z = Math.sin(theta) * radius;
+      const pos: Vec3 = [x * r, y * r, z * r];
+      samples.push({ pos, normal: normalize(pos) });
     }
     return samples;
   }
