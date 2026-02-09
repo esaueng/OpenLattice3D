@@ -6,13 +6,6 @@
     "directory": "./dist",
     "binding": "ASSETS"
   },
-  "kv_namespaces": [
-    {
-      "binding": "FEEDBACK_KV",
-      "id": "REPLACE_WITH_KV_NAMESPACE_ID",
-      "preview_id": "REPLACE_WITH_PREVIEW_KV_NAMESPACE_ID"
-    }
-  ],
   "vars": {
     "FEEDBACK_EMAIL_TO": "",
     "FEEDBACK_EMAIL_FROM": ""
