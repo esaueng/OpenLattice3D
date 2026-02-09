@@ -64,8 +64,9 @@ function estimateGenerationSeconds(params: LatticeParams, resolution: number, ha
 
 function formatDuration(seconds: number): string {
   if (seconds < 90) return `${Math.round(seconds)}s`;
-  const minutes = Math.round(seconds / 60);
-  return `${minutes}m`;
+  if (seconds < 90 * 60) return `${Math.round(seconds / 60)}m`;
+  const hours = seconds / 3600;
+  return `${hours.toFixed(1)}h`;
 }
 
 self.onmessage = (e: MessageEvent<WorkerMessage>) => {
@@ -80,6 +81,7 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
 
   if (msg.type === 'generate') {
     try {
+      const generationStart = performance.now();
       const params = msg.params!;
       const resolution = msg.resolution || 64;
       let sdf: (x: number, y: number, z: number) => number;
@@ -155,8 +157,9 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
         sdf = buildCombinedSDF({ bvh, params, keepOutTris: keepOutSet });
       }
 
-      const estimateSeconds = estimateGenerationSeconds(params, resolution, !shape);
-      const estimateLabel = formatDuration(estimateSeconds);
+      let estimateSeconds = estimateGenerationSeconds(params, resolution, !shape);
+      let smoothedEstimateSeconds = estimateSeconds;
+      let estimateLabel = formatDuration(estimateSeconds);
       postMessage({
         type: 'progress',
         progress: 0.12,
@@ -166,10 +169,18 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
       // Run marching cubes
       const result = marchingCubes(sdf, bounds, resolution, 0, (frac) => {
         if (cancelled) throw new Error('Cancelled');
+        const overallProgress = 0.1 + frac * 0.7;
+        const elapsedSeconds = (performance.now() - generationStart) / 1000;
+        if (overallProgress > 0.05) {
+          const dynamicTotalSeconds = elapsedSeconds / overallProgress;
+          smoothedEstimateSeconds = smoothedEstimateSeconds * 0.7 + dynamicTotalSeconds * 0.3;
+        }
+        const remainingSeconds = Math.max(0, smoothedEstimateSeconds - elapsedSeconds);
+        estimateLabel = formatDuration(remainingSeconds);
         postMessage({
           type: 'progress',
-          progress: 0.1 + frac * 0.7,
-          message: `Marching cubes: ${Math.round(frac * 100)}% (~${estimateLabel})`
+          progress: overallProgress,
+          message: `Marching cubes: ${Math.round(frac * 100)}% (~${estimateLabel} remaining)`
         } as WorkerResponse);
       });
 
