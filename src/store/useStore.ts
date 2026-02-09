@@ -143,7 +143,7 @@ export const useStore = create<AppState>((set) => ({
   resultMesh: null,
   validation: null,
   viewMode: persisted?.viewMode ?? 'original',
-  clipPlane: persisted?.clipPlane ?? { axis: 'y', position: 0.5, flipped: true },
+  clipPlane: persisted?.clipPlane ?? { axis: 'y', position: 0.5, flipped: false },
   viewerBackground: persisted?.viewerBackground ?? '#1a1a2e',
   logs: [],
 
@@ -292,7 +292,7 @@ export const useStore = create<AppState>((set) => ({
       progress: 0,
       progressMessage: '',
       viewMode: 'original',
-      clipPlane: { axis: 'y', position: 0.5, flipped: true },
+      clipPlane: { axis: 'y', position: 0.5, flipped: false },
       viewerBackground: '#1a1a2e',
       logs: [],
     });
