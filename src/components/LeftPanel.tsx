@@ -222,36 +222,6 @@ export function LeftPanel() {
         )}
       </section>
 
-      {/* Constraints Section */}
-      {hasModel && (
-        <section>
-          <h3>Step B: Constraints</h3>
-          <div className="row">
-            <label>Selection Mode:</label>
-            <select
-              value={store.selectionMode}
-              onChange={(e) => store.setSelectionMode(e.target.value as 'none' | 'keep_out' | 'keep_in')}
-            >
-              <option value="none">None (orbit)</option>
-              <option value="keep_out">Paint Keep-Out</option>
-              <option value="keep_in">Paint Keep-In</option>
-            </select>
-          </div>
-          <div className="row">
-            <button className="btn btn-small" onClick={store.selectAllKeepOut}>
-              Select All Keep-Out
-            </button>
-            <button className="btn btn-small" onClick={store.clearSelection}>
-              Clear Selection
-            </button>
-          </div>
-          <div className="info-text">
-            Keep-Out: {store.keepOutTris.size} faces |
-            Keep-In: {store.keepInTris.size} faces
-          </div>
-        </section>
-      )}
-
       {/* Lattice Parameters */}
       {hasModel && (
         <section>
