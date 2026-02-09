@@ -8,6 +8,7 @@ import { DEFAULT_PARAMS } from '../types/project';
 import { isSheetType } from '../geometry/lattice';
 import { SAMPLE_SHAPE_INFO } from '../store/useStore';
 import type { WorkerMessage, WorkerResponse } from '../workers/lattice-worker';
+import { requestNotificationPermission, sendNotification } from '../utils/notifications';
 
 export function LeftPanel() {
   const store = useStore();
@@ -15,23 +16,15 @@ export function LeftPanel() {
   const jsonRef = useRef<HTMLInputElement>(null);
   const workerRef = useRef<Worker | null>(null);
 
-  const requestNotificationPermission = useCallback(async (): Promise<NotificationPermission | null> => {
-    if (!('Notification' in window)) return null;
-    if (Notification.permission === 'default') {
-      return Notification.requestPermission();
-    }
-    return Notification.permission;
+  const requestNotificationPermissionOnce = useCallback(() => {
+    void requestNotificationPermission();
   }, []);
 
   const notifyGenerationComplete = useCallback(async (triCount: number) => {
-    if (!('Notification' in window)) return;
-    const permission = await requestNotificationPermission();
-    if (permission === 'granted') {
-      new Notification('Lattice generation complete', {
-        body: `${triCount.toLocaleString()} triangles generated.`,
-      });
-    }
-  }, [requestNotificationPermission]);
+    await sendNotification('Lattice generation complete', {
+      body: `${triCount.toLocaleString()} triangles generated.`,
+    });
+  }, []);
 
   const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -103,7 +96,7 @@ export function LeftPanel() {
 
   const startGeneration = useCallback(() => {
     if (store.generating) return;
-    void requestNotificationPermission();
+    requestNotificationPermissionOnce();
     store.setGenerating(true);
     store.setProgress(0, 'Starting...');
     store.addLog('Starting lattice generation...');
@@ -163,7 +156,7 @@ export function LeftPanel() {
     };
 
     worker.postMessage(msg);
-  }, [notifyGenerationComplete, requestNotificationPermission, store]);
+  }, [notifyGenerationComplete, requestNotificationPermissionOnce, store]);
 
   const cancelGeneration = useCallback(() => {
     if (workerRef.current) {
