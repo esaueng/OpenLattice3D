@@ -144,7 +144,7 @@ export const useStore = create<AppState>((set) => ({
   validation: null,
   viewMode: persisted?.viewMode ?? 'original',
   clipPlane: persisted?.clipPlane ?? { axis: 'y', position: 0.5, flipped: false },
-  viewerBackground: persisted?.viewerBackground ?? '#1a1a2e',
+  viewerBackground: persisted?.viewerBackground ?? '#000000',
   logs: [],
 
   setOriginalMesh: (mesh, info, fileName) => set({
@@ -306,7 +306,7 @@ export const useStore = create<AppState>((set) => ({
       progressMessage: '',
       viewMode: 'original',
       clipPlane: { axis: 'y', position: 0.5, flipped: false },
-      viewerBackground: '#1a1a2e',
+      viewerBackground: '#000000',
       logs: [],
     });
   },

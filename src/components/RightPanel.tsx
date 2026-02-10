@@ -111,7 +111,7 @@ export function RightPanel() {
           />
           <button
             className="btn btn-tiny"
-            onClick={() => store.setViewerBackground('#1a1a2e')}
+            onClick={() => store.setViewerBackground('#000000')}
             type="button"
           >
             Reset
