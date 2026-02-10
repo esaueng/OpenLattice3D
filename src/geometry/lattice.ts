@@ -583,6 +583,7 @@ export interface LatticeSdfOptions {
 export interface SurfaceHexSample {
   pos: Vec3;
   normal: Vec3;
+  holeScale?: number;
 }
 
 type SpatialHash = Map<string, SurfaceHexSample[]>;
@@ -643,7 +644,8 @@ function surfaceHexHolesSdf(
           ];
           const { t, b, n } = basisFromNormal(sample.normal);
           const local: Vec3 = [dot(delta, t), dot(delta, b), dot(delta, n)];
-          const d = hexPrismSdf(local, inRadius, depth);
+          const radiusScale = Math.max(0.72, Math.min(1.0, sample.holeScale ?? 1.0));
+          const d = hexPrismSdf(local, inRadius * radiusScale, depth);
           if (d < minD) minD = d;
         }
       }

@@ -388,6 +388,51 @@ function relaxSurfaceSamples(
   return samples;
 }
 
+
+function applyAdaptiveHoleScales(samples: SurfaceHexSample[], spacing: number): SurfaceHexSample[] {
+  if (samples.length === 0) return samples;
+  const cell = Math.max(0.1, spacing);
+  const grid = new Map<string, SurfaceHexSample[]>();
+  for (const sample of samples) {
+    const key = `${Math.floor(sample.pos[0] / cell)},${Math.floor(sample.pos[1] / cell)},${Math.floor(sample.pos[2] / cell)}`;
+    const bucket = grid.get(key);
+    if (bucket) bucket.push(sample);
+    else grid.set(key, [sample]);
+  }
+
+  for (const sample of samples) {
+    const base = sample.pos;
+    const cx = Math.floor(base[0] / cell);
+    const cy = Math.floor(base[1] / cell);
+    const cz = Math.floor(base[2] / cell);
+    let nearest = Infinity;
+
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dz = -1; dz <= 1; dz++) {
+          const key = `${cx + dx},${cy + dy},${cz + dz}`;
+          const bucket = grid.get(key);
+          if (!bucket) continue;
+          for (const other of bucket) {
+            if (other === sample) continue;
+            const d = length(sub(base, other.pos));
+            if (d > 1e-6 && d < nearest) nearest = d;
+          }
+        }
+      }
+    }
+
+    if (!Number.isFinite(nearest)) {
+      sample.holeScale = 1.0;
+      continue;
+    }
+    // 0.866 = 2*cos(30°)/2 packing-safe factor for neighboring hex inradii
+    const targetScale = (nearest / spacing) * 0.86;
+    sample.holeScale = Math.max(0.72, Math.min(1.0, targetScale));
+  }
+  return samples;
+}
+
 function estimateGenerationTimings(
   params: LatticeParams,
   resolution: number,
@@ -543,6 +588,7 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
             project: (p) => projectToSurfaceSdf(objectSdf!, p, params.cellSize),
           };
           relaxSurfaceSamples(target, params.cellSize * 0.95, 10, 0.35);
+          applyAdaptiveHoleScales(surfaceSamples, params.cellSize);
           surfaceHexSdf = buildSurfaceHexLattice(objectSdf!, params, surfaceSamples);
         }
       } else {
@@ -592,6 +638,7 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
             },
           };
           relaxSurfaceSamples(target, params.cellSize * 0.95, 10, 0.35);
+          applyAdaptiveHoleScales(surfaceSamples, params.cellSize);
           surfaceHexSdf = buildSurfaceHexLattice(objectSdf!, params, surfaceSamples);
         }
       }
