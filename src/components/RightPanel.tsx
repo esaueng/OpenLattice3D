@@ -27,8 +27,12 @@ export function RightPanel() {
 
   return (
     <div className="panel right-panel">
+      <div className="panel-intro">
+        <h2>Inspect & Export</h2>
+        <p>Review validation, explore views, and export outputs.</p>
+      </div>
       {/* View Controls */}
-      <section>
+      <section className="panel-section">
         <h3>View</h3>
         <div className="view-buttons">
           {(Object.keys(VIEW_LABELS) as ViewMode[]).map((mode) => (
@@ -117,7 +121,7 @@ export function RightPanel() {
 
       {/* Validation Panel */}
       {validation && (
-        <section>
+        <section className="panel-section">
           <h3>Validation</h3>
           <div className={`validation-status ${validation.passed ? 'pass' : 'fail'}`}>
             {validation.passed ? 'ALL CHECKS PASSED' : 'SOME CHECKS FAILED'}
@@ -170,7 +174,7 @@ export function RightPanel() {
 
       {/* Export */}
       {resultMesh && (
-        <section>
+        <section className="panel-section">
           <h3>Export</h3>
           <button
             className="btn btn-primary"
@@ -196,7 +200,7 @@ export function RightPanel() {
       )}
 
       {/* Logs */}
-      <section className="logs-section">
+      <section className="panel-section logs-section">
         <h3>
           Logs
           <button className="btn btn-tiny" onClick={store.clearLogs}>Clear</button>

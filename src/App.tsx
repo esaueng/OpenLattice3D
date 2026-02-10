@@ -22,12 +22,20 @@ function App() {
   };
 
   return (
-    <div className="app">
-      <LeftPanel />
-      <div className="viewer-container">
-        <Viewer3D />
+    <div className="app-shell">
+      <header className="app-topbar">
+        <div>
+          <h1>Open Lattice 3D</h1>
+          <p>Generate manufacturable lattice geometries with live validation.</p>
+        </div>
+      </header>
+      <div className="app">
+        <LeftPanel />
+        <div className="viewer-container">
+          <Viewer3D />
+        </div>
+        <RightPanel />
       </div>
-      <RightPanel />
       <FeedbackWidget />
       <div className="watermark">
         <a href="https://esauengineering.com/" target="_blank" rel="noreferrer">
