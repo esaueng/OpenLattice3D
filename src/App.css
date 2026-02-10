@@ -42,11 +42,12 @@ html, body, #root {
 }
 
 .app-topbar {
-  height: 62px;
+  height: 74px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
+  text-align: center;
   padding: 10px 18px;
   border-bottom: 1px solid var(--border-soft);
   background: linear-gradient(180deg, rgba(27, 39, 66, 0.95), rgba(15, 21, 36, 0.95));
@@ -54,16 +55,34 @@ html, body, #root {
 }
 
 .app-topbar h1 {
-  font-size: 16px;
-  letter-spacing: 0.3px;
+  font-size: 32px;
+  letter-spacing: 0.4px;
+  font-weight: 800;
+  color: #eaf2ff;
+  text-shadow: 0 0 20px rgba(89, 179, 255, 0.35);
+  line-height: 1;
+}
+
+.beta-pill {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 8px;
+  padding: 3px 8px;
+  font-size: 12px;
   font-weight: 700;
-  color: #dce7ff;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #10243b;
+  background: linear-gradient(180deg, #7fd4ff, #4ca7ff);
+  border-radius: 999px;
+  vertical-align: middle;
+  box-shadow: 0 0 16px rgba(89, 179, 255, 0.45);
 }
 
 .app-topbar p {
-  margin-top: 2px;
-  color: var(--text-dim);
-  font-size: 11px;
+  margin-top: 5px;
+  color: #b1c1e8;
+  font-size: 12px;
 }
 
 .app {
@@ -72,7 +91,7 @@ html, body, #root {
   gap: 10px;
   padding: 10px;
   width: 100%;
-  height: calc(100% - 62px);
+  height: calc(100% - 74px);
 }
 
 /* Panels */
@@ -146,13 +165,14 @@ html, body, #root {
 
 .feedback-widget {
   position: fixed;
-  left: 16px;
-  bottom: 16px;
+  left: 190px;
+  transform: translateX(-50%);
+  bottom: 18px;
   z-index: 50;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  align-items: flex-start;
+  align-items: center;
 }
 
 .feedback-toggle {
@@ -185,11 +205,11 @@ html, body, #root {
 .watermark {
   position: fixed;
   left: 50%;
-  bottom: 8px;
+  bottom: 18px;
   transform: translateX(-50%);
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-dim);
-  opacity: 0.72;
+  opacity: 0.86;
   letter-spacing: 0.3px;
   z-index: 5;
 }
@@ -580,6 +600,14 @@ html, body, #root {
     grid-template-rows: auto minmax(320px, 1fr) auto;
     height: auto;
     overflow-y: auto;
+  }
+
+  .app-topbar h1 {
+    font-size: 24px;
+  }
+
+  .feedback-widget {
+    left: 50%;
   }
 
   .panel,

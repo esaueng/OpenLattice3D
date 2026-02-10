@@ -25,7 +25,7 @@ function App() {
     <div className="app-shell">
       <header className="app-topbar">
         <div>
-          <h1>Open Lattice 3D</h1>
+          <h1>Open Lattice 3D <span className="beta-pill">beta</span></h1>
           <p>Generate manufacturable lattice geometries with live validation.</p>
         </div>
       </header>
