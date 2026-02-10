@@ -490,7 +490,7 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
       let surfaceSamples: SurfaceHexSample[] = [];
 
       const shape = msg.sampleShape || (msg.sphereMode ? 'sphere' : null);
-      const isHexSurface = params.variant === 'implicit_conformal' && params.latticeType === 'hexagon';
+      const isSurfacePolygon = params.variant === 'implicit_conformal' && (params.latticeType === 'hexagon' || params.latticeType === 'triangle');
 
       if (shape) {
         const pad = params.cellSize * 0.5;
@@ -501,7 +501,7 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
             const R = sphereRadius;
             bounds = { min: [-(R+pad), -(R+pad), -(R+pad)], max: [R+pad, R+pad, R+pad] };
             objectSdf = (x, y, z) => Math.sqrt(x * x + y * y + z * z) - R;
-            sdf = isHexSurface ? objectSdf : buildSphereLattice(R, params);
+            sdf = isSurfacePolygon ? objectSdf : buildSphereLattice(R, params);
             break;
           }
           case 'cube': {
@@ -515,7 +515,7 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
               const inside = Math.min(Math.max(dx, dy, dz), 0);
               return outside + inside;
             };
-            sdf = isHexSurface ? objectSdf : buildCubeLattice(h, params);
+            sdf = isSurfacePolygon ? objectSdf : buildCubeLattice(h, params);
             break;
           }
           case 'cylinder': {
@@ -528,7 +528,7 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
               const inside = Math.min(Math.max(dRadial, dAxial), 0);
               return outside + inside;
             };
-            sdf = isHexSurface ? objectSdf : buildCylinderLattice(cr, ch, params);
+            sdf = isSurfacePolygon ? objectSdf : buildCylinderLattice(cr, ch, params);
             break;
           }
           case 'torus': {
@@ -539,7 +539,7 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
               const qx = Math.sqrt(x * x + z * z) - mR;
               return Math.sqrt(qx * qx + y * y) - tR;
             };
-            sdf = isHexSurface ? objectSdf : buildTorusLattice(mR, tR, params);
+            sdf = isSurfacePolygon ? objectSdf : buildTorusLattice(mR, tR, params);
             break;
           }
           case 'capsule': {
@@ -550,12 +550,12 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
               const cy = Math.max(-capHH, Math.min(capHH, y));
               return Math.sqrt(x * x + (y - cy) * (y - cy) + z * z) - capR;
             };
-            sdf = isHexSurface ? objectSdf : buildCapsuleLattice(capR, capHH, params);
+            sdf = isSurfacePolygon ? objectSdf : buildCapsuleLattice(capR, capHH, params);
             break;
           }
         }
         postMessage({ type: 'progress', progress: 0.05, message: `${shape} SDF ready` } as WorkerResponse);
-        if (isHexSurface) {
+        if (isSurfacePolygon) {
           const areaEstimate = (() => {
             switch (shape) {
               case 'sphere': return 4 * Math.PI * (sphereRadius ?? 25) ** 2;
@@ -617,7 +617,7 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
         const keepOutSet = new Set(msg.keepOutTris || []);
         objectSdf = (x, y, z) => bvh!.signedDistance([x, y, z]);
         sdf = buildCombinedSDF({ bvh, params, keepOutTris: keepOutSet });
-        if (isHexSurface) {
+        if (isSurfacePolygon) {
           const positions = msg.meshPositions!;
           const normals = msg.meshNormals!;
           const triCount = msg.meshTriCount!;

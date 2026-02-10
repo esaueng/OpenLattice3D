@@ -618,12 +618,41 @@ function hexPrismSdf(local: Vec3, inRadius: number, depth: number): number {
   return Math.max(d2, dz);
 }
 
+function sdRegularPolygon2D(px: number, py: number, radius: number, sides: number): number {
+  const verts = Array.from({ length: sides }, (_, i) => {
+    const angle = (TWO_PI / sides) * i;
+    return [radius * Math.cos(angle), radius * Math.sin(angle)] as const;
+  });
+
+  let minDist = Infinity;
+  let inside = true;
+  for (let i = 0; i < verts.length; i++) {
+    const [ax, ay] = verts[i];
+    const [bx, by] = verts[(i + 1) % verts.length];
+    const edgeCross = (bx - ax) * (py - ay) - (by - ay) * (px - ax);
+    if (edgeCross < 0) inside = false;
+    const d = distToSegment2D(px, py, ax, ay, bx, by);
+    if (d < minDist) minDist = d;
+  }
+  return inside ? -minDist : minDist;
+}
+
+function polygonPrismSdf(local: Vec3, inRadius: number, depth: number, sides: number): number {
+  const circumRadius = inRadius / Math.cos(Math.PI / sides);
+  const d2 = sides === 6
+    ? sdHexagon2D(local[0], local[1], circumRadius)
+    : sdRegularPolygon2D(local[0], local[1], circumRadius, sides);
+  const dz = Math.abs(local[2]) - depth * 0.5;
+  return Math.max(d2, dz);
+}
+
 function surfaceHexHolesSdf(
   p: Vec3,
   grid: SpatialHash,
   cellSize: number,
   inRadius: number,
-  depth: number
+  depth: number,
+  sides: number
 ): number {
   if (grid.size === 0) return Infinity;
   const cx = Math.floor(p[0] / cellSize);
@@ -645,7 +674,7 @@ function surfaceHexHolesSdf(
           const { t, b, n } = basisFromNormal(sample.normal);
           const local: Vec3 = [dot(delta, t), dot(delta, b), dot(delta, n)];
           const radiusScale = Math.max(0.72, Math.min(1.0, sample.holeScale ?? 1.0));
-          const d = hexPrismSdf(local, inRadius * radiusScale, depth);
+          const d = polygonPrismSdf(local, inRadius * radiusScale, depth, sides);
           if (d < minD) minD = d;
         }
       }
@@ -664,13 +693,15 @@ export function buildSurfaceHexLattice(
   const targetDepth = Math.max(0.1, shellDepth);
   const holeDepth = targetDepth * 2.2;
   const wallThickness = Math.max(strutDiameter, cellSize * 0.05);
-  const inRadius = Math.max(0.1, (cellSize - wallThickness) * 0.5);
+  const polygonSides = params.latticeType === 'triangle' ? 3 : 6;
+  const radiusPacking = polygonSides === 3 ? 0.34 : 0.5;
+  const inRadius = Math.max(0.1, (cellSize - wallThickness) * radiusPacking);
   const grid = buildSpatialHash(samples, cellSize);
 
   return (x: number, y: number, z: number) => {
     const dObj = objectSdf(x, y, z);
     const bandSdf = Math.max(dObj, -(dObj + shellDepth));
-    const holeSdf = surfaceHexHolesSdf([x, y, z], grid, cellSize, inRadius, holeDepth);
+    const holeSdf = surfaceHexHolesSdf([x, y, z], grid, cellSize, inRadius, holeDepth, polygonSides);
     return Math.max(bandSdf, -holeSdf);
   };
 }
