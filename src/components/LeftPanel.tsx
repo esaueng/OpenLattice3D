@@ -270,18 +270,6 @@ export function LeftPanel() {
             </select>
           </div>
 
-          <div className="row checkbox-row">
-            <label>
-              <input
-                type="checkbox"
-                checked={store.params.variant === 'implicit_conformal'}
-                disabled={!['hexagon', 'triangle'].includes(store.params.latticeType)}
-                onChange={(e) => store.setVariant(e.target.checked ? 'implicit_conformal' : 'shell_core')}
-              />
-              Conformal lattice (wrap to surface)
-            </label>
-          </div>
-
           <div className="row">
             <label>Cell Size (mm):</label>
             <input

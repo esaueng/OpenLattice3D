@@ -241,7 +241,9 @@ export const useStore = create<AppState>((set) => ({
     params: {
       ...s.params,
       latticeType: type,
-      variant: (type === 'hexagon' || type === 'triangle') ? s.params.variant : 'shell_core',
+      variant: (type === 'hexagon' || type === 'triangle') ? 'implicit_conformal' : 'shell_core',
+      surfaceOnly: (type === 'hexagon' || type === 'triangle') ? true : s.params.surfaceOnly,
+      noShell: (type === 'hexagon' || type === 'triangle') ? false : s.params.noShell,
     },
   })),
 
