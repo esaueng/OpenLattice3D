@@ -93,13 +93,17 @@ function sampleTriangle(a: Vec3, b: Vec3, c: Vec3): Vec3 {
   ];
 }
 
-function sampleSurfacePointsFromMesh(
+type MeshSampler = {
+  sample: () => SurfaceHexSample;
+  totalArea: number;
+};
+
+function buildMeshSampler(
   positions: Float32Array,
   normals: Float32Array,
   triCount: number,
-  count: number,
   keepOutTris: Set<number>
-): SurfaceHexSample[] {
+): MeshSampler | null {
   const areas = new Float32Array(triCount);
   let totalArea = 0;
   for (let i = 0; i < triCount; i++) {
@@ -111,21 +115,21 @@ function sampleSurfacePointsFromMesh(
     totalArea += triangleArea(a, b, c);
     areas[i] = totalArea;
   }
-  if (totalArea <= 1e-6) return [];
-
-  const samples: SurfaceHexSample[] = [];
-  for (let i = 0; i < count; i++) {
-    const triIndex = pickTriangle(areas, totalArea);
-    const o = triIndex * 9;
-    const a: Vec3 = [positions[o], positions[o + 1], positions[o + 2]];
-    const b: Vec3 = [positions[o + 3], positions[o + 4], positions[o + 5]];
-    const c: Vec3 = [positions[o + 6], positions[o + 7], positions[o + 8]];
-    const pos = sampleTriangle(a, b, c);
-    const ni = triIndex * 3;
-    const normal = normalize([normals[ni], normals[ni + 1], normals[ni + 2]]);
-    samples.push({ pos, normal });
-  }
-  return samples;
+  if (totalArea <= 1e-6) return null;
+  return {
+    totalArea,
+    sample: () => {
+      const triIndex = pickTriangle(areas, totalArea);
+      const o = triIndex * 9;
+      const a: Vec3 = [positions[o], positions[o + 1], positions[o + 2]];
+      const b: Vec3 = [positions[o + 3], positions[o + 4], positions[o + 5]];
+      const c: Vec3 = [positions[o + 6], positions[o + 7], positions[o + 8]];
+      const pos = sampleTriangle(a, b, c);
+      const ni = triIndex * 3;
+      const normal = normalize([normals[ni], normals[ni + 1], normals[ni + 2]]);
+      return { pos, normal };
+    },
+  };
 }
 
 function estimateNormal(
@@ -152,55 +156,47 @@ function projectToSurfaceSdf(
   return { pos: projected, normal: n2 };
 }
 
-function sampleSurfacePointsForShape(
+function sampleSurfacePointForShape(
   shape: SampleShape,
-  count: number,
   params: { radius?: number; halfSize?: number; cylRadius?: number; cylHalfHeight?: number; torusMajor?: number; torusTube?: number; capRadius?: number; capHalfHeight?: number }
-): SurfaceHexSample[] {
-  const samples: SurfaceHexSample[] = [];
+): SurfaceHexSample {
   if (shape === 'sphere') {
     const r = params.radius ?? 25;
-    const goldenAngle = Math.PI * (3 - Math.sqrt(5));
-    for (let i = 0; i < count; i++) {
-      const t = (i + 0.5) / count;
-      const y = 1 - 2 * t;
-      const radius = Math.sqrt(1 - y * y);
-      const theta = goldenAngle * i;
-      const x = Math.cos(theta) * radius;
-      const z = Math.sin(theta) * radius;
-      const pos: Vec3 = [x * r, y * r, z * r];
-      samples.push({ pos, normal: normalize(pos) });
-    }
-    return samples;
+    const u = Math.random();
+    const v = Math.random();
+    const theta = 2 * Math.PI * u;
+    const phi = Math.acos(2 * v - 1);
+    const x = r * Math.sin(phi) * Math.cos(theta);
+    const y = r * Math.sin(phi) * Math.sin(theta);
+    const z = r * Math.cos(phi);
+    const pos: Vec3 = [x, y, z];
+    return { pos, normal: normalize(pos) };
   }
   if (shape === 'cube') {
     const h = params.halfSize ?? 15;
     const faceArea = 4 * h * h;
     const totalArea = faceArea * 6;
-    for (let i = 0; i < count; i++) {
-      const r = Math.random() * totalArea;
-      const face = Math.floor(r / faceArea);
-      const u = (Math.random() * 2 - 1) * h;
-      const v = (Math.random() * 2 - 1) * h;
-      let pos: Vec3;
-      let normal: Vec3;
-      switch (face) {
-        case 0:
-          pos = [h, u, v]; normal = [1, 0, 0]; break;
-        case 1:
-          pos = [-h, u, v]; normal = [-1, 0, 0]; break;
-        case 2:
-          pos = [u, h, v]; normal = [0, 1, 0]; break;
-        case 3:
-          pos = [u, -h, v]; normal = [0, -1, 0]; break;
-        case 4:
-          pos = [u, v, h]; normal = [0, 0, 1]; break;
-        default:
-          pos = [u, v, -h]; normal = [0, 0, -1]; break;
-      }
-      samples.push({ pos, normal });
+    const r = Math.random() * totalArea;
+    const face = Math.floor(r / faceArea);
+    const u = (Math.random() * 2 - 1) * h;
+    const v = (Math.random() * 2 - 1) * h;
+    let pos: Vec3;
+    let normal: Vec3;
+    switch (face) {
+      case 0:
+        pos = [h, u, v]; normal = [1, 0, 0]; break;
+      case 1:
+        pos = [-h, u, v]; normal = [-1, 0, 0]; break;
+      case 2:
+        pos = [u, h, v]; normal = [0, 1, 0]; break;
+      case 3:
+        pos = [u, -h, v]; normal = [0, -1, 0]; break;
+      case 4:
+        pos = [u, v, h]; normal = [0, 0, 1]; break;
+      default:
+        pos = [u, v, -h]; normal = [0, 0, -1]; break;
     }
-    return samples;
+    return { pos, normal };
   }
   if (shape === 'cylinder') {
     const r = params.cylRadius ?? 15;
@@ -208,39 +204,32 @@ function sampleSurfacePointsForShape(
     const sideArea = 2 * Math.PI * r * (2 * h);
     const capArea = Math.PI * r * r;
     const totalArea = sideArea + 2 * capArea;
-    for (let i = 0; i < count; i++) {
-      const pick = Math.random() * totalArea;
-      if (pick < sideArea) {
-        const theta = Math.random() * 2 * Math.PI;
-        const y = (Math.random() * 2 - 1) * h;
-        const x = r * Math.cos(theta);
-        const z = r * Math.sin(theta);
-        samples.push({ pos: [x, y, z], normal: normalize([x, 0, z]) });
-      } else {
-        const theta = Math.random() * 2 * Math.PI;
-        const rr = Math.sqrt(Math.random()) * r;
-        const x = rr * Math.cos(theta);
-        const z = rr * Math.sin(theta);
-        const top = pick < sideArea + capArea;
-        samples.push({ pos: [x, top ? h : -h, z], normal: [0, top ? 1 : -1, 0] });
-      }
+    const pick = Math.random() * totalArea;
+    if (pick < sideArea) {
+      const theta = Math.random() * 2 * Math.PI;
+      const y = (Math.random() * 2 - 1) * h;
+      const x = r * Math.cos(theta);
+      const z = r * Math.sin(theta);
+      return { pos: [x, y, z], normal: normalize([x, 0, z]) };
     }
-    return samples;
+    const theta = Math.random() * 2 * Math.PI;
+    const rr = Math.sqrt(Math.random()) * r;
+    const x = rr * Math.cos(theta);
+    const z = rr * Math.sin(theta);
+    const top = pick < sideArea + capArea;
+    return { pos: [x, top ? h : -h, z], normal: [0, top ? 1 : -1, 0] };
   }
   if (shape === 'torus') {
     const major = params.torusMajor ?? 20;
     const tube = params.torusTube ?? 8;
-    for (let i = 0; i < count; i++) {
-      const u = Math.random() * 2 * Math.PI;
-      const v = Math.random() * 2 * Math.PI;
-      const cx = (major + tube * Math.cos(v));
-      const x = cx * Math.cos(u);
-      const z = cx * Math.sin(u);
-      const y = tube * Math.sin(v);
-      const normal = normalize([Math.cos(u) * Math.cos(v), Math.sin(v), Math.sin(u) * Math.cos(v)]);
-      samples.push({ pos: [x, y, z], normal });
-    }
-    return samples;
+    const u = Math.random() * 2 * Math.PI;
+    const v = Math.random() * 2 * Math.PI;
+    const cx = (major + tube * Math.cos(v));
+    const x = cx * Math.cos(u);
+    const z = cx * Math.sin(u);
+    const y = tube * Math.sin(v);
+    const normal = normalize([Math.cos(u) * Math.cos(v), Math.sin(v), Math.sin(u) * Math.cos(v)]);
+    return { pos: [x, y, z], normal };
   }
   if (shape === 'capsule') {
     const r = params.capRadius ?? 12;
@@ -248,30 +237,96 @@ function sampleSurfacePointsForShape(
     const cylArea = 2 * Math.PI * r * (2 * h);
     const sphereArea = 4 * Math.PI * r * r;
     const totalArea = cylArea + sphereArea;
-    for (let i = 0; i < count; i++) {
-      const pick = Math.random() * totalArea;
-      if (pick < cylArea) {
-        const theta = Math.random() * 2 * Math.PI;
-        const y = (Math.random() * 2 - 1) * h;
-        const x = r * Math.cos(theta);
-        const z = r * Math.sin(theta);
-        samples.push({ pos: [x, y, z], normal: normalize([x, 0, z]) });
-      } else {
-        const u = Math.random();
-        const v = Math.random();
-        const theta = 2 * Math.PI * u;
-        const phi = Math.acos(2 * v - 1);
-        const sx = r * Math.sin(phi) * Math.cos(theta);
-        const sy = r * Math.cos(phi);
-        const sz = r * Math.sin(phi) * Math.sin(theta);
-        const top = Math.random() > 0.5;
-        const centerY = top ? h : -h;
-        const pos: Vec3 = [sx, sy + centerY, sz];
-        const normal = normalize([sx, sy, sz]);
-        samples.push({ pos, normal });
+    const pick = Math.random() * totalArea;
+    if (pick < cylArea) {
+      const theta = Math.random() * 2 * Math.PI;
+      const y = (Math.random() * 2 - 1) * h;
+      const x = r * Math.cos(theta);
+      const z = r * Math.sin(theta);
+      return { pos: [x, y, z], normal: normalize([x, 0, z]) };
+    }
+    const u = Math.random();
+    const v = Math.random();
+    const theta = 2 * Math.PI * u;
+    const phi = Math.acos(2 * v - 1);
+    const sx = r * Math.sin(phi) * Math.cos(theta);
+    const sy = r * Math.cos(phi);
+    const sz = r * Math.sin(phi) * Math.sin(theta);
+    const top = Math.random() > 0.5;
+    const centerY = top ? h : -h;
+    const pos: Vec3 = [sx, sy + centerY, sz];
+    const normal = normalize([sx, sy, sz]);
+    return { pos, normal };
+  }
+  return { pos: [0, 0, 0], normal: [0, 1, 0] };
+}
+
+function buildFibonacciSphereSamples(radius: number, count: number): SurfaceHexSample[] {
+  const samples: SurfaceHexSample[] = [];
+  const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+  for (let i = 0; i < count; i++) {
+    const t = (i + 0.5) / count;
+    const y = 1 - 2 * t;
+    const ring = Math.sqrt(1 - y * y);
+    const theta = goldenAngle * i;
+    const x = Math.cos(theta) * ring;
+    const z = Math.sin(theta) * ring;
+    const pos: Vec3 = [x * radius, y * radius, z * radius];
+    samples.push({ pos, normal: normalize(pos) });
+  }
+  return samples;
+}
+
+function generatePoissonSamples(
+  sampler: () => SurfaceHexSample,
+  targetCount: number,
+  minDistance: number
+): SurfaceHexSample[] {
+  const samples: SurfaceHexSample[] = [];
+  let currentMin = minDistance;
+  let attempts = 0;
+  while (samples.length < targetCount && attempts < 6) {
+    const grid = new Map<string, SurfaceHexSample[]>();
+    for (const s of samples) {
+      const key = `${Math.floor(s.pos[0] / currentMin)},${Math.floor(s.pos[1] / currentMin)},${Math.floor(s.pos[2] / currentMin)}`;
+      const bucket = grid.get(key);
+      if (bucket) bucket.push(s);
+      else grid.set(key, [s]);
+    }
+    const batchCount = Math.max(targetCount * 3, 200);
+    for (let i = 0; i < batchCount && samples.length < targetCount; i++) {
+      const cand = sampler();
+      const cx = Math.floor(cand.pos[0] / currentMin);
+      const cy = Math.floor(cand.pos[1] / currentMin);
+      const cz = Math.floor(cand.pos[2] / currentMin);
+      let ok = true;
+      for (let dx = -1; dx <= 1 && ok; dx++) {
+        for (let dy = -1; dy <= 1 && ok; dy++) {
+          for (let dz = -1; dz <= 1 && ok; dz++) {
+            const key = `${cx + dx},${cy + dy},${cz + dz}`;
+            const bucket = grid.get(key);
+            if (!bucket) continue;
+            for (const other of bucket) {
+              if (length(sub(cand.pos, other.pos)) < currentMin) {
+                ok = false;
+                break;
+              }
+            }
+          }
+        }
+      }
+      if (ok) {
+        samples.push(cand);
+        const key = `${cx},${cy},${cz}`;
+        const bucket = grid.get(key);
+        if (bucket) bucket.push(cand);
+        else grid.set(key, [cand]);
       }
     }
-    return samples;
+    if (samples.length < targetCount) {
+      currentMin *= 0.85;
+      attempts += 1;
+    }
   }
   return samples;
 }
@@ -466,18 +521,23 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
               default: return 1000;
             }
           })();
-          const spacingArea = params.cellSize * params.cellSize * 0.9;
-          const sampleCount = Math.max(30, Math.round(areaEstimate / spacingArea));
-          surfaceSamples = sampleSurfacePointsForShape(shape, sampleCount, {
-            radius: sphereRadius ?? 25,
-            halfSize: 15,
-            cylRadius: 15,
-            cylHalfHeight: 20,
-            torusMajor: 20,
-            torusTube: 8,
-            capRadius: 12,
-            capHalfHeight: 15,
-          });
+          const spacingArea = params.cellSize * params.cellSize * 0.55;
+          const sampleCount = Math.max(60, Math.round(areaEstimate / spacingArea));
+          if (shape === 'sphere') {
+            surfaceSamples = buildFibonacciSphereSamples(sphereRadius ?? 25, sampleCount);
+          } else {
+            const sampler = () => sampleSurfacePointForShape(shape, {
+              radius: sphereRadius ?? 25,
+              halfSize: 15,
+              cylRadius: 15,
+              cylHalfHeight: 20,
+              torusMajor: 20,
+              torusTube: 8,
+              capRadius: 12,
+              capHalfHeight: 15,
+            });
+            surfaceSamples = generatePoissonSamples(sampler, sampleCount, params.cellSize * 0.75);
+          }
           const target: SurfaceSamplerTarget = {
             samples: surfaceSamples,
             project: (p) => projectToSurfaceSdf(objectSdf!, p, params.cellSize),
@@ -515,18 +575,13 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
           const positions = msg.meshPositions!;
           const normals = msg.meshNormals!;
           const triCount = msg.meshTriCount!;
-          let totalArea = 0;
-          for (let i = 0; i < triCount; i++) {
-            if (keepOutSet.has(i)) continue;
-            const o = i * 9;
-            const a: Vec3 = [positions[o], positions[o + 1], positions[o + 2]];
-            const b: Vec3 = [positions[o + 3], positions[o + 4], positions[o + 5]];
-            const c: Vec3 = [positions[o + 6], positions[o + 7], positions[o + 8]];
-            totalArea += triangleArea(a, b, c);
+          const meshSampler = buildMeshSampler(positions, normals, triCount, keepOutSet);
+          const totalArea = meshSampler?.totalArea ?? 0;
+          const spacingArea = params.cellSize * params.cellSize * 0.55;
+          const sampleCount = Math.max(60, Math.round(totalArea / spacingArea));
+          if (meshSampler) {
+            surfaceSamples = generatePoissonSamples(meshSampler.sample, sampleCount, params.cellSize * 0.75);
           }
-          const spacingArea = params.cellSize * params.cellSize * 0.9;
-          const sampleCount = Math.max(30, Math.round(totalArea / spacingArea));
-          surfaceSamples = sampleSurfacePointsFromMesh(positions, normals, triCount, sampleCount, keepOutSet);
           const target: SurfaceSamplerTarget = {
             samples: surfaceSamples,
             project: (p) => {
