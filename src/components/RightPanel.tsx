@@ -39,6 +39,7 @@ export function RightPanel() {
             <button
               key={mode}
               className={`btn btn-small ${viewMode === mode ? 'btn-active' : ''}`}
+              title={`Switch viewer to ${VIEW_LABELS[mode]} mode.`}
               onClick={() => store.setViewMode(mode)}
               disabled={
                 (mode === 'lattice' && !resultMesh) ||
@@ -62,6 +63,7 @@ export function RightPanel() {
                   <button
                     key={a}
                     className={`btn btn-tiny ${clipPlane.axis === a ? 'btn-active' : ''}`}
+                    title={`Set cross-section clipping axis to ${a.toUpperCase()}.`}
                     onClick={() => store.setClipPlane({ axis: a })}
                   >
                     {a.toUpperCase()}
@@ -73,6 +75,7 @@ export function RightPanel() {
               <label>Position:</label>
               <input
                 type="range"
+                title="Move the clipping plane through the model in cross-section mode."
                 min={0}
                 max={1}
                 step={0.005}
@@ -85,6 +88,7 @@ export function RightPanel() {
               <label>
                 <input
                   type="checkbox"
+                  title="Reverse which side of the clipping plane is shown."
                   checked={clipPlane.flipped}
                   onChange={(e) => store.setClipPlane({ flipped: e.target.checked })}
                 />
@@ -106,11 +110,13 @@ export function RightPanel() {
           <input
             type="color"
             value={viewerBackground}
+            title="Set the 3D viewer background color."
             onChange={(e) => store.setViewerBackground(e.target.value)}
             aria-label="Viewer background color"
           />
           <button
             className="btn btn-tiny"
+            title="Reset viewer background to default black."
             onClick={() => store.setViewerBackground('#000000')}
             type="button"
           >
@@ -178,6 +184,7 @@ export function RightPanel() {
           <h3>Export</h3>
           <button
             className="btn btn-primary"
+            title="Download the generated lattice mesh as an STL file."
             onClick={() => downloadSTL(resultMesh, `${meshFileName.replace(/\.stl$/i, '')}-lattice.stl`)}
           >
             Export STL ({resultMesh.triCount.toLocaleString()} tris)
@@ -185,6 +192,7 @@ export function RightPanel() {
           {validation && (
             <button
               className="btn btn-small"
+              title="Download a text report of validation checks and outcomes."
               onClick={() => downloadValidationReport(validation, params, meshFileName)}
             >
               Export Validation Report
@@ -192,6 +200,7 @@ export function RightPanel() {
           )}
           <button
             className="btn btn-small"
+            title="Export current parameters and metadata to a project JSON file."
             onClick={() => downloadProjectJSON(params, meshFileName, keepOutTris, keepInTris, validation)}
           >
             Export Project JSON
@@ -203,7 +212,7 @@ export function RightPanel() {
       <section className="panel-section logs-section">
         <h3>
           Logs
-          <button className="btn btn-tiny" onClick={store.clearLogs}>Clear</button>
+          <button className="btn btn-tiny" title="Clear the log output list." onClick={store.clearLogs}>Clear</button>
         </h3>
         <div className="log-container">
           {logs.map((entry, i) => (
