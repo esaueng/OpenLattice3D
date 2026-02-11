@@ -50,11 +50,17 @@ export async function registerNotificationServiceWorker(): Promise<void> {
   await getReadyNotificationRegistration();
 }
 
+function isPageActivelyViewed(): boolean {
+  if (typeof document === 'undefined') return false;
+  return document.visibilityState === 'visible' && document.hasFocus();
+}
+
 export async function sendNotification(
   title: string,
   options?: NotificationOptions
 ): Promise<boolean> {
   if (!('Notification' in window) || !isSecureContext) return false;
+  if (isPageActivelyViewed()) return false;
 
   const permission = await requestNotificationPermission();
   if (permission !== 'granted') return false;
