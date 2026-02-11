@@ -387,29 +387,6 @@ export function LeftPanel() {
             </select>
           </div>
 
-          <div className="row checkbox-row">
-            <label>
-              <input
-                type="checkbox"
-                checked={store.params.gradientEnabled}
-                onChange={(e) => store.updateParams({ gradientEnabled: e.target.checked })}
-              />
-              Near-surface densification
-            </label>
-          </div>
-
-          {store.params.gradientEnabled && (
-            <div className="row">
-              <label>Gradient Strength:</label>
-              <input
-                type="range"
-                value={store.params.gradientStrength}
-                min={0} max={1} step={0.1}
-                onChange={(e) => store.updateParams({ gradientStrength: parseFloat(e.target.value) })}
-              />
-              <span>{store.params.gradientStrength.toFixed(1)}</span>
-            </div>
-          )}
 
         </section>
       )}
