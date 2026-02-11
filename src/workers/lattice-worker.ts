@@ -656,7 +656,10 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
       const marchingStart = performance.now();
       const preSecondsActual = (marchingStart - generationStart) / 1000;
       const sdfToSample = surfaceHexSdf ?? sdf;
-      const result = marchingCubes(sdfToSample, bounds, resolution, 0, (frac) => {
+      const sdfWithThinFilter = params.thinSectionFilter > 0
+        ? (x: number, y: number, z: number) => sdfToSample(x, y, z) + params.thinSectionFilter
+        : sdfToSample;
+      const result = marchingCubes(sdfWithThinFilter, bounds, resolution, 0, (frac) => {
         if (cancelled) throw new Error('Cancelled');
         const overallProgress = 0.1 + frac * 0.7;
         const elapsedSeconds = (performance.now() - generationStart) / 1000;
@@ -691,7 +694,7 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
         const outerDeviation = (shape === 'sphere' && sphereRadius !== null)
           ? checkSphereDeviation(result, sphereRadius, params.toleranceMm)
           : { passed: true, maxDeviation: 0 };
-        const minThickness = checkMinThickness(sdfToSample, result, params.minFeatureSize, 200);
+        const minThickness = checkMinThickness(sdfWithThinFilter, result, params.minFeatureSize, 200);
         const manifold = checkManifold(result);
         const disconnected = checkDisconnected(result);
         const warnings: string[] = [];
@@ -710,7 +713,7 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
           warnings,
         };
       } else {
-        validation = runValidation(result, sdfToSample, params, bvh, null);
+        validation = runValidation(result, sdfWithThinFilter, params, bvh, null);
       }
 
       postMessage({ type: 'progress', progress: 0.95, message: 'Done!' } as WorkerResponse);

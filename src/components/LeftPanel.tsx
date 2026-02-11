@@ -394,6 +394,21 @@ export function LeftPanel() {
           </div>
 
 
+          <div className="row">
+            <label>Thin Artifact Filter:</label>
+            <select
+              value={store.params.thinSectionFilter}
+              onChange={(e) => store.updateParams({ thinSectionFilter: parseFloat(e.target.value) || 0 })}
+            >
+              <option value={0}>Off</option>
+              <option value={0.05}>Low</option>
+              <option value={0.1}>Medium</option>
+              <option value={0.2}>High</option>
+              <option value={0.35}>Very High</option>
+            </select>
+          </div>
+
+
         </section>
       )}
 
