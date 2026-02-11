@@ -20,9 +20,13 @@ export function LeftPanel() {
     void requestNotificationPermission();
   }, []);
 
-  const notifyGenerationComplete = useCallback(async (triCount: number) => {
+  const notifyGenerationComplete = useCallback(async (triCount: number, elapsedMs: number) => {
+    const elapsedSec = Math.max(0, elapsedMs / 1000);
+    const elapsedLabel = elapsedSec < 60
+      ? `${elapsedSec.toFixed(1)}s`
+      : `${Math.floor(elapsedSec / 60)}m ${(elapsedSec % 60).toFixed(0)}s`;
     await sendNotification('Lattice generation complete', {
-      body: `${triCount.toLocaleString()} triangles generated.`,
+      body: `${triCount.toLocaleString()} triangles generated in ${elapsedLabel}.`,
     });
   }, []);
 
@@ -113,6 +117,7 @@ export function LeftPanel() {
     );
     workerRef.current = worker;
 
+    const generationStartedAt = performance.now();
     const resolution = Math.round(24 + store.params.exportResolution * 24); // 48..264
 
     const msg: WorkerMessage = {
@@ -146,7 +151,8 @@ export function LeftPanel() {
         store.setGenerating(false);
         store.setProgress(1, 'Complete');
         store.addLog(`Generation complete: ${resp.triCount} triangles`);
-        void notifyGenerationComplete(resp.triCount || 0);
+        const elapsedMs = performance.now() - generationStartedAt;
+        void notifyGenerationComplete(resp.triCount || 0, elapsedMs);
         worker.terminate();
       } else if (resp.type === 'error') {
         store.addLog(`Error: ${resp.message}`, 'error');
