@@ -144,7 +144,7 @@ export const useStore = create<AppState>((set) => ({
   validation: null,
   viewMode: persisted?.viewMode ?? 'original',
   clipPlane: persisted?.clipPlane ?? { axis: 'y', position: 0.5, flipped: false },
-  viewerBackground: persisted?.viewerBackground ?? '#1a1a2e',
+  viewerBackground: persisted?.viewerBackground ?? '#000000',
   logs: [],
 
   setOriginalMesh: (mesh, info, fileName) => set({
@@ -241,7 +241,9 @@ export const useStore = create<AppState>((set) => ({
     params: {
       ...s.params,
       latticeType: type,
-      variant: (type === 'hexagon' || type === 'triangle') ? s.params.variant : 'shell_core',
+      variant: (type === 'hexagon' || type === 'triangle') ? 'implicit_conformal' : 'shell_core',
+      surfaceOnly: (type === 'hexagon' || type === 'triangle') ? true : s.params.surfaceOnly,
+      noShell: (type === 'hexagon' || type === 'triangle') ? false : s.params.noShell,
     },
   })),
 
@@ -306,7 +308,7 @@ export const useStore = create<AppState>((set) => ({
       progressMessage: '',
       viewMode: 'original',
       clipPlane: { axis: 'y', position: 0.5, flipped: false },
-      viewerBackground: '#1a1a2e',
+      viewerBackground: '#000000',
       logs: [],
     });
   },

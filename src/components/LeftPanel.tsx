@@ -20,9 +20,13 @@ export function LeftPanel() {
     void requestNotificationPermission();
   }, []);
 
-  const notifyGenerationComplete = useCallback(async (triCount: number) => {
+  const notifyGenerationComplete = useCallback(async (triCount: number, elapsedMs: number) => {
+    const elapsedSec = Math.max(0, elapsedMs / 1000);
+    const elapsedLabel = elapsedSec < 60
+      ? `${elapsedSec.toFixed(1)}s`
+      : `${Math.floor(elapsedSec / 60)}m ${(elapsedSec % 60).toFixed(0)}s`;
     await sendNotification('Lattice generation complete', {
-      body: `${triCount.toLocaleString()} triangles generated.`,
+      body: `${triCount.toLocaleString()} triangles generated in ${elapsedLabel}.`,
     });
   }, []);
 
@@ -113,6 +117,7 @@ export function LeftPanel() {
     );
     workerRef.current = worker;
 
+    const generationStartedAt = performance.now();
     const resolution = Math.round(24 + store.params.exportResolution * 24); // 48..264
 
     const msg: WorkerMessage = {
@@ -146,7 +151,8 @@ export function LeftPanel() {
         store.setGenerating(false);
         store.setProgress(1, 'Complete');
         store.addLog(`Generation complete: ${resp.triCount} triangles`);
-        void notifyGenerationComplete(resp.triCount || 0);
+        const elapsedMs = performance.now() - generationStartedAt;
+        void notifyGenerationComplete(resp.triCount || 0, elapsedMs);
         worker.terminate();
       } else if (resp.type === 'error') {
         store.addLog(`Error: ${resp.message}`, 'error');
@@ -172,10 +178,13 @@ export function LeftPanel() {
 
   return (
     <div className="panel left-panel">
-      <h2 className="app-title">Open Lattice 3D</h2>
+      <div className="panel-intro">
+        <h2>Setup</h2>
+        <p>Import a model, tune lattice parameters, then generate.</p>
+      </div>
 
       {/* Import Section */}
-      <section>
+      <section className="panel-section">
         <h3>Import</h3>
         <input
           ref={fileRef}
@@ -192,19 +201,20 @@ export function LeftPanel() {
           style={{ display: 'none' }}
         />
         <div className="row" style={{ gap: '6px', flexWrap: 'wrap' }}>
-          <button className="btn btn-primary" onClick={() => fileRef.current?.click()}>
+          <button className="btn btn-primary" title="Upload an STL mesh to generate a lattice from." onClick={() => fileRef.current?.click()}>
             Upload STL
           </button>
-          <button className="btn btn-small" onClick={() => jsonRef.current?.click()}>
+          <button className="btn btn-small" title="Import saved lattice parameters from a JSON file." onClick={() => jsonRef.current?.click()}>
             Import JSON
           </button>
-          <button className="btn btn-small btn-danger" onClick={handleReset}>
+          <button className="btn btn-small btn-danger" title="Reset the project, parameters, and generated results." onClick={handleReset}>
             Clear All
           </button>
         </div>
         <div className="row" style={{ marginTop: '8px' }}>
           <label>Sample Part:</label>
           <select
+            title="Load a built-in sample shape for quick testing."
             value={store.sampleShape || ''}
             onChange={(e) => { if (e.target.value) handleSampleShape(e.target.value as SampleShape); }}
           >
@@ -237,12 +247,13 @@ export function LeftPanel() {
 
       {/* Lattice Parameters */}
       {hasModel && (
-        <section>
+        <section className="panel-section">
           <h3>Lattice Parameters</h3>
 
           <div className="row">
             <label>Lattice Type:</label>
             <select
+              title="Choose the lattice algorithm used to generate internal geometry."
               value={store.params.latticeType}
               onChange={(e) => store.setLatticeType(e.target.value as LatticeType)}
             >
@@ -267,22 +278,11 @@ export function LeftPanel() {
             </select>
           </div>
 
-          <div className="row checkbox-row">
-            <label>
-              <input
-                type="checkbox"
-                checked={store.params.variant === 'implicit_conformal'}
-                disabled={!['hexagon', 'triangle'].includes(store.params.latticeType)}
-                onChange={(e) => store.setVariant(e.target.checked ? 'implicit_conformal' : 'shell_core')}
-              />
-              Conformal lattice (wrap to surface)
-            </label>
-          </div>
-
           <div className="row">
             <label>Cell Size (mm):</label>
             <input
               type="number"
+              title="Controls overall lattice spacing. Larger values create bigger cells."
               value={store.params.cellSize}
               min={2} max={50} step={0.5}
               onChange={(e) => store.updateParams({ cellSize: parseFloat(e.target.value) || 8 })}
@@ -293,6 +293,7 @@ export function LeftPanel() {
             <label>
               <input
                 type="checkbox"
+                title="Removes the outer shell so only lattice remains."
                 checked={store.params.noShell}
                 onChange={(e) => store.updateParams({ noShell: e.target.checked, surfaceOnly: false })}
               />
@@ -304,6 +305,7 @@ export function LeftPanel() {
             <label>
               <input
                 type="checkbox"
+                title="Constrain lattice generation to a surface band, leaving inside hollow."
                 checked={store.params.surfaceOnly}
                 onChange={(e) => store.updateParams({ surfaceOnly: e.target.checked, noShell: false })}
               />
@@ -316,6 +318,7 @@ export function LeftPanel() {
               <label>Lattice Depth (mm):</label>
               <input
                 type="number"
+                title="Depth of the generated lattice band from the outer surface."
                 value={store.params.surfaceDepth}
                 min={1} max={50} step={0.5}
                 onChange={(e) => store.updateParams({ surfaceDepth: parseFloat(e.target.value) || 8 })}
@@ -328,6 +331,7 @@ export function LeftPanel() {
               <label>Shell Thickness (mm):</label>
               <input
                 type="number"
+                title="Thickness of the outer shell retained around the lattice."
                 value={store.params.shellThickness}
                 min={0.3} max={10} step={0.1}
                 onChange={(e) => store.updateParams({ shellThickness: parseFloat(e.target.value) || 1.5 })}
@@ -340,6 +344,7 @@ export function LeftPanel() {
               <label>Wall Thickness (mm):</label>
               <input
                 type="number"
+                title="Thickness of sheet-style TPMS surfaces."
                 value={store.params.wallThickness}
                 min={0.3} max={5} step={0.1}
                 onChange={(e) => store.updateParams({ wallThickness: parseFloat(e.target.value) || 1.0 })}
@@ -350,6 +355,7 @@ export function LeftPanel() {
               <label>Strut Diameter (mm):</label>
               <input
                 type="number"
+                title="Diameter of strut members for strut-based lattices."
                 value={store.params.strutDiameter}
                 min={0.3} max={5} step={0.1}
                 onChange={(e) => store.updateParams({ strutDiameter: parseFloat(e.target.value) || 1.0 })}
@@ -361,6 +367,7 @@ export function LeftPanel() {
             <label>Min Feature Size (mm):</label>
             <input
               type="number"
+              title="Minimum manufacturable feature size target used in validation."
               value={store.params.minFeatureSize}
               min={0.3} max={5} step={0.1}
               onChange={(e) => store.updateParams({ minFeatureSize: parseFloat(e.target.value) || 0.8 })}
@@ -371,6 +378,7 @@ export function LeftPanel() {
             <label>Tolerance (mm):</label>
             <input
               type="number"
+              title="Maximum allowed outer-surface deviation versus the source mesh."
               value={store.params.toleranceMm}
               min={0.05} max={2} step={0.05}
               onChange={(e) => store.updateParams({ toleranceMm: parseFloat(e.target.value) || 0.2 })}
@@ -380,6 +388,7 @@ export function LeftPanel() {
           <div className="row">
             <label>Export Resolution:</label>
             <select
+              title="Sampling resolution for marching cubes. Higher values increase detail and compute time."
               value={store.params.exportResolution}
               onChange={(e) => store.updateParams({ exportResolution: parseInt(e.target.value) || 3 })}
             >
@@ -396,39 +405,32 @@ export function LeftPanel() {
             </select>
           </div>
 
-          <div className="row checkbox-row">
-            <label>
-              <input
-                type="checkbox"
-                checked={store.params.gradientEnabled}
-                onChange={(e) => store.updateParams({ gradientEnabled: e.target.checked })}
-              />
-              Near-surface densification
-            </label>
+
+          <div className="row">
+            <label>Thin Artifact Filter:</label>
+            <select
+              title="Removes very thin/jagged sections. Higher levels remove more material."
+              value={store.params.thinSectionFilter}
+              onChange={(e) => store.updateParams({ thinSectionFilter: parseFloat(e.target.value) || 0 })}
+            >
+              <option value={0}>Off</option>
+              <option value={0.05}>Low</option>
+              <option value={0.1}>Medium</option>
+              <option value={0.2}>High</option>
+              <option value={0.35}>Very High</option>
+            </select>
           </div>
 
-          {store.params.gradientEnabled && (
-            <div className="row">
-              <label>Gradient Strength:</label>
-              <input
-                type="range"
-                value={store.params.gradientStrength}
-                min={0} max={1} step={0.1}
-                onChange={(e) => store.updateParams({ gradientStrength: parseFloat(e.target.value) })}
-              />
-              <span>{store.params.gradientStrength.toFixed(1)}</span>
-            </div>
-          )}
 
         </section>
       )}
 
       {/* Generate */}
       {hasModel && (
-        <section>
+        <section className="panel-section panel-section-sticky">
           <h3>Generate</h3>
           {!store.generating ? (
-            <button className="btn btn-primary btn-large" onClick={startGeneration}>
+            <button className="btn btn-primary btn-large" title="Start generating the lattice with the current settings." onClick={startGeneration}>
               Generate Lattice
             </button>
           ) : (
@@ -437,11 +439,22 @@ export function LeftPanel() {
                 <div className="progress-fill" style={{ width: `${store.progress * 100}%` }} />
               </div>
               <div className="progress-text">{store.progressMessage}</div>
-              <button className="btn btn-small" onClick={cancelGeneration}>Cancel</button>
+              <button className="btn btn-small" title="Stop the current generation job." onClick={cancelGeneration}>Cancel</button>
             </div>
           )}
         </section>
       )}
+
+      <div className="feedback-sidebar-cta">
+        <a
+          className="btn btn-feedback btn-feedback-compact"
+          href="https://form.esauengineering.com/feedback-openlattice3d"
+          target="_blank"
+          rel="noreferrer"
+        >
+          Bug report / feedback
+        </a>
+      </div>
     </div>
   );
 }
