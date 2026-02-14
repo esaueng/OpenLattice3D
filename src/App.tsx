@@ -2,7 +2,6 @@ import { useEffect } from 'react';
 import { LeftPanel } from './components/LeftPanel';
 import { Viewer3D } from './components/Viewer3D';
 import { RightPanel } from './components/RightPanel';
-import { FeedbackWidget } from './components/FeedbackWidget';
 import { registerNotificationServiceWorker } from './utils/notifications';
 import './App.css';
 
@@ -26,7 +25,6 @@ function App() {
         </div>
         <RightPanel />
       </div>
-      <FeedbackWidget />
       <div className="watermark">
         <a href="https://esauengineering.com/" target="_blank" rel="noreferrer">
           Built by Esau Engineering
