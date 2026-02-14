@@ -3,12 +3,7 @@
   "main": "worker/index.ts",
   "compatibility_date": "2024-12-01",
   "assets": {
-    "directory": "./dist",
-    "binding": "ASSETS"
-  },
-  "vars": {
-    "FEEDBACK_EMAIL_TO": "",
-    "FEEDBACK_EMAIL_FROM": ""
+    "directory": "./dist"
   },
   "observability": {
     "enabled": false,
