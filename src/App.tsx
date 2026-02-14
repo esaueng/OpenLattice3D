@@ -17,6 +17,14 @@ function App() {
           <h1>Open Lattice 3D <span className="beta-pill">beta</span></h1>
           <p>Generate manufacturable lattice geometries with live validation.</p>
         </div>
+        <a
+          className="btn btn-small feedback-link"
+          href="https://form.esauengineering.com/feedback-openlattice3d"
+          target="_blank"
+          rel="noreferrer"
+        >
+          Feedback / Bug Report
+        </a>
       </header>
       <div className="app">
         <LeftPanel />
