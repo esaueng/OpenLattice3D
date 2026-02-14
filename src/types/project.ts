@@ -50,6 +50,7 @@ export interface LatticeParams {
   surfaceDepth: number;        // mm — depth of the lattice band when surfaceOnly is on
   gradientEnabled: boolean;
   gradientStrength: number;    // 0..1
+  thinSectionFilter: number;   // mm material removal to suppress ultra-thin/jagged artifacts
   exportResolution: number;    // grid divisions per cell
   escapeHoles: boolean;
   escapeHoleDiameter: number;  // mm
@@ -91,6 +92,7 @@ export const DEFAULT_PARAMS: LatticeParams = {
   surfaceDepth: 8.0,
   gradientEnabled: false,
   gradientStrength: 0.5,
+  thinSectionFilter: 0.0,
   exportResolution: 3,
   escapeHoles: true,
   escapeHoleDiameter: 5.0,

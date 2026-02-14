@@ -2,11 +2,13 @@
 // This runs heavy computation off the main thread.
 
 import { marchingCubes } from '../geometry/marching-cubes';
-import { buildCombinedSDF, buildSphereLattice, buildCubeLattice, buildCylinderLattice, buildTorusLattice, buildCapsuleLattice } from '../geometry/lattice';
+import { buildCombinedSDF, buildSurfaceHexLattice, buildSphereLattice, buildCubeLattice, buildCylinderLattice, buildTorusLattice, buildCapsuleLattice } from '../geometry/lattice';
 import { MeshBVH } from '../geometry/bvh';
 import { runValidation, checkSphereDeviation, checkMinThickness, checkManifold, checkDisconnected } from '../geometry/validation';
 import type { LatticeParams, ValidationResult, SampleShape } from '../types/project';
 import type { Vec3 } from '../geometry/vec3';
+import { add, sub, dot, cross, length, scale, normalize } from '../geometry/vec3';
+import type { SurfaceHexSample } from '../geometry/lattice';
 
 export interface WorkerMessage {
   type: 'generate' | 'validate' | 'cancel';
@@ -55,6 +57,381 @@ type GenerationEstimate = {
   validationSeconds: number;
   totalSeconds: number;
 };
+
+type SurfaceSamplerTarget = {
+  samples: SurfaceHexSample[];
+  project: (p: Vec3) => { pos: Vec3; normal: Vec3 };
+};
+
+function triangleArea(a: Vec3, b: Vec3, c: Vec3): number {
+  return 0.5 * length(cross(sub(b, a), sub(c, a)));
+}
+
+function pickTriangle(cumulativeAreas: Float32Array, totalArea: number): number {
+  const r = Math.random() * totalArea;
+  let lo = 0;
+  let hi = cumulativeAreas.length - 1;
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (r <= cumulativeAreas[mid]) hi = mid;
+    else lo = mid + 1;
+  }
+  return lo;
+}
+
+function sampleTriangle(a: Vec3, b: Vec3, c: Vec3): Vec3 {
+  const r1 = Math.random();
+  const r2 = Math.random();
+  const sqrtR1 = Math.sqrt(r1);
+  const u = 1 - sqrtR1;
+  const v = sqrtR1 * (1 - r2);
+  const w = sqrtR1 * r2;
+  return [
+    a[0] * u + b[0] * v + c[0] * w,
+    a[1] * u + b[1] * v + c[1] * w,
+    a[2] * u + b[2] * v + c[2] * w,
+  ];
+}
+
+type MeshSampler = {
+  sample: () => SurfaceHexSample;
+  totalArea: number;
+};
+
+function buildMeshSampler(
+  positions: Float32Array,
+  normals: Float32Array,
+  triCount: number,
+  keepOutTris: Set<number>
+): MeshSampler | null {
+  const areas = new Float32Array(triCount);
+  let totalArea = 0;
+  for (let i = 0; i < triCount; i++) {
+    if (keepOutTris.has(i)) continue;
+    const o = i * 9;
+    const a: Vec3 = [positions[o], positions[o + 1], positions[o + 2]];
+    const b: Vec3 = [positions[o + 3], positions[o + 4], positions[o + 5]];
+    const c: Vec3 = [positions[o + 6], positions[o + 7], positions[o + 8]];
+    totalArea += triangleArea(a, b, c);
+    areas[i] = totalArea;
+  }
+  if (totalArea <= 1e-6) return null;
+  return {
+    totalArea,
+    sample: () => {
+      const triIndex = pickTriangle(areas, totalArea);
+      const o = triIndex * 9;
+      const a: Vec3 = [positions[o], positions[o + 1], positions[o + 2]];
+      const b: Vec3 = [positions[o + 3], positions[o + 4], positions[o + 5]];
+      const c: Vec3 = [positions[o + 6], positions[o + 7], positions[o + 8]];
+      const pos = sampleTriangle(a, b, c);
+      const ni = triIndex * 3;
+      const normal = normalize([normals[ni], normals[ni + 1], normals[ni + 2]]);
+      return { pos, normal };
+    },
+  };
+}
+
+function estimateNormal(
+  sdf: (x: number, y: number, z: number) => number,
+  p: Vec3,
+  eps: number
+): Vec3 {
+  const dx = sdf(p[0] + eps, p[1], p[2]) - sdf(p[0] - eps, p[1], p[2]);
+  const dy = sdf(p[0], p[1] + eps, p[2]) - sdf(p[0], p[1] - eps, p[2]);
+  const dz = sdf(p[0], p[1], p[2] + eps) - sdf(p[0], p[1], p[2] - eps);
+  return normalize([dx, dy, dz]);
+}
+
+function projectToSurfaceSdf(
+  sdf: (x: number, y: number, z: number) => number,
+  p: Vec3,
+  cellSize: number
+): { pos: Vec3; normal: Vec3 } {
+  const eps = Math.max(0.05, cellSize * 0.02);
+  const d = sdf(p[0], p[1], p[2]);
+  const n = estimateNormal(sdf, p, eps);
+  const projected = sub(p, scale(n, d));
+  const n2 = estimateNormal(sdf, projected, eps);
+  return { pos: projected, normal: n2 };
+}
+
+function sampleSurfacePointForShape(
+  shape: SampleShape,
+  params: { radius?: number; halfSize?: number; cylRadius?: number; cylHalfHeight?: number; torusMajor?: number; torusTube?: number; capRadius?: number; capHalfHeight?: number }
+): SurfaceHexSample {
+  if (shape === 'sphere') {
+    const r = params.radius ?? 25;
+    const u = Math.random();
+    const v = Math.random();
+    const theta = 2 * Math.PI * u;
+    const phi = Math.acos(2 * v - 1);
+    const x = r * Math.sin(phi) * Math.cos(theta);
+    const y = r * Math.sin(phi) * Math.sin(theta);
+    const z = r * Math.cos(phi);
+    const pos: Vec3 = [x, y, z];
+    return { pos, normal: normalize(pos) };
+  }
+  if (shape === 'cube') {
+    const h = params.halfSize ?? 15;
+    const faceArea = 4 * h * h;
+    const totalArea = faceArea * 6;
+    const r = Math.random() * totalArea;
+    const face = Math.floor(r / faceArea);
+    const u = (Math.random() * 2 - 1) * h;
+    const v = (Math.random() * 2 - 1) * h;
+    let pos: Vec3;
+    let normal: Vec3;
+    switch (face) {
+      case 0:
+        pos = [h, u, v]; normal = [1, 0, 0]; break;
+      case 1:
+        pos = [-h, u, v]; normal = [-1, 0, 0]; break;
+      case 2:
+        pos = [u, h, v]; normal = [0, 1, 0]; break;
+      case 3:
+        pos = [u, -h, v]; normal = [0, -1, 0]; break;
+      case 4:
+        pos = [u, v, h]; normal = [0, 0, 1]; break;
+      default:
+        pos = [u, v, -h]; normal = [0, 0, -1]; break;
+    }
+    return { pos, normal };
+  }
+  if (shape === 'cylinder') {
+    const r = params.cylRadius ?? 15;
+    const h = params.cylHalfHeight ?? 20;
+    const sideArea = 2 * Math.PI * r * (2 * h);
+    const capArea = Math.PI * r * r;
+    const totalArea = sideArea + 2 * capArea;
+    const pick = Math.random() * totalArea;
+    if (pick < sideArea) {
+      const theta = Math.random() * 2 * Math.PI;
+      const y = (Math.random() * 2 - 1) * h;
+      const x = r * Math.cos(theta);
+      const z = r * Math.sin(theta);
+      return { pos: [x, y, z], normal: normalize([x, 0, z]) };
+    }
+    const theta = Math.random() * 2 * Math.PI;
+    const rr = Math.sqrt(Math.random()) * r;
+    const x = rr * Math.cos(theta);
+    const z = rr * Math.sin(theta);
+    const top = pick < sideArea + capArea;
+    return { pos: [x, top ? h : -h, z], normal: [0, top ? 1 : -1, 0] };
+  }
+  if (shape === 'torus') {
+    const major = params.torusMajor ?? 20;
+    const tube = params.torusTube ?? 8;
+    const u = Math.random() * 2 * Math.PI;
+    const v = Math.random() * 2 * Math.PI;
+    const cx = (major + tube * Math.cos(v));
+    const x = cx * Math.cos(u);
+    const z = cx * Math.sin(u);
+    const y = tube * Math.sin(v);
+    const normal = normalize([Math.cos(u) * Math.cos(v), Math.sin(v), Math.sin(u) * Math.cos(v)]);
+    return { pos: [x, y, z], normal };
+  }
+  if (shape === 'capsule') {
+    const r = params.capRadius ?? 12;
+    const h = params.capHalfHeight ?? 15;
+    const cylArea = 2 * Math.PI * r * (2 * h);
+    const sphereArea = 4 * Math.PI * r * r;
+    const totalArea = cylArea + sphereArea;
+    const pick = Math.random() * totalArea;
+    if (pick < cylArea) {
+      const theta = Math.random() * 2 * Math.PI;
+      const y = (Math.random() * 2 - 1) * h;
+      const x = r * Math.cos(theta);
+      const z = r * Math.sin(theta);
+      return { pos: [x, y, z], normal: normalize([x, 0, z]) };
+    }
+    const u = Math.random();
+    const v = Math.random();
+    const theta = 2 * Math.PI * u;
+    const phi = Math.acos(2 * v - 1);
+    const sx = r * Math.sin(phi) * Math.cos(theta);
+    const sy = r * Math.cos(phi);
+    const sz = r * Math.sin(phi) * Math.sin(theta);
+    const top = Math.random() > 0.5;
+    const centerY = top ? h : -h;
+    const pos: Vec3 = [sx, sy + centerY, sz];
+    const normal = normalize([sx, sy, sz]);
+    return { pos, normal };
+  }
+  return { pos: [0, 0, 0], normal: [0, 1, 0] };
+}
+
+function buildFibonacciSphereSamples(radius: number, count: number): SurfaceHexSample[] {
+  const samples: SurfaceHexSample[] = [];
+  const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+  for (let i = 0; i < count; i++) {
+    const t = (i + 0.5) / count;
+    const y = 1 - 2 * t;
+    const ring = Math.sqrt(1 - y * y);
+    const theta = goldenAngle * i;
+    const x = Math.cos(theta) * ring;
+    const z = Math.sin(theta) * ring;
+    const pos: Vec3 = [x * radius, y * radius, z * radius];
+    samples.push({ pos, normal: normalize(pos) });
+  }
+  return samples;
+}
+
+function generatePoissonSamples(
+  sampler: () => SurfaceHexSample,
+  targetCount: number,
+  minDistance: number
+): SurfaceHexSample[] {
+  const samples: SurfaceHexSample[] = [];
+  let currentMin = minDistance;
+  let attempts = 0;
+  while (samples.length < targetCount && attempts < 6) {
+    const grid = new Map<string, SurfaceHexSample[]>();
+    for (const s of samples) {
+      const key = `${Math.floor(s.pos[0] / currentMin)},${Math.floor(s.pos[1] / currentMin)},${Math.floor(s.pos[2] / currentMin)}`;
+      const bucket = grid.get(key);
+      if (bucket) bucket.push(s);
+      else grid.set(key, [s]);
+    }
+    const batchCount = Math.max(targetCount * 3, 200);
+    for (let i = 0; i < batchCount && samples.length < targetCount; i++) {
+      const cand = sampler();
+      const cx = Math.floor(cand.pos[0] / currentMin);
+      const cy = Math.floor(cand.pos[1] / currentMin);
+      const cz = Math.floor(cand.pos[2] / currentMin);
+      let ok = true;
+      for (let dx = -1; dx <= 1 && ok; dx++) {
+        for (let dy = -1; dy <= 1 && ok; dy++) {
+          for (let dz = -1; dz <= 1 && ok; dz++) {
+            const key = `${cx + dx},${cy + dy},${cz + dz}`;
+            const bucket = grid.get(key);
+            if (!bucket) continue;
+            for (const other of bucket) {
+              if (length(sub(cand.pos, other.pos)) < currentMin) {
+                ok = false;
+                break;
+              }
+            }
+          }
+        }
+      }
+      if (ok) {
+        samples.push(cand);
+        const key = `${cx},${cy},${cz}`;
+        const bucket = grid.get(key);
+        if (bucket) bucket.push(cand);
+        else grid.set(key, [cand]);
+      }
+    }
+    if (samples.length < targetCount) {
+      currentMin *= 0.85;
+      attempts += 1;
+    }
+  }
+  return samples;
+}
+
+function relaxSurfaceSamples(
+  target: SurfaceSamplerTarget,
+  cellSize: number,
+  iterations: number,
+  strength: number
+): SurfaceHexSample[] {
+  const samples = target.samples;
+  if (samples.length === 0) return samples;
+  for (let it = 0; it < iterations; it++) {
+    const grid = new Map<string, SurfaceHexSample[]>();
+    for (const sample of samples) {
+      const key = `${Math.floor(sample.pos[0] / cellSize)},${Math.floor(sample.pos[1] / cellSize)},${Math.floor(sample.pos[2] / cellSize)}`;
+      const bucket = grid.get(key);
+      if (bucket) bucket.push(sample);
+      else grid.set(key, [sample]);
+    }
+
+    for (const sample of samples) {
+      const base = sample.pos;
+      const cx = Math.floor(base[0] / cellSize);
+      const cy = Math.floor(base[1] / cellSize);
+      const cz = Math.floor(base[2] / cellSize);
+      let push: Vec3 = [0, 0, 0];
+
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dz = -1; dz <= 1; dz++) {
+            const key = `${cx + dx},${cy + dy},${cz + dz}`;
+            const bucket = grid.get(key);
+            if (!bucket) continue;
+            for (const other of bucket) {
+              if (other === sample) continue;
+              const d = length(sub(base, other.pos));
+              if (d > 1e-6 && d < cellSize) {
+                const away = scale(sub(base, other.pos), (cellSize - d) / d);
+                push = add(push, away);
+              }
+            }
+          }
+        }
+      }
+
+      const n = normalize(sample.normal);
+      const normalComponent = scale(n, dot(push, n));
+      const tangentMove = scale(sub(push, normalComponent), strength);
+      sample.pos = add(sample.pos, tangentMove);
+    }
+
+    for (const sample of samples) {
+      const projected = target.project(sample.pos);
+      sample.pos = projected.pos;
+      sample.normal = projected.normal;
+    }
+  }
+  return samples;
+}
+
+
+function applyAdaptiveHoleScales(samples: SurfaceHexSample[], spacing: number): SurfaceHexSample[] {
+  if (samples.length === 0) return samples;
+  const cell = Math.max(0.1, spacing);
+  const grid = new Map<string, SurfaceHexSample[]>();
+  for (const sample of samples) {
+    const key = `${Math.floor(sample.pos[0] / cell)},${Math.floor(sample.pos[1] / cell)},${Math.floor(sample.pos[2] / cell)}`;
+    const bucket = grid.get(key);
+    if (bucket) bucket.push(sample);
+    else grid.set(key, [sample]);
+  }
+
+  for (const sample of samples) {
+    const base = sample.pos;
+    const cx = Math.floor(base[0] / cell);
+    const cy = Math.floor(base[1] / cell);
+    const cz = Math.floor(base[2] / cell);
+    let nearest = Infinity;
+
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dz = -1; dz <= 1; dz++) {
+          const key = `${cx + dx},${cy + dy},${cz + dz}`;
+          const bucket = grid.get(key);
+          if (!bucket) continue;
+          for (const other of bucket) {
+            if (other === sample) continue;
+            const d = length(sub(base, other.pos));
+            if (d > 1e-6 && d < nearest) nearest = d;
+          }
+        }
+      }
+    }
+
+    if (!Number.isFinite(nearest)) {
+      sample.holeScale = 1.0;
+      continue;
+    }
+    // 0.866 = 2*cos(30°)/2 packing-safe factor for neighboring hex inradii
+    const targetScale = (nearest / spacing) * 0.86;
+    sample.holeScale = Math.max(0.72, Math.min(1.0, targetScale));
+  }
+  return samples;
+}
 
 function estimateGenerationTimings(
   params: LatticeParams,
@@ -105,11 +482,15 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
       const params = msg.params!;
       const resolution = msg.resolution || 64;
       let sdf: (x: number, y: number, z: number) => number;
+      let objectSdf: ((x: number, y: number, z: number) => number) | null = null;
+      let surfaceHexSdf: ((x: number, y: number, z: number) => number) | null = null;
       let bounds: { min: Vec3; max: Vec3 };
       let sphereRadius: number | null = null;
       let bvh: MeshBVH | null = null;
+      let surfaceSamples: SurfaceHexSample[] = [];
 
       const shape = msg.sampleShape || (msg.sphereMode ? 'sphere' : null);
+      const isSurfacePolygon = params.variant === 'implicit_conformal' && (params.latticeType === 'hexagon' || params.latticeType === 'triangle');
 
       if (shape) {
         const pad = params.cellSize * 0.5;
@@ -119,37 +500,97 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
             sphereRadius = msg.sphereRadius || 25;
             const R = sphereRadius;
             bounds = { min: [-(R+pad), -(R+pad), -(R+pad)], max: [R+pad, R+pad, R+pad] };
-            sdf = buildSphereLattice(R, params);
+            objectSdf = (x, y, z) => Math.sqrt(x * x + y * y + z * z) - R;
+            sdf = isSurfacePolygon ? objectSdf : buildSphereLattice(R, params);
             break;
           }
           case 'cube': {
             const h = 15; // 30mm cube → halfSize 15
             bounds = { min: [-(h+pad), -(h+pad), -(h+pad)], max: [h+pad, h+pad, h+pad] };
-            sdf = buildCubeLattice(h, params);
+            objectSdf = (x, y, z) => {
+              const dx = Math.abs(x) - h;
+              const dy = Math.abs(y) - h;
+              const dz = Math.abs(z) - h;
+              const outside = Math.sqrt(Math.max(dx, 0) ** 2 + Math.max(dy, 0) ** 2 + Math.max(dz, 0) ** 2);
+              const inside = Math.min(Math.max(dx, dy, dz), 0);
+              return outside + inside;
+            };
+            sdf = isSurfacePolygon ? objectSdf : buildCubeLattice(h, params);
             break;
           }
           case 'cylinder': {
             const cr = 15, ch = 20; // R=15, H=40 → halfH=20
             bounds = { min: [-cr-pad, -ch-pad, -cr-pad], max: [cr+pad, ch+pad, cr+pad] };
-            sdf = buildCylinderLattice(cr, ch, params);
+            objectSdf = (x, y, z) => {
+              const dRadial = Math.sqrt(x * x + z * z) - cr;
+              const dAxial = Math.abs(y) - ch;
+              const outside = Math.sqrt(Math.max(dRadial, 0) ** 2 + Math.max(dAxial, 0) ** 2);
+              const inside = Math.min(Math.max(dRadial, dAxial), 0);
+              return outside + inside;
+            };
+            sdf = isSurfacePolygon ? objectSdf : buildCylinderLattice(cr, ch, params);
             break;
           }
           case 'torus': {
             const mR = 20, tR = 8; // major=20, tube=8
             const xy = mR + tR + pad;
             bounds = { min: [-xy, -(tR+pad), -xy], max: [xy, tR+pad, xy] };
-            sdf = buildTorusLattice(mR, tR, params);
+            objectSdf = (x, y, z) => {
+              const qx = Math.sqrt(x * x + z * z) - mR;
+              return Math.sqrt(qx * qx + y * y) - tR;
+            };
+            sdf = isSurfacePolygon ? objectSdf : buildTorusLattice(mR, tR, params);
             break;
           }
           case 'capsule': {
             const capR = 12, capHH = 15; // R=12, H=30 → halfH=15, total extent = 15+12
             const capExt = capHH + capR + pad;
             bounds = { min: [-(capR+pad), -capExt, -(capR+pad)], max: [capR+pad, capExt, capR+pad] };
-            sdf = buildCapsuleLattice(capR, capHH, params);
+            objectSdf = (x, y, z) => {
+              const cy = Math.max(-capHH, Math.min(capHH, y));
+              return Math.sqrt(x * x + (y - cy) * (y - cy) + z * z) - capR;
+            };
+            sdf = isSurfacePolygon ? objectSdf : buildCapsuleLattice(capR, capHH, params);
             break;
           }
         }
         postMessage({ type: 'progress', progress: 0.05, message: `${shape} SDF ready` } as WorkerResponse);
+        if (isSurfacePolygon) {
+          const areaEstimate = (() => {
+            switch (shape) {
+              case 'sphere': return 4 * Math.PI * (sphereRadius ?? 25) ** 2;
+              case 'cube': return 6 * (15 ** 2) * 4;
+              case 'cylinder': return 2 * Math.PI * 15 * (40) + 2 * Math.PI * 15 * 15;
+              case 'torus': return 4 * Math.PI * Math.PI * 20 * 8;
+              case 'capsule': return 2 * Math.PI * 12 * (30) + 4 * Math.PI * 12 * 12;
+              default: return 1000;
+            }
+          })();
+          const spacingArea = params.cellSize * params.cellSize * 0.55;
+          const sampleCount = Math.max(60, Math.round(areaEstimate / spacingArea));
+          if (shape === 'sphere') {
+            surfaceSamples = buildFibonacciSphereSamples(sphereRadius ?? 25, sampleCount);
+          } else {
+            const sampler = () => sampleSurfacePointForShape(shape, {
+              radius: sphereRadius ?? 25,
+              halfSize: 15,
+              cylRadius: 15,
+              cylHalfHeight: 20,
+              torusMajor: 20,
+              torusTube: 8,
+              capRadius: 12,
+              capHalfHeight: 15,
+            });
+            surfaceSamples = generatePoissonSamples(sampler, sampleCount, params.cellSize * 0.75);
+          }
+          const target: SurfaceSamplerTarget = {
+            samples: surfaceSamples,
+            project: (p) => projectToSurfaceSdf(objectSdf!, p, params.cellSize),
+          };
+          relaxSurfaceSamples(target, params.cellSize * 0.95, 10, 0.35);
+          applyAdaptiveHoleScales(surfaceSamples, params.cellSize);
+          surfaceHexSdf = buildSurfaceHexLattice(objectSdf!, params, surfaceSamples);
+        }
       } else {
         // Build BVH from mesh
         postMessage({ type: 'progress', progress: 0.02, message: 'Building BVH...' } as WorkerResponse);
@@ -174,7 +615,32 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
         postMessage({ type: 'progress', progress: 0.1, message: 'BVH built, computing SDF...' } as WorkerResponse);
 
         const keepOutSet = new Set(msg.keepOutTris || []);
+        objectSdf = (x, y, z) => bvh!.signedDistance([x, y, z]);
         sdf = buildCombinedSDF({ bvh, params, keepOutTris: keepOutSet });
+        if (isSurfacePolygon) {
+          const positions = msg.meshPositions!;
+          const normals = msg.meshNormals!;
+          const triCount = msg.meshTriCount!;
+          const meshSampler = buildMeshSampler(positions, normals, triCount, keepOutSet);
+          const totalArea = meshSampler?.totalArea ?? 0;
+          const spacingArea = params.cellSize * params.cellSize * 0.55;
+          const sampleCount = Math.max(60, Math.round(totalArea / spacingArea));
+          if (meshSampler) {
+            surfaceSamples = generatePoissonSamples(meshSampler.sample, sampleCount, params.cellSize * 0.75);
+          }
+          const target: SurfaceSamplerTarget = {
+            samples: surfaceSamples,
+            project: (p) => {
+              const res = bvh!.closestPoint(p);
+              const ni = res.triIndex * 3;
+              const normal = normalize([normals[ni], normals[ni + 1], normals[ni + 2]]);
+              return { pos: res.point, normal };
+            },
+          };
+          relaxSurfaceSamples(target, params.cellSize * 0.95, 10, 0.35);
+          applyAdaptiveHoleScales(surfaceSamples, params.cellSize);
+          surfaceHexSdf = buildSurfaceHexLattice(objectSdf!, params, surfaceSamples);
+        }
       }
 
       const initialEstimate = estimateGenerationTimings(params, resolution, !shape);
@@ -189,7 +655,11 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
       // Run marching cubes
       const marchingStart = performance.now();
       const preSecondsActual = (marchingStart - generationStart) / 1000;
-      const result = marchingCubes(sdf, bounds, resolution, 0, (frac) => {
+      const sdfToSample = surfaceHexSdf ?? sdf;
+      const sdfWithThinFilter = params.thinSectionFilter > 0
+        ? (x: number, y: number, z: number) => sdfToSample(x, y, z) + params.thinSectionFilter
+        : sdfToSample;
+      const result = marchingCubes(sdfWithThinFilter, bounds, resolution, 0, (frac) => {
         if (cancelled) throw new Error('Cancelled');
         const overallProgress = 0.1 + frac * 0.7;
         const elapsedSeconds = (performance.now() - generationStart) / 1000;
@@ -224,7 +694,7 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
         const outerDeviation = (shape === 'sphere' && sphereRadius !== null)
           ? checkSphereDeviation(result, sphereRadius, params.toleranceMm)
           : { passed: true, maxDeviation: 0 };
-        const minThickness = checkMinThickness(sdf, result, params.minFeatureSize, 200);
+        const minThickness = checkMinThickness(sdfWithThinFilter, result, params.minFeatureSize, 200);
         const manifold = checkManifold(result);
         const disconnected = checkDisconnected(result);
         const warnings: string[] = [];
@@ -243,7 +713,7 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
           warnings,
         };
       } else {
-        validation = runValidation(result, sdf, params, bvh, null);
+        validation = runValidation(result, sdfWithThinFilter, params, bvh, null);
       }
 
       postMessage({ type: 'progress', progress: 0.95, message: 'Done!' } as WorkerResponse);
