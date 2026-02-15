@@ -255,6 +255,7 @@ html, body, #root {
   border-color: #8b6a28;
   color: #f6e7bb;
   font-weight: 500;
+  text-decoration: none;
 }
 
 .btn-feedback:hover {
@@ -263,10 +264,10 @@ html, body, #root {
 }
 
 .btn-feedback-compact {
-  padding: 2px 8px;
-  font-size: 10px;
-  line-height: 1.2;
-  border-radius: 6px;
+  padding: 4px 11px;
+  font-size: 11px;
+  line-height: 1.25;
+  border-radius: 8px;
   letter-spacing: 0.1px;
 }
 
@@ -282,6 +283,7 @@ html, body, #root {
 
 .feedback-sidebar-cta .btn {
   margin: 0;
+  text-decoration: none;
 }
 
 .btn-small {
