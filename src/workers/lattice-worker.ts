@@ -58,6 +58,79 @@ type GenerationEstimate = {
   totalSeconds: number;
 };
 
+
+type SurfaceSampleWorkerResponse = {
+  positions: Float32Array;
+  normals: Float32Array;
+};
+
+type ShapeSampleWorkerMessage = {
+  mode: 'shape';
+  shape: SampleShape;
+  params: {
+    radius?: number;
+    halfSize?: number;
+    cylRadius?: number;
+    cylHalfHeight?: number;
+    torusMajor?: number;
+    torusTube?: number;
+    capRadius?: number;
+    capHalfHeight?: number;
+  };
+  targetCount: number;
+  minDistance: number;
+};
+
+type MeshSampleWorkerMessage = {
+  mode: 'mesh';
+  positions: Float32Array;
+  normals: Float32Array;
+  triCount: number;
+  keepOutTris: number[];
+  targetCount: number;
+  minDistance: number;
+};
+
+async function generatePoissonSamplesParallel(
+  msgFactory: (targetCount: number) => ShapeSampleWorkerMessage | MeshSampleWorkerMessage,
+  targetCount: number,
+  minDistance: number,
+  maxWorkers = Math.max(1, Math.min(4, (self.navigator?.hardwareConcurrency ?? 2) - 1))
+): Promise<SurfaceHexSample[]> {
+  const workerCount = Math.max(1, Math.min(maxWorkers, targetCount >= 240 ? 4 : 2));
+  if (workerCount <= 1) {
+    return [];
+  }
+
+  const perWorker = Math.ceil(targetCount / workerCount);
+  const jobs = Array.from({ length: workerCount }, async (_, i) => {
+    const count = Math.min(perWorker, Math.max(0, targetCount - i * perWorker));
+    if (count <= 0) return [] as SurfaceHexSample[];
+
+    const worker = new Worker(new URL('./surface-sample-worker.ts', import.meta.url), { type: 'module' });
+    const response = await new Promise<SurfaceSampleWorkerResponse>((resolve, reject) => {
+      worker.onmessage = (ev: MessageEvent<SurfaceSampleWorkerResponse>) => resolve(ev.data);
+      worker.onerror = (err) => reject(err);
+      const payload = msgFactory(count);
+      worker.postMessage(payload, payload.mode === 'mesh'
+        ? [payload.positions.buffer, payload.normals.buffer]
+        : []);
+    }).finally(() => worker.terminate());
+
+    const samples: SurfaceHexSample[] = [];
+    for (let j = 0; j < response.positions.length; j += 3) {
+      samples.push({
+        pos: [response.positions[j], response.positions[j + 1], response.positions[j + 2]],
+        normal: normalize([response.normals[j], response.normals[j + 1], response.normals[j + 2]]),
+      });
+    }
+    return samples;
+  });
+
+  const all = (await Promise.all(jobs)).flat();
+  // Trim to requested size if workers overshoot.
+  return all.slice(0, targetCount);
+}
 type SurfaceSamplerTarget = {
   samples: SurfaceHexSample[];
   project: (p: Vec3) => { pos: Vec3; normal: Vec3 };
@@ -466,7 +539,7 @@ function formatDuration(seconds: number): string {
   return `${hours.toFixed(1)}h`;
 }
 
-self.onmessage = (e: MessageEvent<WorkerMessage>) => {
+self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
   const msg = e.data;
 
   if (msg.type === 'cancel') {
@@ -571,7 +644,7 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
           if (shape === 'sphere') {
             surfaceSamples = buildFibonacciSphereSamples(sphereRadius ?? 25, sampleCount);
           } else {
-            const sampler = () => sampleSurfacePointForShape(shape, {
+            const samplerParams = {
               radius: sphereRadius ?? 25,
               halfSize: 15,
               cylRadius: 15,
@@ -580,8 +653,22 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
               torusTube: 8,
               capRadius: 12,
               capHalfHeight: 15,
-            });
-            surfaceSamples = generatePoissonSamples(sampler, sampleCount, params.cellSize * 0.75);
+            };
+            const fallbackSampler = () => sampleSurfacePointForShape(shape, samplerParams);
+            surfaceSamples = await generatePoissonSamplesParallel(
+              (count) => ({
+                mode: 'shape',
+                shape,
+                params: samplerParams,
+                targetCount: count,
+                minDistance: params.cellSize * 0.75,
+              }),
+              sampleCount,
+              params.cellSize * 0.75
+            );
+            if (surfaceSamples.length < Math.floor(sampleCount * 0.8)) {
+              surfaceSamples = generatePoissonSamples(fallbackSampler, sampleCount, params.cellSize * 0.75);
+            }
           }
           const target: SurfaceSamplerTarget = {
             samples: surfaceSamples,
@@ -626,7 +713,22 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
           const spacingArea = params.cellSize * params.cellSize * 0.55;
           const sampleCount = Math.max(60, Math.round(totalArea / spacingArea));
           if (meshSampler) {
-            surfaceSamples = generatePoissonSamples(meshSampler.sample, sampleCount, params.cellSize * 0.75);
+            surfaceSamples = await generatePoissonSamplesParallel(
+              (count) => ({
+                mode: 'mesh',
+                positions: positions.slice(),
+                normals: normals.slice(),
+                triCount,
+                keepOutTris: Array.from(keepOutSet),
+                targetCount: count,
+                minDistance: params.cellSize * 0.75,
+              }),
+              sampleCount,
+              params.cellSize * 0.75
+            );
+            if (surfaceSamples.length < Math.floor(sampleCount * 0.8)) {
+              surfaceSamples = generatePoissonSamples(meshSampler.sample, sampleCount, params.cellSize * 0.75);
+            }
           }
           const target: SurfaceSamplerTarget = {
             samples: surfaceSamples,
