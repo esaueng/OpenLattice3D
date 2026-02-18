@@ -26,6 +26,9 @@ const DEMO_TILE_ITEMS: Array<{ type: LatticeType; label: string }> = [
   { type: 'spinodal', label: 'Spinodal' },
 ];
 
+const DEMO_SPHERE_RADIUS_MM = 25;
+const DEMO_VIEW_TARGET_RADIUS = 8;
+
 type DemoTileState = {
   type: LatticeType;
   label: string;
@@ -190,7 +193,7 @@ function CrossSectionView({ result, clip }: { result: MarchingCubesResult; clip:
 
 
 
-function normalizeDemoResult(result: MarchingCubesResult, targetRadius = 8): MarchingCubesResult {
+function normalizeDemoResult(result: MarchingCubesResult, targetRadius = DEMO_VIEW_TARGET_RADIUS): MarchingCubesResult {
   const bounds = resultBounds(result);
   const center = bounds.getCenter(new THREE.Vector3());
   const size = bounds.getSize(new THREE.Vector3());
@@ -268,7 +271,7 @@ function DemoTileViewerWithMode({ tile, viewMode, clipPlane }: {
   viewMode: 'original' | 'lattice' | 'cross_section' | 'xray';
   clipPlane: ClipPlaneState;
 }) {
-  const placeholder = useMemo(() => generateSphereMesh(8, 20), []);
+  const placeholder = useMemo(() => generateSphereMesh(DEMO_VIEW_TARGET_RADIUS, 20), []);
   const placeholderGeom = useMemo(() => {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(placeholder.positions, 3));
@@ -305,9 +308,8 @@ function DemoTileViewerWithMode({ tile, viewMode, clipPlane }: {
   );
 }
 
-function DemoGridView({ params, sphereRadius, runId, viewMode, clipPlane }: {
+function DemoGridView({ params, runId, viewMode, clipPlane }: {
   params: LatticeParams;
-  sphereRadius: number;
   runId: number;
   viewMode: 'original' | 'lattice' | 'cross_section' | 'xray';
   clipPlane: ClipPlaneState;
@@ -339,7 +341,7 @@ function DemoGridView({ params, sphereRadius, runId, viewMode, clipPlane }: {
           params: localParams,
           sphereMode: true,
           sampleShape: 'sphere',
-          sphereRadius: Math.max(8, Math.min(11, sphereRadius * 0.4)),
+          sphereRadius: DEMO_SPHERE_RADIUS_MM,
           resolution: Math.max(38, Math.round(18 + params.exportResolution * 14)),
           keepOutTris: [],
         };
@@ -378,7 +380,7 @@ function DemoGridView({ params, sphereRadius, runId, viewMode, clipPlane }: {
       cancelled = true;
       for (const w of workers) w.terminate();
     };
-  }, [runId, params, sphereRadius]);
+  }, [runId, params]);
 
   return (
     <div className="demo-grid-view" aria-label="Demo lattice windows">
@@ -414,7 +416,6 @@ export function Viewer3D() {
       <div style={{ width: '100%', height: '100%', background: viewerBackground }}>
         <DemoGridView
           params={params}
-          sphereRadius={sphereRadius}
           runId={demoRunId}
           viewMode={viewMode}
           clipPlane={clipPlane}
