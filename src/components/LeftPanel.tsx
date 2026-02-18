@@ -186,6 +186,7 @@ export function LeftPanel() {
   }, [store]);
 
   const hasModel = store.originalMesh || store.sphereMode;
+  const hasModelOrDemo = hasModel || store.demoModeActive;
 
   return (
     <div className="panel left-panel">
@@ -225,27 +226,24 @@ export function LeftPanel() {
         <div className="row" style={{ marginTop: '8px' }}>
           <label>Sample Part:</label>
           <select
-            title="Load a built-in sample shape for quick testing."
-            value={store.sampleShape || ''}
-            onChange={(e) => { if (e.target.value) handleSampleShape(e.target.value as SampleShape); }}
+            title="Load a built-in sample shape, or start the 12-window demo grid."
+            value={store.demoModeActive ? '__demo_all__' : (store.sampleShape || '')}
+            onChange={(e) => {
+              if (e.target.value === '__demo_all__') {
+                startDemoGrid();
+                return;
+              }
+              if (e.target.value) handleSampleShape(e.target.value as SampleShape);
+            }}
           >
             <option value="">-- Choose --</option>
+            <option value="__demo_all__">Demo: All 12 Lattice Types</option>
             {(Object.keys(SAMPLE_SHAPE_INFO) as SampleShape[]).map((k) => (
               <option key={k} value={k}>{SAMPLE_SHAPE_INFO[k].label}</option>
             ))}
           </select>
         </div>
 
-        <div className="row" style={{ marginTop: '8px' }}>
-          <button
-            className="btn btn-accent btn-small"
-            title="Generate a demo grid that tiles every lattice type on procedural spheres."
-            onClick={startDemoGrid}
-            disabled={store.generating || store.demoModeActive}
-          >
-            Demo All Lattice Types
-          </button>
-        </div>
 
         {store.meshInfo && (
           <div className="info-block">
@@ -268,7 +266,7 @@ export function LeftPanel() {
       </section>
 
       {/* Lattice Parameters */}
-      {hasModel && (
+      {hasModelOrDemo && (
         <section className="panel-section">
           <h3>Lattice Parameters</h3>
 
