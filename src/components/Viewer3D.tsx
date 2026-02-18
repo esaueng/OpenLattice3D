@@ -239,7 +239,11 @@ function AutoFit() {
   return null;
 }
 
-function DemoTileViewer({ tile }: { tile: DemoTileState }) {
+function DemoTileViewerWithMode({ tile, viewMode, clipPlane }: {
+  tile: DemoTileState;
+  viewMode: 'original' | 'lattice' | 'cross_section' | 'xray';
+  clipPlane: ClipPlaneState;
+}) {
   const placeholder = useMemo(() => generateSphereMesh(8, 20), []);
   const placeholderGeom = useMemo(() => {
     const g = new THREE.BufferGeometry();
@@ -248,20 +252,27 @@ function DemoTileViewer({ tile }: { tile: DemoTileState }) {
     return g;
   }, [placeholder.positions]);
 
+  const showPlaceholder = viewMode === 'original' || !tile.result;
+  const tileResult = tile.result;
+
   return (
     <div className="demo-window">
       <div className="demo-window-label">{tile.label}</div>
-      <Canvas camera={{ fov: 52, near: 0.1, far: 10000 }}>
+      <Canvas camera={{ fov: 58, near: 0.1, far: 10000, position: [22, 16, 22] }} gl={{ localClippingEnabled: true }}>
         <ambientLight intensity={0.5} />
         <directionalLight position={[40, 40, 40]} intensity={0.8} />
-        {tile.result ? (
-          <ResultMeshView result={tile.result} />
-        ) : (
+        {showPlaceholder ? (
           <mesh geometry={placeholderGeom}>
             <meshPhongMaterial color="#6d7ea5" transparent opacity={0.45} side={THREE.DoubleSide} />
           </mesh>
+        ) : viewMode === 'cross_section' ? (
+          <CrossSectionView result={tileResult as MarchingCubesResult} clip={clipPlane} />
+        ) : viewMode === 'xray' ? (
+          <XRayView result={tileResult as MarchingCubesResult} />
+        ) : (
+          <ResultMeshView result={tileResult as MarchingCubesResult} />
         )}
-        <OrbitControls makeDefault />
+        <OrbitControls makeDefault target={[0, 0, 0]} />
       </Canvas>
       {tile.status !== 'done' && (
         <div className="demo-window-status">{tile.status === 'error' ? (tile.error ?? 'Error') : 'Generating...'}</div>
@@ -270,11 +281,12 @@ function DemoTileViewer({ tile }: { tile: DemoTileState }) {
   );
 }
 
-function DemoGridView({ params, sphereRadius, runId, onComplete }: {
+function DemoGridView({ params, sphereRadius, runId, viewMode, clipPlane }: {
   params: LatticeParams;
   sphereRadius: number;
   runId: number;
-  onComplete: () => void;
+  viewMode: 'original' | 'lattice' | 'cross_section' | 'xray';
+  clipPlane: ClipPlaneState;
 }) {
   const [tiles, setTiles] = useState<DemoTileState[]>(() => DEMO_TILE_ITEMS.map((item) => ({ ...item, status: 'pending', result: null })));
 
@@ -334,7 +346,6 @@ function DemoGridView({ params, sphereRadius, runId, onComplete }: {
         worker.postMessage(msg);
       })));
 
-      if (!cancelled) onComplete();
     };
 
     void run();
@@ -343,11 +354,18 @@ function DemoGridView({ params, sphereRadius, runId, onComplete }: {
       cancelled = true;
       for (const w of workers) w.terminate();
     };
-  }, [runId, params, sphereRadius, onComplete]);
+  }, [runId, params, sphereRadius]);
 
   return (
     <div className="demo-grid-view" aria-label="Demo lattice windows">
-      {tiles.map((tile) => <DemoTileViewer key={tile.type} tile={tile} />)}
+      {tiles.map((tile) => (
+        <DemoTileViewerWithMode
+          key={tile.type}
+          tile={tile}
+          viewMode={viewMode}
+          clipPlane={clipPlane}
+        />
+      ))}
     </div>
   );
 }
@@ -357,7 +375,7 @@ export function Viewer3D() {
     originalMesh, sphereMode, sphereRadius, sampleShape, viewMode, clipPlane,
     keepOutTris, keepInTris, selectionMode, resultMesh,
     toggleKeepOut, toggleKeepIn, viewerBackground, demoModeActive,
-    demoRunId, params, setDemoModeActive,
+    demoRunId, params,
   } = useStore();
 
   const handleFaceClick = useCallback((triIdx: number) => {
@@ -374,10 +392,8 @@ export function Viewer3D() {
           params={params}
           sphereRadius={sphereRadius}
           runId={demoRunId}
-          onComplete={() => {
-            // keep demo mode active so users can keep manipulating all 12 viewers independently
-            setDemoModeActive(true);
-          }}
+          viewMode={viewMode}
+          clipPlane={clipPlane}
         />
       </div>
     );
@@ -414,7 +430,7 @@ export function Viewer3D() {
         {viewMode === 'cross_section' && resultMesh && <CrossSectionView result={resultMesh} clip={clipPlane} />}
         {viewMode === 'xray' && resultMesh && <XRayView result={resultMesh} />}
 
-        <OrbitControls makeDefault />
+        <OrbitControls makeDefault target={[0, 0, 0]} />
         <GizmoHelper alignment="bottom-right" margin={[60, 60]}>
           <GizmoViewport labelColor="white" axisHeadScale={1} />
         </GizmoHelper>
