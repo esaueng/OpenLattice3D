@@ -107,6 +107,7 @@ export function LeftPanel() {
     store.addLog(demoMode ? 'Starting demo lattice grid generation...' : 'Starting lattice generation...');
     // Clear previous result without changing viewMode — view is preserved for regeneration
     store.setValidation(null);
+    store.setDemoModeActive(demoMode);
 
     // Create worker
     if (workerRef.current) {
@@ -152,6 +153,7 @@ export function LeftPanel() {
         store.setValidation(resp.validation || null);
         store.setGenerating(false);
         store.setProgress(1, 'Complete');
+        store.setDemoModeActive(demoMode);
         store.addLog(demoMode
           ? `Demo grid complete: ${resp.triCount} triangles`
           : `Generation complete: ${resp.triCount} triangles`);
@@ -161,6 +163,7 @@ export function LeftPanel() {
       } else if (resp.type === 'error') {
         store.addLog(`Error: ${resp.message}`, 'error');
         store.setGenerating(false);
+        store.setDemoModeActive(false);
         worker.terminate();
       }
     };
@@ -174,6 +177,7 @@ export function LeftPanel() {
       workerRef.current = null;
     }
     store.setGenerating(false);
+    store.setDemoModeActive(false);
     store.setProgress(0, 'Cancelled');
     store.addLog('Generation cancelled', 'warn');
   }, [store]);
