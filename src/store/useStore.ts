@@ -86,6 +86,7 @@ interface AppState {
   clipPlane: ClipPlaneState;
   viewerBackground: string;
   demoModeActive: boolean;
+  demoRunId: number;
 
   // Logs
   logs: LogEntry[];
@@ -112,6 +113,7 @@ interface AppState {
   setClipPlane: (partial: Partial<ClipPlaneState>) => void;
   setViewerBackground: (color: string) => void;
   setDemoModeActive: (active: boolean) => void;
+  startDemoRun: () => void;
   importParams: (imported: Partial<LatticeParams>) => void;
   addLog: (message: string, level?: 'info' | 'warn' | 'error') => void;
   clearLogs: () => void;
@@ -148,6 +150,7 @@ export const useStore = create<AppState>((set) => ({
   clipPlane: persisted?.clipPlane ?? { axis: 'y', position: 0.5, flipped: false },
   viewerBackground: persisted?.viewerBackground ?? '#000000',
   demoModeActive: false,
+  demoRunId: 0,
   logs: [],
 
   setOriginalMesh: (mesh, info, fileName) => set({
@@ -284,6 +287,14 @@ export const useStore = create<AppState>((set) => ({
 
   setDemoModeActive: (active) => set({ demoModeActive: active }),
 
+  startDemoRun: () => set((s) => ({
+    demoModeActive: true,
+    demoRunId: s.demoRunId + 1,
+    resultMesh: null,
+    validation: null,
+    viewMode: 'lattice',
+  })),
+
   addLog: (message, level = 'info') => set((s) => ({
     logs: [...s.logs.slice(-200), { time: Date.now(), message, level }],
   })),
@@ -319,6 +330,7 @@ export const useStore = create<AppState>((set) => ({
       viewerBackground: '#000000',
       logs: [],
       demoModeActive: false,
+      demoRunId: 0,
     });
   },
 }));
