@@ -665,9 +665,19 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         ];
         const cols = 4;
         const rows = Math.ceil(demoTypes.length / cols);
-        const spacing = Math.max(28, params.cellSize * 3.6);
-        const demoRadius = Math.max(10, Math.min(18, (msg.sphereRadius || 25) * 0.6));
+        const spacing = Math.max(20, params.cellSize * 2.6);
+        const demoRadius = Math.max(7, Math.min(10, (msg.sphereRadius || 25) * 0.35));
+        const windowHalf = Math.max(demoRadius + 1.8, spacing * 0.42);
         const baseParams: LatticeParams = { ...params, variant: 'shell_core', surfaceOnly: false, noShell: false };
+
+        const boxSdf = (x: number, y: number, z: number, hx: number, hy: number, hz: number) => {
+          const dx = Math.abs(x) - hx;
+          const dy = Math.abs(y) - hy;
+          const dz = Math.abs(z) - hz;
+          const outside = Math.sqrt(Math.max(dx, 0) ** 2 + Math.max(dy, 0) ** 2 + Math.max(dz, 0) ** 2);
+          const inside = Math.min(Math.max(dx, dy, dz), 0);
+          return outside + inside;
+        };
 
         const cells = demoTypes.map((latticeType, index) => {
           const col = index % cols;
@@ -675,17 +685,29 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
           const cx = (col - (cols - 1) / 2) * spacing;
           const cz = (row - (rows - 1) / 2) * spacing;
           const localParams: LatticeParams = { ...baseParams, latticeType };
-          return { cx, cz, sdf: buildSphereLattice(demoRadius, localParams) };
+          const sphereSdf = buildSphereLattice(demoRadius, localParams);
+          return {
+            cx,
+            cz,
+            sdf: (x: number, y: number, z: number) => {
+              const localX = x - cx;
+              const localZ = z - cz;
+              return Math.max(
+                sphereSdf(localX, y, localZ),
+                boxSdf(localX, y, localZ, windowHalf, demoRadius + 2.2, windowHalf)
+              );
+            },
+          };
         });
 
-        const extentX = ((cols - 1) * spacing) * 0.5 + demoRadius + pad;
-        const extentZ = ((rows - 1) * spacing) * 0.5 + demoRadius + pad;
-        const extentY = demoRadius + pad;
+        const extentX = ((cols - 1) * spacing) * 0.5 + windowHalf + pad;
+        const extentZ = ((rows - 1) * spacing) * 0.5 + windowHalf + pad;
+        const extentY = demoRadius + 2.5 + pad;
         bounds = { min: [-extentX, -extentY, -extentZ], max: [extentX, extentY, extentZ] };
 
         sdf = (x, y, z) => {
           let d = Infinity;
-          for (const c of cells) d = Math.min(d, c.sdf(x - c.cx, y, z - c.cz));
+          for (const c of cells) d = Math.min(d, c.sdf(x, y, z));
           return d;
         };
 
