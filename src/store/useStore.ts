@@ -163,7 +163,6 @@ export const useStore = create<AppState>((set) => ({
     validation: null,
     keepOutTris: new Set(),
     keepInTris: new Set(),
-    demoModeActive: false,
   }),
 
   setMeshRepaired: (repaired) => set((s) => ({
@@ -191,7 +190,6 @@ export const useStore = create<AppState>((set) => ({
       strutDiameter: 1.0,
       processPreset: 'SLS_MJF',
     },
-    demoModeActive: false,
   }),
 
   setSphereMode: (radius) => set({
@@ -214,7 +212,6 @@ export const useStore = create<AppState>((set) => ({
       strutDiameter: 1.0,
       processPreset: 'SLS_MJF',
     },
-    demoModeActive: false,
   }),
 
   setSelectionMode: (mode) => set({ selectionMode: mode }),

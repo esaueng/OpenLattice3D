@@ -172,10 +172,10 @@ export function LeftPanel() {
     if (store.generating) return;
     if (enabled) {
       store.startDemoRun();
-      store.addLog('Started demo grid: 12 separate lattice viewers');
+      store.addLog('Started multiview: 12 separate lattice viewers');
     } else {
       store.setDemoModeActive(false);
-      store.addLog('Demo grid hidden');
+      store.addLog('Multiview hidden');
     }
   }, [store]);
 
@@ -264,17 +264,17 @@ export function LeftPanel() {
       </section>
 
       <section className="panel-section">
-        <h3>Demo View</h3>
+        <h3>Multiview</h3>
         <div className="row checkbox-row">
           <label>
             <input
               type="checkbox"
-              title="Show all 12 lattice viewers in a tiled demo grid."
+              title="Show all 12 lattice viewers in a tiled multiview layout for the current model."
               checked={store.demoModeActive}
               onChange={(e) => toggleDemoGrid(e.target.checked)}
               disabled={store.generating}
             />
-            Show all 12 demo windows
+            Show all 12 windows
           </label>
         </div>
       </section>
