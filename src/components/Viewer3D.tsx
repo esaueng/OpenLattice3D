@@ -321,89 +321,115 @@ function DemoGridView({ params, runId, viewMode, clipPlane, selectedLatticeType,
   keepOutTris: Set<number>;
 }) {
   const [tiles, setTiles] = useState<DemoTileState[]>(() => DEMO_TILE_ITEMS.map((item) => ({ ...item, status: 'pending', result: null })));
+  const workersRef = useRef<Map<LatticeType, Worker>>(new Map());
+  const tokensRef = useRef<Partial<Record<LatticeType, number>>>({});
+  const hasCompletedInitialFullRun = useRef(false);
+  const latestParamsRef = useRef(params);
 
   useEffect(() => {
-    let cancelled = false;
-    const workers: Worker[] = [];
+    latestParamsRef.current = params;
+  }, [params]);
+
+  const stopTileWorker = useCallback((type: LatticeType) => {
+    const existing = workersRef.current.get(type);
+    if (existing) {
+      existing.terminate();
+      workersRef.current.delete(type);
+    }
+  }, []);
+
+  const generateTiles = useCallback((types: LatticeType[], baseParams: LatticeParams) => {
+    for (const type of types) {
+      stopTileWorker(type);
+      const token = (tokensRef.current[type] ?? 0) + 1;
+      tokensRef.current[type] = token;
+
+      const worker = new Worker(new URL('../workers/lattice-worker.ts', import.meta.url), { type: 'module' });
+      workersRef.current.set(type, worker);
+
+      const localParams: LatticeParams = {
+        ...baseParams,
+        latticeType: type,
+        variant: (type === 'hexagon' || type === 'triangle') ? 'implicit_conformal' : 'shell_core',
+        surfaceOnly: (type === 'hexagon' || type === 'triangle'),
+        noShell: false,
+      };
+
+      const msg: WorkerMessage = {
+        type: 'generate',
+        params: localParams,
+        sphereMode,
+        sampleShape,
+        sphereRadius,
+        resolution: Math.round(24 + baseParams.exportResolution * 24),
+        keepOutTris: Array.from(keepOutTris),
+      };
+
+      if (sourceMesh) {
+        msg.meshPositions = sourceMesh.positions;
+        msg.meshNormals = sourceMesh.normals;
+        msg.meshTriCount = sourceMesh.triCount;
+      }
+
+      setTiles((prev) => prev.map((t) => (t.type === type ? { ...t, status: 'running', error: undefined } : t)));
+
+      worker.onmessage = (ev: MessageEvent<WorkerResponse>) => {
+        if (tokensRef.current[type] !== token) return;
+        const resp = ev.data;
+        if (resp.type === 'result') {
+          setTiles((prev) => prev.map((t) => t.type === type ? {
+            ...t,
+            status: 'done',
+            result: normalizeDemoResult({ positions: resp.positions!, normals: resp.normals!, triCount: resp.triCount! }),
+            error: undefined,
+          } : t));
+          worker.terminate();
+          workersRef.current.delete(type);
+        } else if (resp.type === 'error') {
+          setTiles((prev) => prev.map((t) => t.type === type ? { ...t, status: 'error', error: resp.message } : t));
+          worker.terminate();
+          workersRef.current.delete(type);
+        }
+      };
+
+      worker.postMessage(msg);
+    }
+  }, [keepOutTris, sampleShape, sourceMesh, sphereMode, sphereRadius, stopTileWorker]);
+
+  useEffect(() => {
+    const allTypes = DEMO_TILE_ITEMS.map((item) => item.type);
 
     if (!sourceMesh && !sphereMode) {
+      for (const type of allTypes) stopTileWorker(type);
       setTiles(DEMO_TILE_ITEMS.map((item) => ({
         ...item,
         status: 'error',
         result: null,
         error: 'Import or select a sample model',
       })));
-      return () => { /* no-op */ };
+      hasCompletedInitialFullRun.current = false;
+      return;
     }
 
-    setTiles(DEMO_TILE_ITEMS.map((item) => ({ ...item, status: 'pending', result: null })));
-
-    const run = async () => {
-      await Promise.all(DEMO_TILE_ITEMS.map((item, index) => new Promise<void>((resolve) => {
-        if (cancelled) { resolve(); return; }
-
-        const worker = new Worker(new URL('../workers/lattice-worker.ts', import.meta.url), { type: 'module' });
-        workers.push(worker);
-
-        const localParams: LatticeParams = {
-          ...params,
-          latticeType: item.type,
-          variant: (item.type === 'hexagon' || item.type === 'triangle') ? 'implicit_conformal' : 'shell_core',
-          surfaceOnly: (item.type === 'hexagon' || item.type === 'triangle'),
-          noShell: false,
-        };
-
-        const msg: WorkerMessage = {
-          type: 'generate',
-          params: localParams,
-          sphereMode,
-          sampleShape,
-          sphereRadius,
-          resolution: Math.round(24 + params.exportResolution * 24),
-          keepOutTris: Array.from(keepOutTris),
-        };
-
-        if (sourceMesh) {
-          msg.meshPositions = sourceMesh.positions;
-          msg.meshNormals = sourceMesh.normals;
-          msg.meshTriCount = sourceMesh.triCount;
-        }
-
-        setTiles((prev) => prev.map((t, i) => (i === index ? { ...t, status: 'running' } : t)));
-
-        worker.onmessage = (ev: MessageEvent<WorkerResponse>) => {
-          const resp = ev.data;
-          if (resp.type === 'result') {
-            if (!cancelled) {
-              setTiles((prev) => prev.map((t, i) => i === index ? {
-                ...t,
-                status: 'done',
-                result: normalizeDemoResult({ positions: resp.positions!, normals: resp.normals!, triCount: resp.triCount! }),
-              } : t));
-            }
-            worker.terminate();
-            resolve();
-          } else if (resp.type === 'error') {
-            if (!cancelled) {
-              setTiles((prev) => prev.map((t, i) => i === index ? { ...t, status: 'error', error: resp.message } : t));
-            }
-            worker.terminate();
-            resolve();
-          }
-        };
-
-        worker.postMessage(msg);
-      })));
-
-    };
-
-    void run();
+    setTiles(DEMO_TILE_ITEMS.map((item) => ({ ...item, status: 'pending', result: null, error: undefined })));
+    generateTiles(allTypes, latestParamsRef.current);
+    hasCompletedInitialFullRun.current = true;
 
     return () => {
-      cancelled = true;
-      for (const w of workers) w.terminate();
+      for (const type of allTypes) stopTileWorker(type);
     };
-  }, [runId, params, sourceMesh, sphereMode, sphereRadius, sampleShape, keepOutTris]);
+  }, [runId, sourceMesh, sphereMode, sphereRadius, sampleShape, keepOutTris, stopTileWorker, generateTiles]);
+
+  useEffect(() => {
+    if (!hasCompletedInitialFullRun.current) return;
+    if (!sourceMesh && !sphereMode) return;
+    generateTiles([selectedLatticeType], params);
+  }, [params, selectedLatticeType, sourceMesh, sphereMode, generateTiles]);
+
+  useEffect(() => () => {
+    for (const worker of workersRef.current.values()) worker.terminate();
+    workersRef.current.clear();
+  }, []);
 
   return (
     <div className="demo-grid-view" aria-label="Demo lattice windows">
