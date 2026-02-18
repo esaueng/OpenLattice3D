@@ -98,16 +98,16 @@ export function LeftPanel() {
     store.addLog('Project reset to defaults');
   }, [store]);
 
-  const startGeneration = useCallback((demoMode = false) => {
+  const startGeneration = useCallback(() => {
     if (store.generating) return;
-    if (!demoMode && !store.originalMesh && !store.sphereMode) return;
+    if (!store.originalMesh && !store.sphereMode) return;
     requestNotificationPermissionOnce();
     store.setGenerating(true);
     store.setProgress(0, 'Starting...');
-    store.addLog(demoMode ? 'Starting demo lattice grid generation...' : 'Starting lattice generation...');
+    store.addLog('Starting lattice generation...');
     // Clear previous result without changing viewMode — view is preserved for regeneration
     store.setValidation(null);
-    store.setDemoModeActive(demoMode);
+    store.setDemoModeActive(false);
 
     // Create worker
     if (workerRef.current) {
@@ -125,10 +125,9 @@ export function LeftPanel() {
     const msg: WorkerMessage = {
       type: 'generate',
       params: store.params,
-      sphereMode: demoMode ? true : store.sphereMode,
+      sphereMode: store.sphereMode,
       sphereRadius: store.sphereRadius,
-      sampleShape: demoMode ? 'sphere' : store.sampleShape,
-      demoMode,
+      sampleShape: store.sampleShape,
       resolution,
       keepOutTris: Array.from(store.keepOutTris),
     };
@@ -153,10 +152,8 @@ export function LeftPanel() {
         store.setValidation(resp.validation || null);
         store.setGenerating(false);
         store.setProgress(1, 'Complete');
-        store.setDemoModeActive(demoMode);
-        store.addLog(demoMode
-          ? `Demo grid complete: ${resp.triCount} triangles`
-          : `Generation complete: ${resp.triCount} triangles`);
+        store.setDemoModeActive(false);
+        store.addLog(`Generation complete: ${resp.triCount} triangles`);
         const elapsedMs = performance.now() - generationStartedAt;
         void notifyGenerationComplete(resp.triCount || 0, elapsedMs);
         worker.terminate();
@@ -170,6 +167,12 @@ export function LeftPanel() {
 
     worker.postMessage(msg);
   }, [notifyGenerationComplete, requestNotificationPermissionOnce, store]);
+
+  const startDemoGrid = useCallback(() => {
+    if (store.generating) return;
+    store.startDemoRun();
+    store.addLog('Started demo grid: 12 separate lattice viewers');
+  }, [store]);
 
   const cancelGeneration = useCallback(() => {
     if (workerRef.current) {
@@ -237,8 +240,8 @@ export function LeftPanel() {
           <button
             className="btn btn-accent btn-small"
             title="Generate a demo grid that tiles every lattice type on procedural spheres."
-            onClick={() => startGeneration(true)}
-            disabled={store.generating}
+            onClick={startDemoGrid}
+            disabled={store.generating || store.demoModeActive}
           >
             Demo All Lattice Types
           </button>
@@ -449,7 +452,7 @@ export function LeftPanel() {
         <section className="panel-section panel-section-sticky">
           <h3>Generate</h3>
           {!store.generating ? (
-            <button className="btn btn-primary btn-large" title="Start generating the lattice with the current settings." onClick={() => startGeneration(false)}>
+            <button className="btn btn-primary btn-large" title="Start generating the lattice with the current settings." onClick={startGeneration}>
               Generate Lattice
             </button>
           ) : (
