@@ -188,6 +188,30 @@ function CrossSectionView({ result, clip }: { result: MarchingCubesResult; clip:
   );
 }
 
+
+
+function normalizeDemoResult(result: MarchingCubesResult, targetRadius = 8): MarchingCubesResult {
+  const bounds = resultBounds(result);
+  const center = bounds.getCenter(new THREE.Vector3());
+  const size = bounds.getSize(new THREE.Vector3());
+  const halfMaxExtent = Math.max(size.x, size.y, size.z) * 0.5;
+  if (!Number.isFinite(halfMaxExtent) || halfMaxExtent <= 1e-6) return result;
+
+  const scale = targetRadius / halfMaxExtent;
+  const src = result.positions;
+  const normalized = new Float32Array(src.length);
+  for (let i = 0; i < src.length; i += 3) {
+    normalized[i] = (src[i] - center.x) * scale;
+    normalized[i + 1] = (src[i + 1] - center.y) * scale;
+    normalized[i + 2] = (src[i + 2] - center.z) * scale;
+  }
+
+  return {
+    positions: normalized,
+    normals: result.normals,
+    triCount: result.triCount,
+  };
+}
 function XRayView({ result }: { result: MarchingCubesResult }) {
   const geom = useMemo(() => {
     const g = new THREE.BufferGeometry();
@@ -329,7 +353,7 @@ function DemoGridView({ params, sphereRadius, runId, viewMode, clipPlane }: {
               setTiles((prev) => prev.map((t, i) => i === index ? {
                 ...t,
                 status: 'done',
-                result: { positions: resp.positions!, normals: resp.normals!, triCount: resp.triCount! },
+                result: normalizeDemoResult({ positions: resp.positions!, normals: resp.normals!, triCount: resp.triCount! }),
               } : t));
             }
             worker.terminate();
