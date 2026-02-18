@@ -205,6 +205,96 @@ function buildMeshSampler(
   };
 }
 
+
+function removeDisconnectedFragments(
+  mesh: { positions: Float32Array; normals: Float32Array; triCount: number },
+  minComponentRatio = 0.003
+): { positions: Float32Array; normals: Float32Array; triCount: number; removedTriangles: number } {
+  const { positions, normals, triCount } = mesh;
+  if (triCount <= 0) return { positions, normals, triCount, removedTriangles: 0 };
+
+  const q = (v: number) => Math.round(v * 1e3);
+  const edgeToTris = new Map<string, number[]>();
+  for (let i = 0; i < triCount; i++) {
+    const verts: string[] = [];
+    for (let v = 0; v < 3; v++) {
+      const o = i * 9 + v * 3;
+      verts.push(`${q(positions[o])},${q(positions[o + 1])},${q(positions[o + 2])}`);
+    }
+    for (let e = 0; e < 3; e++) {
+      const a = verts[e];
+      const b = verts[(e + 1) % 3];
+      const key = a < b ? `${a}-${b}` : `${b}-${a}`;
+      const arr = edgeToTris.get(key);
+      if (arr) arr.push(i);
+      else edgeToTris.set(key, [i]);
+    }
+  }
+
+  const adj: number[][] = Array.from({ length: triCount }, () => []);
+  for (const tris of edgeToTris.values()) {
+    for (let i = 0; i < tris.length; i++) {
+      for (let j = i + 1; j < tris.length; j++) {
+        adj[tris[i]].push(tris[j]);
+        adj[tris[j]].push(tris[i]);
+      }
+    }
+  }
+
+  const visited = new Uint8Array(triCount);
+  const components: number[][] = [];
+  for (let i = 0; i < triCount; i++) {
+    if (visited[i]) continue;
+    const comp: number[] = [];
+    const stack = [i];
+    while (stack.length) {
+      const t = stack.pop()!;
+      if (visited[t]) continue;
+      visited[t] = 1;
+      comp.push(t);
+      for (const nb of adj[t]) {
+        if (!visited[nb]) stack.push(nb);
+      }
+    }
+    components.push(comp);
+  }
+
+  if (components.length <= 1) {
+    return { positions, normals, triCount, removedTriangles: 0 };
+  }
+
+  components.sort((a, b) => b.length - a.length);
+  const largest = components[0].length;
+  const keep = new Uint8Array(triCount);
+  for (const comp of components) {
+    if (comp.length === largest || comp.length >= largest * minComponentRatio) {
+      for (const idx of comp) keep[idx] = 1;
+    }
+  }
+
+  let kept = 0;
+  for (let i = 0; i < triCount; i++) if (keep[i]) kept++;
+  if (kept === triCount || kept === 0) {
+    return { positions, normals, triCount, removedTriangles: 0 };
+  }
+
+  const outPos = new Float32Array(kept * 9);
+  const outNrm = new Float32Array(kept * 3);
+  let outTri = 0;
+  for (let i = 0; i < triCount; i++) {
+    if (!keep[i]) continue;
+    outPos.set(positions.subarray(i * 9, i * 9 + 9), outTri * 9);
+    outNrm.set(normals.subarray(i * 3, i * 3 + 3), outTri * 3);
+    outTri++;
+  }
+
+  return {
+    positions: outPos,
+    normals: outNrm,
+    triCount: outTri,
+    removedTriangles: triCount - outTri,
+  };
+}
 function estimateNormal(
   sdf: (x: number, y: number, z: number) => number,
   p: Vec3,
@@ -761,7 +851,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
       const sdfWithThinFilter = params.thinSectionFilter > 0
         ? (x: number, y: number, z: number) => sdfToSample(x, y, z) + params.thinSectionFilter
         : sdfToSample;
-      const result = marchingCubes(sdfWithThinFilter, bounds, resolution, 0, (frac) => {
+      const rawResult = marchingCubes(sdfWithThinFilter, bounds, resolution, 0, (frac) => {
         if (cancelled) throw new Error('Cancelled');
         const overallProgress = 0.1 + frac * 0.7;
         const elapsedSeconds = (performance.now() - generationStart) / 1000;
@@ -781,6 +871,15 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
           message: `Marching cubes: ${Math.round(frac * 100)}% (~${estimateLabel} remaining)`
         } as WorkerResponse);
       });
+
+      const result = removeDisconnectedFragments(rawResult, 0.004);
+      if (result.removedTriangles > 0) {
+        postMessage({
+          type: 'progress',
+          progress: 0.84,
+          message: `Removed ${result.removedTriangles.toLocaleString()} disconnected fragment triangles`
+        } as WorkerResponse);
+      }
 
       const remainingValidation = Math.max(0, initialEstimate.validationSeconds);
       postMessage({
