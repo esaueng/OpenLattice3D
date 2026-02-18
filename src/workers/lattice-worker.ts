@@ -22,6 +22,7 @@ export interface WorkerMessage {
   sampleShape?: SampleShape | null;
   resolution?: number;
   keepOutTris?: number[];
+  demoMode?: boolean;
 }
 
 export interface WorkerResponse {
@@ -652,10 +653,48 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
       let bvh: MeshBVH | null = null;
       let surfaceSamples: SurfaceHexSample[] = [];
 
-      const shape = msg.sampleShape || (msg.sphereMode ? 'sphere' : null);
-      const isSurfacePolygon = params.variant === 'implicit_conformal' && (params.latticeType === 'hexagon' || params.latticeType === 'triangle');
+      const isDemoGrid = Boolean(msg.demoMode);
+      const shape = isDemoGrid ? null : (msg.sampleShape || (msg.sphereMode ? 'sphere' : null));
+      const isSurfacePolygon = !isDemoGrid && params.variant === 'implicit_conformal' && (params.latticeType === 'hexagon' || params.latticeType === 'triangle');
 
-      if (shape) {
+      if (isDemoGrid) {
+        const pad = params.cellSize * 0.5;
+        const demoTypes: LatticeParams['latticeType'][] = [
+          'gyroid', 'schwarzP', 'schwarzD', 'neovius', 'iwp', 'bcc',
+          'octet', 'diamond', 'hexagon', 'triangle', 'voronoi', 'spinodal',
+        ];
+        const cols = 4;
+        const rows = Math.ceil(demoTypes.length / cols);
+        const spacing = Math.max(28, params.cellSize * 3.6);
+        const demoRadius = Math.max(10, Math.min(18, (msg.sphereRadius || 25) * 0.6));
+        const baseParams: LatticeParams = { ...params, variant: 'shell_core', surfaceOnly: false, noShell: false };
+
+        const cells = demoTypes.map((latticeType, index) => {
+          const col = index % cols;
+          const row = Math.floor(index / cols);
+          const cx = (col - (cols - 1) / 2) * spacing;
+          const cz = (row - (rows - 1) / 2) * spacing;
+          const localParams: LatticeParams = { ...baseParams, latticeType };
+          return { cx, cz, sdf: buildSphereLattice(demoRadius, localParams) };
+        });
+
+        const extentX = ((cols - 1) * spacing) * 0.5 + demoRadius + pad;
+        const extentZ = ((rows - 1) * spacing) * 0.5 + demoRadius + pad;
+        const extentY = demoRadius + pad;
+        bounds = { min: [-extentX, -extentY, -extentZ], max: [extentX, extentY, extentZ] };
+
+        sdf = (x, y, z) => {
+          let d = Infinity;
+          for (const c of cells) d = Math.min(d, c.sdf(x - c.cx, y, z - c.cz));
+          return d;
+        };
+
+        postMessage({
+          type: 'progress',
+          progress: 0.06,
+          message: `Demo grid ready: ${demoTypes.length} lattice types tiled on spheres`
+        } as WorkerResponse);
+      } else if (shape) {
         const pad = params.cellSize * 0.5;
 
         switch (shape) {
