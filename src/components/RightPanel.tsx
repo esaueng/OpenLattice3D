@@ -23,6 +23,7 @@ export function RightPanel() {
     keepOutTris,
     keepInTris,
     viewerBackground,
+    demoModeActive,
   } = store;
 
   return (
@@ -42,10 +43,12 @@ export function RightPanel() {
               title={`Switch viewer to ${VIEW_LABELS[mode]} mode.`}
               onClick={() => store.setViewMode(mode)}
               disabled={
-                (mode === 'lattice' && !resultMesh) ||
-                (mode === 'cross_section' && !resultMesh) ||
-                (mode === 'xray' && !resultMesh) ||
-                (mode === 'original' && !store.originalMesh && !store.sphereMode)
+                !demoModeActive && (
+                  (mode === 'lattice' && !resultMesh) ||
+                  (mode === 'cross_section' && !resultMesh) ||
+                  (mode === 'xray' && !resultMesh) ||
+                  (mode === 'original' && !store.originalMesh && !store.sphereMode)
+                )
               }
             >
               {VIEW_LABELS[mode]}
