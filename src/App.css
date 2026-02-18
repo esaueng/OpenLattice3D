@@ -639,6 +639,11 @@ html, body, #root {
   background: #070d1c;
 }
 
+
+.demo-window-selected {
+  border-color: #5fb1ff;
+  box-shadow: 0 0 0 2px rgba(95, 177, 255, 0.4), inset 0 0 0 1px rgba(95, 177, 255, 0.25);
+}
 .demo-window-label {
   position: absolute;
   top: 6px;

@@ -246,15 +246,27 @@ export const useStore = create<AppState>((set) => ({
     params: { ...s.params, processPreset: preset, ...PROCESS_DEFAULTS[preset] },
   })),
 
-  setLatticeType: (type) => set((s) => ({
-    params: {
-      ...s.params,
-      latticeType: type,
-      variant: (type === 'hexagon' || type === 'triangle') ? 'implicit_conformal' : 'shell_core',
-      surfaceOnly: (type === 'hexagon' || type === 'triangle') ? true : s.params.surfaceOnly,
-      noShell: (type === 'hexagon' || type === 'triangle') ? false : s.params.noShell,
-    },
-  })),
+  setLatticeType: (type) => set((s) => {
+    const isPolygonSurface = type === 'hexagon' || type === 'triangle';
+    return {
+      params: {
+        ...s.params,
+        latticeType: type,
+        variant: isPolygonSurface ? 'implicit_conformal' : 'shell_core',
+        surfaceOnly: isPolygonSurface ? true : s.params.surfaceOnly,
+        noShell: isPolygonSurface ? false : s.params.noShell,
+        ...(isPolygonSurface ? {
+          cellSize: 4,
+          surfaceDepth: 5,
+          strutDiameter: 1.8,
+          minFeatureSize: 2,
+          toleranceMm: 0.2,
+          exportResolution: 5,
+          thinSectionFilter: 0,
+        } : {}),
+      },
+    };
+  }),
 
   setVariant: (variant) => set((s) => ({
     params: {
