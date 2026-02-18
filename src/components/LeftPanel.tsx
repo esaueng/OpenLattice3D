@@ -168,10 +168,15 @@ export function LeftPanel() {
     worker.postMessage(msg);
   }, [notifyGenerationComplete, requestNotificationPermissionOnce, store]);
 
-  const startDemoGrid = useCallback(() => {
+  const toggleDemoGrid = useCallback((enabled: boolean) => {
     if (store.generating) return;
-    store.startDemoRun();
-    store.addLog('Started demo grid: 12 separate lattice viewers');
+    if (enabled) {
+      store.startDemoRun();
+      store.addLog('Started demo grid: 12 separate lattice viewers');
+    } else {
+      store.setDemoModeActive(false);
+      store.addLog('Demo grid hidden');
+    }
   }, [store]);
 
   const cancelGeneration = useCallback(() => {
@@ -226,18 +231,11 @@ export function LeftPanel() {
         <div className="row" style={{ marginTop: '8px' }}>
           <label>Sample Part:</label>
           <select
-            title="Load a built-in sample shape, or start the 12-window demo grid."
-            value={store.demoModeActive ? '__demo_all__' : (store.sampleShape || '')}
-            onChange={(e) => {
-              if (e.target.value === '__demo_all__') {
-                startDemoGrid();
-                return;
-              }
-              if (e.target.value) handleSampleShape(e.target.value as SampleShape);
-            }}
+            title="Load a built-in sample shape for quick testing."
+            value={store.sampleShape || ''}
+            onChange={(e) => { if (e.target.value) handleSampleShape(e.target.value as SampleShape); }}
           >
             <option value="">-- Choose --</option>
-            <option value="__demo_all__">Demo: All 12 Lattice Types</option>
             {(Object.keys(SAMPLE_SHAPE_INFO) as SampleShape[]).map((k) => (
               <option key={k} value={k}>{SAMPLE_SHAPE_INFO[k].label}</option>
             ))}
@@ -263,6 +261,22 @@ export function LeftPanel() {
             <div><strong>Mode:</strong> Procedural (analytic SDF)</div>
           </div>
         )}
+      </section>
+
+      <section className="panel-section">
+        <h3>Demo View</h3>
+        <div className="row checkbox-row">
+          <label>
+            <input
+              type="checkbox"
+              title="Show all 12 lattice viewers in a tiled demo grid."
+              checked={store.demoModeActive}
+              onChange={(e) => toggleDemoGrid(e.target.checked)}
+              disabled={store.generating}
+            />
+            Show all 12 demo windows
+          </label>
+        </div>
       </section>
 
       {/* Lattice Parameters */}
