@@ -12,6 +12,12 @@ import type { SampleShape } from '../types/project';
 
 // ── Helpers ──────────────────────────────────────────────
 
+const DEMO_TILE_LABELS = [
+  'Gyroid', 'Schwarz P', 'Schwarz D', 'Neovius',
+  'IWP', 'BCC', 'Octet', 'Diamond',
+  'Hexagon', 'Triangle', 'Voronoi', 'Spinodal',
+];
+
 /** Compute world-space bounding box from a result mesh */
 function resultBounds(result: MarchingCubesResult): THREE.Box3 {
   const box = new THREE.Box3();
@@ -254,7 +260,7 @@ export function Viewer3D() {
   const {
     originalMesh, sphereMode, sphereRadius, sampleShape, viewMode, clipPlane,
     keepOutTris, keepInTris, selectionMode, resultMesh,
-    toggleKeepOut, toggleKeepIn, viewerBackground,
+    toggleKeepOut, toggleKeepIn, viewerBackground, demoModeActive,
   } = useStore();
 
   const handleFaceClick = useCallback((triIdx: number) => {
@@ -315,6 +321,13 @@ export function Viewer3D() {
           <GizmoViewport labelColor="white" axisHeadScale={1} />
         </GizmoHelper>
       </Canvas>
+      {demoModeActive && resultMesh && viewMode !== 'original' && (
+        <div className="demo-tile-overlay" aria-label="Demo lattice tile labels">
+          {DEMO_TILE_LABELS.map((label) => (
+            <div key={label} className="demo-tile-label">{label}</div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

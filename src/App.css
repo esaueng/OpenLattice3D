@@ -162,7 +162,7 @@ html, body, #root {
 }
 
 /* Viewer */
-.viewer-container {
+ .viewer-container {
   position: relative;
   border: 1px solid var(--border-soft);
   border-radius: 14px;
@@ -617,3 +617,29 @@ html, body, #root {
 }
 
 
+
+
+.demo-tile-overlay {
+  position: absolute;
+  inset: 10px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  pointer-events: none;
+  z-index: 6;
+}
+
+.demo-tile-label {
+  align-self: start;
+  justify-self: start;
+  margin: 6px;
+  padding: 2px 7px;
+  font-size: 10px;
+  border: 1px solid rgba(125, 157, 220, 0.55);
+  border-radius: 6px;
+  color: #dfeaff;
+  background: rgba(12, 24, 48, 0.72);
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}

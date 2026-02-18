@@ -85,6 +85,7 @@ interface AppState {
   viewMode: ViewMode;
   clipPlane: ClipPlaneState;
   viewerBackground: string;
+  demoModeActive: boolean;
 
   // Logs
   logs: LogEntry[];
@@ -110,6 +111,7 @@ interface AppState {
   setViewMode: (mode: ViewMode) => void;
   setClipPlane: (partial: Partial<ClipPlaneState>) => void;
   setViewerBackground: (color: string) => void;
+  setDemoModeActive: (active: boolean) => void;
   importParams: (imported: Partial<LatticeParams>) => void;
   addLog: (message: string, level?: 'info' | 'warn' | 'error') => void;
   clearLogs: () => void;
@@ -145,6 +147,7 @@ export const useStore = create<AppState>((set) => ({
   viewMode: persisted?.viewMode ?? 'original',
   clipPlane: persisted?.clipPlane ?? { axis: 'y', position: 0.5, flipped: false },
   viewerBackground: persisted?.viewerBackground ?? '#000000',
+  demoModeActive: false,
   logs: [],
 
   setOriginalMesh: (mesh, info, fileName) => set({
@@ -157,6 +160,7 @@ export const useStore = create<AppState>((set) => ({
     validation: null,
     keepOutTris: new Set(),
     keepInTris: new Set(),
+    demoModeActive: false,
   }),
 
   setMeshRepaired: (repaired) => set((s) => ({
@@ -184,6 +188,7 @@ export const useStore = create<AppState>((set) => ({
       strutDiameter: 1.0,
       processPreset: 'SLS_MJF',
     },
+    demoModeActive: false,
   }),
 
   setSphereMode: (radius) => set({
@@ -206,6 +211,7 @@ export const useStore = create<AppState>((set) => ({
       strutDiameter: 1.0,
       processPreset: 'SLS_MJF',
     },
+    demoModeActive: false,
   }),
 
   setSelectionMode: (mode) => set({ selectionMode: mode }),
@@ -276,6 +282,8 @@ export const useStore = create<AppState>((set) => ({
 
   setViewerBackground: (color) => set({ viewerBackground: color }),
 
+  setDemoModeActive: (active) => set({ demoModeActive: active }),
+
   addLog: (message, level = 'info') => set((s) => ({
     logs: [...s.logs.slice(-200), { time: Date.now(), message, level }],
   })),
@@ -310,6 +318,7 @@ export const useStore = create<AppState>((set) => ({
       clipPlane: { axis: 'y', position: 0.5, flipped: false },
       viewerBackground: '#000000',
       logs: [],
+      demoModeActive: false,
     });
   },
 }));
