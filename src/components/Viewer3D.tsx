@@ -26,7 +26,6 @@ const DEMO_TILE_ITEMS: Array<{ type: LatticeType; label: string }> = [
   { type: 'spinodal', label: 'Spinodal' },
 ];
 
-const DEMO_SPHERE_RADIUS_MM = 25;
 const DEMO_VIEW_TARGET_RADIUS = 8;
 
 type DemoTileState = {
@@ -309,18 +308,34 @@ function DemoTileViewerWithMode({ tile, viewMode, clipPlane, selectedLatticeType
   );
 }
 
-function DemoGridView({ params, runId, viewMode, clipPlane, selectedLatticeType }: {
+function DemoGridView({ params, runId, viewMode, clipPlane, selectedLatticeType, sourceMesh, sphereMode, sphereRadius, sampleShape, keepOutTris }: {
   params: LatticeParams;
   runId: number;
   viewMode: 'original' | 'lattice' | 'cross_section' | 'xray';
   clipPlane: ClipPlaneState;
   selectedLatticeType: LatticeType;
+  sourceMesh: TriangleMesh | null;
+  sphereMode: boolean;
+  sphereRadius: number;
+  sampleShape: SampleShape | null;
+  keepOutTris: Set<number>;
 }) {
   const [tiles, setTiles] = useState<DemoTileState[]>(() => DEMO_TILE_ITEMS.map((item) => ({ ...item, status: 'pending', result: null })));
 
   useEffect(() => {
     let cancelled = false;
     const workers: Worker[] = [];
+
+    if (!sourceMesh && !sphereMode) {
+      setTiles(DEMO_TILE_ITEMS.map((item) => ({
+        ...item,
+        status: 'error',
+        result: null,
+        error: 'Import or select a sample model',
+      })));
+      return () => { /* no-op */ };
+    }
+
     setTiles(DEMO_TILE_ITEMS.map((item) => ({ ...item, status: 'pending', result: null })));
 
     const run = async () => {
@@ -341,12 +356,18 @@ function DemoGridView({ params, runId, viewMode, clipPlane, selectedLatticeType 
         const msg: WorkerMessage = {
           type: 'generate',
           params: localParams,
-          sphereMode: true,
-          sampleShape: 'sphere',
-          sphereRadius: DEMO_SPHERE_RADIUS_MM,
+          sphereMode,
+          sampleShape,
+          sphereRadius,
           resolution: Math.round(24 + params.exportResolution * 24),
-          keepOutTris: [],
+          keepOutTris: Array.from(keepOutTris),
         };
+
+        if (sourceMesh) {
+          msg.meshPositions = sourceMesh.positions;
+          msg.meshNormals = sourceMesh.normals;
+          msg.meshTriCount = sourceMesh.triCount;
+        }
 
         setTiles((prev) => prev.map((t, i) => (i === index ? { ...t, status: 'running' } : t)));
 
@@ -382,7 +403,7 @@ function DemoGridView({ params, runId, viewMode, clipPlane, selectedLatticeType 
       cancelled = true;
       for (const w of workers) w.terminate();
     };
-  }, [runId, params]);
+  }, [runId, params, sourceMesh, sphereMode, sphereRadius, sampleShape, keepOutTris]);
 
   return (
     <div className="demo-grid-view" aria-label="Demo lattice windows">
@@ -392,7 +413,7 @@ function DemoGridView({ params, runId, viewMode, clipPlane, selectedLatticeType 
           tile={tile}
           viewMode={viewMode}
           clipPlane={clipPlane}
-          selectedLatticeType={params.latticeType}
+          selectedLatticeType={selectedLatticeType}
         />
       ))}
     </div>
@@ -423,6 +444,11 @@ export function Viewer3D() {
           viewMode={viewMode}
           clipPlane={clipPlane}
           selectedLatticeType={params.latticeType}
+          sourceMesh={originalMesh}
+          sphereMode={sphereMode}
+          sphereRadius={sphereRadius}
+          sampleShape={sampleShape}
+          keepOutTris={keepOutTris}
         />
       </div>
     );
