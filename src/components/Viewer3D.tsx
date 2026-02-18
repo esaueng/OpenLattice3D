@@ -266,10 +266,11 @@ function AutoFit() {
   return null;
 }
 
-function DemoTileViewerWithMode({ tile, viewMode, clipPlane }: {
+function DemoTileViewerWithMode({ tile, viewMode, clipPlane, selectedLatticeType }: {
   tile: DemoTileState;
   viewMode: 'original' | 'lattice' | 'cross_section' | 'xray';
   clipPlane: ClipPlaneState;
+  selectedLatticeType: LatticeType;
 }) {
   const placeholder = useMemo(() => generateSphereMesh(DEMO_VIEW_TARGET_RADIUS, 20), []);
   const placeholderGeom = useMemo(() => {
@@ -283,7 +284,7 @@ function DemoTileViewerWithMode({ tile, viewMode, clipPlane }: {
   const tileResult = tile.result;
 
   return (
-    <div className="demo-window">
+    <div className={`demo-window ${tile.type === selectedLatticeType ? 'demo-window-selected' : ''}`}>
       <div className="demo-window-label">{tile.label}</div>
       <Canvas camera={{ fov: 58, near: 0.1, far: 10000, position: [22, 16, 22] }} gl={{ localClippingEnabled: true }}>
         <ambientLight intensity={0.5} />
@@ -308,11 +309,12 @@ function DemoTileViewerWithMode({ tile, viewMode, clipPlane }: {
   );
 }
 
-function DemoGridView({ params, runId, viewMode, clipPlane }: {
+function DemoGridView({ params, runId, viewMode, clipPlane, selectedLatticeType }: {
   params: LatticeParams;
   runId: number;
   viewMode: 'original' | 'lattice' | 'cross_section' | 'xray';
   clipPlane: ClipPlaneState;
+  selectedLatticeType: LatticeType;
 }) {
   const [tiles, setTiles] = useState<DemoTileState[]>(() => DEMO_TILE_ITEMS.map((item) => ({ ...item, status: 'pending', result: null })));
 
@@ -342,7 +344,7 @@ function DemoGridView({ params, runId, viewMode, clipPlane }: {
           sphereMode: true,
           sampleShape: 'sphere',
           sphereRadius: DEMO_SPHERE_RADIUS_MM,
-          resolution: Math.max(38, Math.round(18 + params.exportResolution * 14)),
+          resolution: Math.round(24 + params.exportResolution * 24),
           keepOutTris: [],
         };
 
@@ -390,6 +392,7 @@ function DemoGridView({ params, runId, viewMode, clipPlane }: {
           tile={tile}
           viewMode={viewMode}
           clipPlane={clipPlane}
+          selectedLatticeType={params.latticeType}
         />
       ))}
     </div>
@@ -419,6 +422,7 @@ export function Viewer3D() {
           runId={demoRunId}
           viewMode={viewMode}
           clipPlane={clipPlane}
+          selectedLatticeType={params.latticeType}
         />
       </div>
     );
