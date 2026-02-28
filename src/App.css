@@ -148,8 +148,7 @@ html, body, #root {
 }
 
 .panel-section-sticky {
-  position: sticky;
-  bottom: 0;
+  position: static;
   background: rgba(16, 24, 43, 0.98);
   backdrop-filter: blur(4px);
 }
