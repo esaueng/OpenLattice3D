@@ -159,7 +159,7 @@ html, body, #root {
   flex-direction: column;
   overflow-y: auto;
   overflow-x: hidden;
-  padding-bottom: 86px;
+  padding-bottom: 14px;
   scrollbar-gutter: stable;
 }
 
@@ -274,18 +274,13 @@ html, body, #root {
 }
 
 .feedback-sidebar-cta {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 10px;
+  position: sticky;
+  bottom: 8px;
+  margin-top: auto;
+  padding-top: 10px;
   display: flex;
   justify-content: center;
-  z-index: 3;
-  pointer-events: none;
-}
-
-.feedback-sidebar-cta .btn {
-  pointer-events: auto;
+  z-index: 2;
 }
 
 .feedback-sidebar-cta .btn {
@@ -638,9 +633,10 @@ html, body, #root {
   }
 
   .feedback-sidebar-cta {
-    position: static;
     justify-content: flex-start;
-    margin-top: 6px;
+    bottom: 6px;
+    margin-top: 8px;
+    padding-top: 8px;
   }
 
   .watermark {
@@ -772,6 +768,7 @@ html, body, #root {
 
   .feedback-sidebar-cta {
     justify-content: center;
+    bottom: 6px;
   }
 
   /* Reduce viewer vertical dominance on phones so controls appear sooner */
