@@ -479,16 +479,6 @@ export function LeftPanel() {
         </section>
       )}
 
-      <div className="feedback-sidebar-cta">
-        <a
-          className="btn btn-feedback btn-feedback-compact"
-          href="https://form.esauengineering.com/feedback-openlattice3d"
-          target="_blank"
-          rel="noreferrer"
-        >
-          Bug report / feedback
-        </a>
-      </div>
     </div>
   );
 }
