@@ -46,12 +46,33 @@ html, body, #root {
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
   text-align: center;
-  padding: 10px 18px;
+  gap: 8px;
+  padding: 10px 12px;
   border-bottom: 1px solid var(--border-soft);
   background: rgba(15, 21, 36, 0.95);
   backdrop-filter: blur(6px);
+}
+
+.topbar-center {
+  flex: 1;
+  min-width: 0;
+}
+
+.topbar-side {
+  width: 180px;
+  display: flex;
+  align-items: center;
+}
+
+.topbar-side-right {
+  justify-content: flex-end;
+}
+
+.topbar-side .btn {
+  margin: 0;
+  text-decoration: none;
 }
 
 .app-topbar h1 {
@@ -273,20 +294,6 @@ html, body, #root {
   letter-spacing: 0.1px;
 }
 
-.feedback-sidebar-cta {
-  position: sticky;
-  bottom: 8px;
-  margin-top: auto;
-  padding-top: 10px;
-  display: flex;
-  justify-content: center;
-  z-index: 2;
-}
-
-.feedback-sidebar-cta .btn {
-  margin: 0;
-  text-decoration: none;
-}
 
 .btn-small {
   padding: 4px 9px;
@@ -618,6 +625,16 @@ html, body, #root {
     order: 3;
   }
 
+  .app-topbar {
+    height: auto;
+    min-height: 72px;
+    padding: 8px 10px;
+  }
+
+  .topbar-side {
+    width: 152px;
+  }
+
   .app-topbar h1 {
     font-size: 24px;
   }
@@ -632,12 +649,6 @@ html, body, #root {
     overflow: auto;
   }
 
-  .feedback-sidebar-cta {
-    justify-content: flex-start;
-    bottom: 6px;
-    margin-top: 8px;
-    padding-top: 8px;
-  }
 
   .watermark {
     position: static;
@@ -651,7 +662,20 @@ html, body, #root {
   .app-topbar {
     height: auto;
     min-height: 64px;
-    padding: 10px 12px;
+    padding: 8px 8px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .topbar-center {
+    order: 1;
+    width: 100%;
+  }
+
+  .topbar-side {
+    order: 2;
+    width: 100%;
+    justify-content: center;
   }
 
   .app-topbar h1 {
@@ -766,10 +790,6 @@ html, body, #root {
     flex-basis: 100%;
   }
 
-  .feedback-sidebar-cta {
-    justify-content: center;
-    bottom: 6px;
-  }
 
   /* Reduce viewer vertical dominance on phones so controls appear sooner */
   .viewer-container {
