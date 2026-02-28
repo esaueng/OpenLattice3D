@@ -596,6 +596,103 @@ html, body, #root {
   border-radius: 999px;
 }
 
+
+@media (min-width: 1200px) and (max-height: 980px) {
+  .app-topbar {
+    height: 62px;
+    padding: 6px 12px;
+  }
+
+  .app-topbar h1 {
+    font-size: 24px;
+    line-height: 1;
+  }
+
+  .app-topbar p {
+    margin-top: 2px;
+    font-size: 9px;
+  }
+
+  .app {
+    height: calc(100% - 62px);
+    gap: 8px;
+    padding: 6px;
+  }
+
+  .panel {
+    padding: 8px;
+  }
+
+  .panel-intro {
+    margin-bottom: 4px;
+    padding: 1px 0 3px;
+  }
+
+  .panel-intro h2 {
+    font-size: 13px;
+  }
+
+  .panel-intro p {
+    font-size: 10px;
+  }
+
+  .panel section,
+  .panel-section {
+    padding: 6px;
+    margin-bottom: 3px;
+    border-radius: 8px;
+  }
+
+  .panel h3 {
+    font-size: 11px;
+    margin-bottom: 5px;
+  }
+
+  .btn {
+    padding: 3px 8px;
+    margin: 1px 2px 1px 0;
+    font-size: 11px;
+  }
+
+  .btn-large {
+    padding: 8px;
+    font-size: 12px;
+  }
+
+  .row {
+    gap: 3px 5px;
+    margin-bottom: 3px;
+  }
+
+  .row label {
+    width: 98px;
+    font-size: 10px;
+  }
+
+  .row input[type="number"] {
+    width: 58px;
+    padding: 3px 6px;
+    font-size: 11px;
+  }
+
+  .row select {
+    padding: 4px 6px;
+    font-size: 11px;
+  }
+
+  .checkbox-row label {
+    font-size: 11px;
+    gap: 5px;
+  }
+
+  .info-block {
+    padding: 5px;
+    margin-top: 4px;
+    font-size: 11px;
+    line-height: 1.4;
+  }
+}
+
 @media (max-width: 1500px) {
   .app {
     grid-template-columns: 320px minmax(460px, 1fr) 320px;
