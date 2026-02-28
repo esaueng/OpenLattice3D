@@ -13,9 +13,20 @@ function App() {
   return (
     <div className="app-shell">
       <header className="app-topbar">
-        <div>
+        <div className="topbar-side" aria-hidden="true" />
+        <div className="topbar-center">
           <h1>Open Lattice 3D <span className="beta-pill">beta</span></h1>
           <p>Generate manufacturable lattice geometries with live validation.</p>
+        </div>
+        <div className="topbar-side topbar-side-right">
+          <a
+            className="btn btn-feedback btn-feedback-compact"
+            href="https://form.esauengineering.com/feedback-openlattice3d"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Bug report / feedback
+          </a>
         </div>
       </header>
       <div className="app">
