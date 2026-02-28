@@ -144,7 +144,7 @@ html, body, #root {
   border-radius: 10px;
   padding: 10px;
   margin-bottom: 10px;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .panel-section-sticky {
@@ -158,7 +158,10 @@ html, body, #root {
   position: relative;
   display: flex;
   flex-direction: column;
-  padding-bottom: 42px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-bottom: 86px;
+  scrollbar-gutter: stable;
 }
 
 /* Viewer */
@@ -275,10 +278,15 @@ html, body, #root {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 8px;
+  bottom: 10px;
   display: flex;
   justify-content: center;
   z-index: 3;
+  pointer-events: none;
+}
+
+.feedback-sidebar-cta .btn {
+  pointer-events: auto;
 }
 
 .feedback-sidebar-cta .btn {
