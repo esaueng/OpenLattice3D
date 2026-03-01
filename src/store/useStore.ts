@@ -85,6 +85,8 @@ interface AppState {
   viewMode: ViewMode;
   clipPlane: ClipPlaneState;
   viewerBackground: string;
+  demoModeActive: boolean;
+  demoRunId: number;
 
   // Logs
   logs: LogEntry[];
@@ -110,6 +112,8 @@ interface AppState {
   setViewMode: (mode: ViewMode) => void;
   setClipPlane: (partial: Partial<ClipPlaneState>) => void;
   setViewerBackground: (color: string) => void;
+  setDemoModeActive: (active: boolean) => void;
+  startDemoRun: () => void;
   importParams: (imported: Partial<LatticeParams>) => void;
   addLog: (message: string, level?: 'info' | 'warn' | 'error') => void;
   clearLogs: () => void;
@@ -144,7 +148,9 @@ export const useStore = create<AppState>((set) => ({
   validation: null,
   viewMode: persisted?.viewMode ?? 'original',
   clipPlane: persisted?.clipPlane ?? { axis: 'y', position: 0.5, flipped: false },
-  viewerBackground: persisted?.viewerBackground ?? '#1a1a2e',
+  viewerBackground: persisted?.viewerBackground ?? '#000000',
+  demoModeActive: false,
+  demoRunId: 0,
   logs: [],
 
   setOriginalMesh: (mesh, info, fileName) => set({
@@ -237,13 +243,27 @@ export const useStore = create<AppState>((set) => ({
     params: { ...s.params, processPreset: preset, ...PROCESS_DEFAULTS[preset] },
   })),
 
-  setLatticeType: (type) => set((s) => ({
-    params: {
-      ...s.params,
-      latticeType: type,
-      variant: (type === 'hexagon' || type === 'triangle') ? s.params.variant : 'shell_core',
-    },
-  })),
+  setLatticeType: (type) => set((s) => {
+    const isPolygonSurface = type === 'hexagon' || type === 'triangle';
+    return {
+      params: {
+        ...s.params,
+        latticeType: type,
+        variant: isPolygonSurface ? 'implicit_conformal' : 'shell_core',
+        surfaceOnly: isPolygonSurface ? true : s.params.surfaceOnly,
+        noShell: isPolygonSurface ? false : s.params.noShell,
+        ...(isPolygonSurface ? {
+          cellSize: 4,
+          surfaceDepth: 5,
+          strutDiameter: 1.8,
+          minFeatureSize: 2,
+          toleranceMm: 0.2,
+          exportResolution: 5,
+          thinSectionFilter: 0,
+        } : {}),
+      },
+    };
+  }),
 
   setVariant: (variant) => set((s) => ({
     params: {
@@ -273,6 +293,16 @@ export const useStore = create<AppState>((set) => ({
   setClipPlane: (partial) => set((s) => ({ clipPlane: { ...s.clipPlane, ...partial } })),
 
   setViewerBackground: (color) => set({ viewerBackground: color }),
+
+  setDemoModeActive: (active) => set({ demoModeActive: active }),
+
+  startDemoRun: () => set((s) => ({
+    demoModeActive: true,
+    demoRunId: s.demoRunId + 1,
+    resultMesh: null,
+    validation: null,
+    viewMode: 'lattice',
+  })),
 
   addLog: (message, level = 'info') => set((s) => ({
     logs: [...s.logs.slice(-200), { time: Date.now(), message, level }],
@@ -306,8 +336,10 @@ export const useStore = create<AppState>((set) => ({
       progressMessage: '',
       viewMode: 'original',
       clipPlane: { axis: 'y', position: 0.5, flipped: false },
-      viewerBackground: '#1a1a2e',
+      viewerBackground: '#000000',
       logs: [],
+      demoModeActive: false,
+      demoRunId: 0,
     });
   },
 }));
