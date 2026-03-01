@@ -399,6 +399,16 @@ html, body, #root {
   font-size: 12px;
 }
 
+.multiview-toggle-row {
+  align-items: center;
+}
+
+.multiview-toggle-label {
+  width: auto !important;
+  max-width: 100%;
+  white-space: nowrap;
+}
+
 /* Info blocks */
 .info-block {
   background: #0c1323;
@@ -892,6 +902,10 @@ html, body, #root {
   .viewer-container {
     min-height: 280px;
     max-height: 44vh;
+  }
+
+  .multiview-toggle-label {
+    white-space: normal;
   }
 }
 

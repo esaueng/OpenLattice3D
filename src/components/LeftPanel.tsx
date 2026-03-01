@@ -265,8 +265,8 @@ export function LeftPanel() {
 
       <section className="panel-section">
         <h3>Multiview</h3>
-        <div className="row checkbox-row">
-          <label>
+        <div className="row checkbox-row multiview-toggle-row">
+          <label className="multiview-toggle-label">
             <input
               type="checkbox"
               title="Show all 12 lattice viewers in a tiled multiview layout for the current model."
