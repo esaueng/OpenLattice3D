@@ -16,7 +16,7 @@ function App() {
         <div className="topbar-side">
           <a
             className="topbar-github-link"
-            href="https://github.com/esaueng/OpenLattice3D"
+            href="https://github.com/EsauEngineering/OpenLattice3D"
             target="_blank"
             rel="noreferrer"
             aria-label="Open GitHub repository"
