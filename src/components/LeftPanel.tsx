@@ -323,8 +323,8 @@ export function LeftPanel() {
             />
           </div>
 
-          <div className="row checkbox-row">
-            <label>
+          <div className="row checkbox-row param-toggle-row">
+            <label className="param-toggle-label">
               <input
                 type="checkbox"
                 title="Removes the outer shell so only lattice remains."
@@ -335,8 +335,8 @@ export function LeftPanel() {
             </label>
           </div>
 
-          <div className="row checkbox-row">
-            <label>
+          <div className="row checkbox-row param-toggle-row">
+            <label className="param-toggle-label">
               <input
                 type="checkbox"
                 title="Constrain lattice generation to a surface band, leaving inside hollow."
