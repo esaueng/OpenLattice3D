@@ -409,6 +409,16 @@ html, body, #root {
   white-space: nowrap;
 }
 
+.param-toggle-row {
+  align-items: center;
+}
+
+.param-toggle-label {
+  width: auto !important;
+  max-width: 100%;
+  white-space: nowrap;
+}
+
 /* Info blocks */
 .info-block {
   background: #0c1323;
@@ -904,7 +914,8 @@ html, body, #root {
     max-height: 44vh;
   }
 
-  .multiview-toggle-label {
+  .multiview-toggle-label,
+  .param-toggle-label {
     white-space: normal;
   }
 }
