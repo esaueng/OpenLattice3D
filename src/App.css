@@ -79,23 +79,24 @@ html, body, #root {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 6px;
-  width: 36px;
-  height: 36px;
-  border-radius: 12px;
-  border-color: #3a4f79;
-  background: #12203d;
+  padding: 0;
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
   color: #dce9ff;
 }
 
 .btn-github:hover {
-  background: #18305f;
-  border-color: #5f84c9;
+  background: transparent;
+  color: #ffffff;
 }
 
 .btn-github svg {
-  width: 17px;
-  height: 17px;
+  width: 30px;
+  height: 30px;
   fill: currentColor;
   flex-shrink: 0;
 }
@@ -778,10 +779,10 @@ html, body, #root {
   }
 
   .btn-github {
-    min-width: 32px;
-    min-height: 32px;
-    width: 32px;
-    height: 32px;
+    min-width: 36px;
+    min-height: 36px;
+    width: 36px;
+    height: 36px;
   }
 
   .app-topbar h1 {
@@ -828,11 +829,11 @@ html, body, #root {
   }
 
   .btn-github {
-    min-width: 32px;
-    min-height: 34px;
-    width: 36px;
-    height: 36px;
-    padding: 6px;
+    min-width: 40px;
+    min-height: 40px;
+    width: 40px;
+    height: 40px;
+    padding: 0;
   }
 
   .app-topbar h1 {
