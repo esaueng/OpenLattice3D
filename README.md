@@ -146,3 +146,7 @@ Wall thickness derived from iso-value `c = wallThickness * pi / cellSize`.
 - Min thickness: ray march along normals to measure wall/strut width
 - Manifold: edge-count analysis (each edge shared by exactly 2 triangles)
 - Connectivity: flood-fill on triangle adjacency graph
+
+## License
+
+MIT. See [LICENSE](./LICENSE).
