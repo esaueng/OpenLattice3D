@@ -329,8 +329,9 @@ function DemoTileViewerWithMode({ tile, viewMode, clipPlane, selectedLatticeType
   );
 }
 
-function DemoGridView({ params, runId, viewMode, clipPlane, selectedLatticeType, onSelectLatticeType, sourceMesh, sphereMode, sphereRadius, sampleShape, keepOutTris }: {
+function DemoGridView({ params, demoParamsByType, runId, viewMode, clipPlane, selectedLatticeType, onSelectLatticeType, sourceMesh, sphereMode, sphereRadius, sampleShape, keepOutTris }: {
   params: LatticeParams;
+  demoParamsByType: Partial<Record<LatticeType, LatticeParams>>;
   runId: number;
   viewMode: 'original' | 'lattice' | 'cross_section' | 'xray';
   clipPlane: ClipPlaneState;
@@ -347,10 +348,15 @@ function DemoGridView({ params, runId, viewMode, clipPlane, selectedLatticeType,
   const tokensRef = useRef<Partial<Record<LatticeType, number>>>({});
   const hasCompletedInitialFullRun = useRef(false);
   const latestParamsRef = useRef(params);
+  const latestDemoParamsRef = useRef(demoParamsByType);
 
   useEffect(() => {
     latestParamsRef.current = params;
   }, [params]);
+
+  useEffect(() => {
+    latestDemoParamsRef.current = demoParamsByType;
+  }, [demoParamsByType]);
 
   const stopTileWorker = useCallback((type: LatticeType) => {
     const existing = workersRef.current.get(type);
@@ -369,7 +375,8 @@ function DemoGridView({ params, runId, viewMode, clipPlane, selectedLatticeType,
       const worker = new Worker(new URL('../workers/lattice-worker.ts', import.meta.url), { type: 'module' });
       workersRef.current.set(type, worker);
 
-      const localParams: LatticeParams = {
+      const savedParams = latestDemoParamsRef.current[type];
+      const localParams: LatticeParams = savedParams ? { ...savedParams, latticeType: type } : {
         ...baseParams,
         latticeType: type,
         variant: (type === 'hexagon' || type === 'triangle') ? 'implicit_conformal' : 'shell_core',
@@ -383,7 +390,7 @@ function DemoGridView({ params, runId, viewMode, clipPlane, selectedLatticeType,
         sphereMode,
         sampleShape,
         sphereRadius,
-        resolution: Math.round(24 + baseParams.exportResolution * 24),
+        resolution: Math.round(24 + localParams.exportResolution * 24),
         keepOutTris: Array.from(keepOutTris),
       };
 
@@ -474,7 +481,7 @@ export function Viewer3D() {
     originalMesh, sphereMode, sphereRadius, sampleShape, viewMode, clipPlane,
     keepOutTris, keepInTris, selectionMode, resultMesh,
     toggleKeepOut, toggleKeepIn, viewerBackground, demoModeActive,
-    demoRunId, params, setLatticeType,
+    demoRunId, params, demoParamsByType, setLatticeType,
   } = useStore();
 
   const handleFaceClick = useCallback((triIdx: number) => {
@@ -489,6 +496,7 @@ export function Viewer3D() {
       <div style={{ width: '100%', height: '100%', background: viewerBackground }}>
         <DemoGridView
           params={params}
+          demoParamsByType={demoParamsByType}
           runId={demoRunId}
           viewMode={viewMode}
           clipPlane={clipPlane}
