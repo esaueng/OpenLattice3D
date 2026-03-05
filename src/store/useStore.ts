@@ -52,6 +52,51 @@ function savePersistedState(s: PersistedState) {
 
 const persisted = loadPersistedState();
 
+type DemoParamsByType = Partial<Record<LatticeType, LatticeParams>>;
+
+const ALL_LATTICE_TYPES: LatticeType[] = [
+  'gyroid',
+  'schwarzP',
+  'schwarzD',
+  'neovius',
+  'iwp',
+  'bcc',
+  'octet',
+  'diamond',
+  'hexagon',
+  'triangle',
+  'voronoi',
+  'spinodal',
+];
+
+function paramsForType(base: LatticeParams, type: LatticeType): LatticeParams {
+  const isPolygonSurface = type === 'hexagon' || type === 'triangle';
+  return {
+    ...base,
+    latticeType: type,
+    variant: isPolygonSurface ? 'implicit_conformal' : 'shell_core',
+    surfaceOnly: isPolygonSurface ? true : base.surfaceOnly,
+    noShell: isPolygonSurface ? false : base.noShell,
+    ...(isPolygonSurface ? {
+      cellSize: 4,
+      surfaceDepth: 5,
+      strutDiameter: 1.8,
+      minFeatureSize: 2,
+      toleranceMm: 0.2,
+      exportResolution: 5,
+      thinSectionFilter: 0,
+    } : {}),
+  };
+}
+
+function seedDemoParamsMap(seed: LatticeParams, existing: DemoParamsByType): DemoParamsByType {
+  const out: DemoParamsByType = { ...existing };
+  for (const type of ALL_LATTICE_TYPES) {
+    if (!out[type]) out[type] = paramsForType(seed, type);
+  }
+  return out;
+}
+
 interface AppState {
   // Mesh
   originalMesh: TriangleMesh | null;
@@ -71,6 +116,7 @@ interface AppState {
 
   // Params
   params: LatticeParams;
+  demoParamsByType: DemoParamsByType;
 
   // Generation
   generating: boolean;
@@ -141,6 +187,7 @@ export const useStore = create<AppState>((set) => ({
   keepOutTris: new Set<number>(),
   keepInTris: new Set<number>(),
   params: persisted?.params ? { ...DEFAULT_PARAMS, ...persisted.params } : { ...DEFAULT_PARAMS },
+  demoParamsByType: {},
   generating: false,
   progress: 0,
   progressMessage: '',
@@ -163,6 +210,7 @@ export const useStore = create<AppState>((set) => ({
     validation: null,
     keepOutTris: new Set(),
     keepInTris: new Set(),
+    demoParamsByType: {},
   }),
 
   setMeshRepaired: (repaired) => set((s) => ({
@@ -181,6 +229,7 @@ export const useStore = create<AppState>((set) => ({
     validation: null,
     keepOutTris: new Set(),
     keepInTris: new Set(),
+    demoParamsByType: {},
     params: {
       ...DEFAULT_PARAMS,
       toleranceMm: 0.2,
@@ -203,6 +252,7 @@ export const useStore = create<AppState>((set) => ({
     validation: null,
     keepOutTris: new Set(),
     keepInTris: new Set(),
+    demoParamsByType: {},
     params: {
       ...DEFAULT_PARAMS,
       toleranceMm: 0.2,
@@ -237,42 +287,63 @@ export const useStore = create<AppState>((set) => ({
 
   clearSelection: () => set({ keepOutTris: new Set(), keepInTris: new Set() }),
 
-  updateParams: (partial) => set((s) => ({ params: { ...s.params, ...partial } })),
-
-  setProcessPreset: (preset) => set((s) => ({
-    params: { ...s.params, processPreset: preset, ...PROCESS_DEFAULTS[preset] },
-  })),
-
-  setLatticeType: (type) => set((s) => {
-    const isPolygonSurface = type === 'hexagon' || type === 'triangle';
+  updateParams: (partial) => set((s) => {
+    const nextParams = { ...s.params, ...partial };
+    if (!s.demoModeActive) return { params: nextParams };
     return {
-      params: {
-        ...s.params,
-        latticeType: type,
-        variant: isPolygonSurface ? 'implicit_conformal' : 'shell_core',
-        surfaceOnly: isPolygonSurface ? true : s.params.surfaceOnly,
-        noShell: isPolygonSurface ? false : s.params.noShell,
-        ...(isPolygonSurface ? {
-          cellSize: 4,
-          surfaceDepth: 5,
-          strutDiameter: 1.8,
-          minFeatureSize: 2,
-          toleranceMm: 0.2,
-          exportResolution: 5,
-          thinSectionFilter: 0,
-        } : {}),
+      params: nextParams,
+      demoParamsByType: {
+        ...s.demoParamsByType,
+        [nextParams.latticeType]: nextParams,
       },
     };
   }),
 
-  setVariant: (variant) => set((s) => ({
-    params: {
+  setProcessPreset: (preset) => set((s) => {
+    const nextParams = { ...s.params, processPreset: preset, ...PROCESS_DEFAULTS[preset] };
+    if (!s.demoModeActive) return { params: nextParams };
+    return {
+      params: nextParams,
+      demoParamsByType: {
+        ...s.demoParamsByType,
+        [nextParams.latticeType]: nextParams,
+      },
+    };
+  }),
+
+  setLatticeType: (type) => set((s) => {
+    if (s.demoModeActive) {
+      const currentType = s.params.latticeType;
+      const nextMap: DemoParamsByType = {
+        ...s.demoParamsByType,
+        [currentType]: { ...s.params, latticeType: currentType },
+      };
+      const nextParams = nextMap[type] ? { ...nextMap[type]!, latticeType: type } : paramsForType(s.params, type);
+      nextMap[type] = nextParams;
+      return {
+        params: nextParams,
+        demoParamsByType: nextMap,
+      };
+    }
+    return { params: paramsForType(s.params, type) };
+  }),
+
+  setVariant: (variant) => set((s) => {
+    const nextParams = {
       ...s.params,
       variant,
       surfaceOnly: variant === 'implicit_conformal' ? true : s.params.surfaceOnly,
       noShell: variant === 'implicit_conformal' ? false : s.params.noShell,
-    },
-  })),
+    };
+    if (!s.demoModeActive) return { params: nextParams };
+    return {
+      params: nextParams,
+      demoParamsByType: {
+        ...s.demoParamsByType,
+        [nextParams.latticeType]: nextParams,
+      },
+    };
+  }),
 
   setGenerating: (generating) => set({ generating }),
 
@@ -296,23 +367,48 @@ export const useStore = create<AppState>((set) => ({
 
   setDemoModeActive: (active) => set({ demoModeActive: active }),
 
-  startDemoRun: () => set((s) => ({
-    demoModeActive: true,
-    demoRunId: s.demoRunId + 1,
-    resultMesh: null,
-    validation: null,
-    viewMode: 'lattice',
-  })),
+  startDemoRun: () => set((s) => {
+    const currentType = s.params.latticeType;
+    const mapWithCurrent = {
+      ...s.demoParamsByType,
+      [currentType]: { ...s.params, latticeType: currentType },
+    };
+    const nextMap = seedDemoParamsMap(s.params, mapWithCurrent);
+    const activeParams = nextMap[currentType] ?? s.params;
+    return {
+      demoModeActive: true,
+      demoRunId: s.demoRunId + 1,
+      resultMesh: null,
+      validation: null,
+      viewMode: 'lattice',
+      params: activeParams,
+      demoParamsByType: nextMap,
+    };
+  }),
 
   addLog: (message, level = 'info') => set((s) => ({
     logs: [...s.logs.slice(-200), { time: Date.now(), message, level }],
   })),
 
-  importParams: (imported) => set((s) => ({
-    params: { ...s.params, ...imported },
-    resultMesh: null,
-    validation: null,
-  })),
+  importParams: (imported) => set((s) => {
+    const nextParams = { ...s.params, ...imported };
+    if (!s.demoModeActive) {
+      return {
+        params: nextParams,
+        resultMesh: null,
+        validation: null,
+      };
+    }
+    return {
+      params: nextParams,
+      resultMesh: null,
+      validation: null,
+      demoParamsByType: {
+        ...s.demoParamsByType,
+        [nextParams.latticeType]: nextParams,
+      },
+    };
+  }),
 
   clearLogs: () => set({ logs: [] }),
 
@@ -331,6 +427,7 @@ export const useStore = create<AppState>((set) => ({
       keepOutTris: new Set(),
       keepInTris: new Set(),
       params: { ...DEFAULT_PARAMS },
+      demoParamsByType: {},
       generating: false,
       progress: 0,
       progressMessage: '',
