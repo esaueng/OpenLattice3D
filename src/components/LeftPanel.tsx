@@ -100,6 +100,7 @@ export function LeftPanel() {
 
   const startGeneration = useCallback(() => {
     if (store.generating) return;
+    if (store.demoModeActive) return;
     if (!store.originalMesh && !store.sphereMode) return;
     requestNotificationPermissionOnce();
     store.setGenerating(true);
@@ -192,6 +193,7 @@ export function LeftPanel() {
 
   const hasModel = store.originalMesh || store.sphereMode;
   const hasModelOrDemo = hasModel || store.demoModeActive;
+  const generateDisabledByMultiview = store.demoModeActive;
 
   return (
     <div className="panel left-panel">
@@ -464,7 +466,15 @@ export function LeftPanel() {
         <section className="panel-section panel-section-sticky">
           <h3>Generate</h3>
           {!store.generating ? (
-            <button className="btn btn-primary btn-large" title="Start generating the lattice with the current settings." onClick={startGeneration}>
+            <button
+              className={`btn btn-primary btn-large ${generateDisabledByMultiview ? 'btn-generate-muted' : ''}`}
+              title={generateDisabledByMultiview
+                ? 'Disabled while 12-window multiview is enabled.'
+                : 'Start generating the lattice with the current settings.'}
+              onClick={startGeneration}
+              disabled={generateDisabledByMultiview}
+              aria-disabled={generateDisabledByMultiview}
+            >
               Generate Lattice
             </button>
           ) : (
