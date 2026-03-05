@@ -982,6 +982,19 @@ html, body, #root {
   border-radius: 8px;
   overflow: hidden;
   background: #070d1c;
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.demo-window:hover {
+  border-color: #4f7cc7;
+}
+
+.demo-window:focus-visible {
+  outline: none;
+  border-color: #5fb1ff;
+  box-shadow: 0 0 0 2px rgba(95, 177, 255, 0.35);
 }
 
 
