@@ -346,9 +346,16 @@ function DemoGridView({ params, demoParamsByType, runId, viewMode, clipPlane, se
   const [tiles, setTiles] = useState<DemoTileState[]>(() => DEMO_TILE_ITEMS.map((item) => ({ ...item, status: 'pending', result: null })));
   const workersRef = useRef<Map<LatticeType, Worker>>(new Map());
   const tokensRef = useRef<Partial<Record<LatticeType, number>>>({});
+  const completedSigRef = useRef<Partial<Record<LatticeType, string>>>({});
+  const runningSigRef = useRef<Partial<Record<LatticeType, string>>>({});
   const hasCompletedInitialFullRun = useRef(false);
   const latestParamsRef = useRef(params);
   const latestDemoParamsRef = useRef(demoParamsByType);
+  const keepOutKey = useMemo(() => Array.from(keepOutTris).sort((a, b) => a - b).join(','), [keepOutTris]);
+  const sourceKey = useMemo(() => {
+    if (sourceMesh) return `mesh:${sourceMesh.triCount}:${sourceMesh.positions.length}:${sourceMesh.normals.length}`;
+    return `shape:${sampleShape ?? 'none'}:${sphereMode ? 1 : 0}:${sphereRadius}`;
+  }, [sampleShape, sourceMesh, sphereMode, sphereRadius]);
 
   useEffect(() => {
     latestParamsRef.current = params;
@@ -363,18 +370,21 @@ function DemoGridView({ params, demoParamsByType, runId, viewMode, clipPlane, se
     if (existing) {
       existing.terminate();
       workersRef.current.delete(type);
+      runningSigRef.current[type] = undefined;
     }
   }, []);
 
-  const generateTiles = useCallback((types: LatticeType[], baseParams: LatticeParams) => {
+  const buildTileSignature = useCallback((type: LatticeType, localParams: LatticeParams) => {
+    return JSON.stringify({
+      type,
+      source: sourceKey,
+      keepOut: keepOutKey,
+      params: localParams,
+    });
+  }, [keepOutKey, sourceKey]);
+
+  const generateTiles = useCallback((types: LatticeType[], baseParams: LatticeParams, force = false) => {
     for (const type of types) {
-      stopTileWorker(type);
-      const token = (tokensRef.current[type] ?? 0) + 1;
-      tokensRef.current[type] = token;
-
-      const worker = new Worker(new URL('../workers/lattice-worker.ts', import.meta.url), { type: 'module' });
-      workersRef.current.set(type, worker);
-
       const savedParams = latestDemoParamsRef.current[type];
       const localParams: LatticeParams = savedParams ? { ...savedParams, latticeType: type } : {
         ...baseParams,
@@ -383,6 +393,20 @@ function DemoGridView({ params, demoParamsByType, runId, viewMode, clipPlane, se
         surfaceOnly: (type === 'hexagon' || type === 'triangle'),
         noShell: false,
       };
+      const signature = buildTileSignature(type, localParams);
+
+      if (!force) {
+        if (runningSigRef.current[type] === signature) continue;
+        if (completedSigRef.current[type] === signature) continue;
+      }
+
+      stopTileWorker(type);
+      const token = (tokensRef.current[type] ?? 0) + 1;
+      tokensRef.current[type] = token;
+
+      const worker = new Worker(new URL('../workers/lattice-worker.ts', import.meta.url), { type: 'module' });
+      workersRef.current.set(type, worker);
+      runningSigRef.current[type] = signature;
 
       const msg: WorkerMessage = {
         type: 'generate',
@@ -406,6 +430,8 @@ function DemoGridView({ params, demoParamsByType, runId, viewMode, clipPlane, se
         if (tokensRef.current[type] !== token) return;
         const resp = ev.data;
         if (resp.type === 'result') {
+          runningSigRef.current[type] = undefined;
+          completedSigRef.current[type] = signature;
           setTiles((prev) => prev.map((t) => t.type === type ? {
             ...t,
             status: 'done',
@@ -415,6 +441,7 @@ function DemoGridView({ params, demoParamsByType, runId, viewMode, clipPlane, se
           worker.terminate();
           workersRef.current.delete(type);
         } else if (resp.type === 'error') {
+          runningSigRef.current[type] = undefined;
           setTiles((prev) => prev.map((t) => t.type === type ? { ...t, status: 'error', error: resp.message } : t));
           worker.terminate();
           workersRef.current.delete(type);
@@ -423,7 +450,7 @@ function DemoGridView({ params, demoParamsByType, runId, viewMode, clipPlane, se
 
       worker.postMessage(msg);
     }
-  }, [keepOutTris, sampleShape, sourceMesh, sphereMode, sphereRadius, stopTileWorker]);
+  }, [buildTileSignature, keepOutTris, sampleShape, sourceMesh, sphereMode, sphereRadius, stopTileWorker]);
 
   useEffect(() => {
     const allTypes = DEMO_TILE_ITEMS.map((item) => item.type);
@@ -440,8 +467,10 @@ function DemoGridView({ params, demoParamsByType, runId, viewMode, clipPlane, se
       return;
     }
 
+    completedSigRef.current = {};
+    runningSigRef.current = {};
     setTiles(DEMO_TILE_ITEMS.map((item) => ({ ...item, status: 'pending', result: null, error: undefined })));
-    generateTiles(allTypes, latestParamsRef.current);
+    generateTiles(allTypes, latestParamsRef.current, true);
     hasCompletedInitialFullRun.current = true;
 
     return () => {
@@ -452,7 +481,7 @@ function DemoGridView({ params, demoParamsByType, runId, viewMode, clipPlane, se
   useEffect(() => {
     if (!hasCompletedInitialFullRun.current) return;
     if (!sourceMesh && !sphereMode) return;
-    generateTiles([selectedLatticeType], params);
+    generateTiles([selectedLatticeType], params, false);
   }, [params, selectedLatticeType, sourceMesh, sphereMode, generateTiles]);
 
   useEffect(() => () => {
