@@ -340,6 +340,12 @@ html, body, #root {
   border-radius: 9px;
 }
 
+.btn-generate-muted {
+  opacity: 0.2 !important;
+  filter: saturate(0.35);
+  pointer-events: none;
+}
+
 .btn-active {
   background: var(--accent) !important;
   color: #0b1324 !important;
