@@ -1,5 +1,5 @@
 // 3D Viewer component using react-three-fiber
-import { useRef, useMemo, useCallback, useEffect, useState } from 'react';
+import { useRef, useMemo, useCallback, useEffect, useState, type KeyboardEvent } from 'react';
 import { Canvas, useThree, useFrame, type ThreeEvent } from '@react-three/fiber';
 import { OrbitControls, GizmoHelper, GizmoViewport } from '@react-three/drei';
 import * as THREE from 'three';
@@ -265,11 +265,12 @@ function AutoFit() {
   return null;
 }
 
-function DemoTileViewerWithMode({ tile, viewMode, clipPlane, selectedLatticeType }: {
+function DemoTileViewerWithMode({ tile, viewMode, clipPlane, selectedLatticeType, onSelectLatticeType }: {
   tile: DemoTileState;
   viewMode: 'original' | 'lattice' | 'cross_section' | 'xray';
   clipPlane: ClipPlaneState;
   selectedLatticeType: LatticeType;
+  onSelectLatticeType: (type: LatticeType) => void;
 }) {
   const placeholder = useMemo(() => generateSphereMesh(DEMO_VIEW_TARGET_RADIUS, 20), []);
   const placeholderGeom = useMemo(() => {
@@ -282,8 +283,28 @@ function DemoTileViewerWithMode({ tile, viewMode, clipPlane, selectedLatticeType
   const showPlaceholder = viewMode === 'original' || !tile.result;
   const tileResult = tile.result;
 
+  const isSelected = tile.type === selectedLatticeType;
+  const handleSelect = useCallback(() => {
+    onSelectLatticeType(tile.type);
+  }, [onSelectLatticeType, tile.type]);
+
+  const handleKeyDown = useCallback((e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      onSelectLatticeType(tile.type);
+    }
+  }, [onSelectLatticeType, tile.type]);
+
   return (
-    <div className={`demo-window ${tile.type === selectedLatticeType ? 'demo-window-selected' : ''}`}>
+    <div
+      className={`demo-window ${isSelected ? 'demo-window-selected' : ''}`}
+      role="button"
+      tabIndex={0}
+      aria-pressed={isSelected}
+      aria-label={`Select ${tile.label} lattice type`}
+      onClick={handleSelect}
+      onKeyDown={handleKeyDown}
+    >
       <div className="demo-window-label">{tile.label}</div>
       <Canvas camera={{ fov: 58, near: 0.1, far: 10000, position: [22, 16, 22] }} gl={{ localClippingEnabled: true }}>
         <ambientLight intensity={0.5} />
@@ -308,12 +329,13 @@ function DemoTileViewerWithMode({ tile, viewMode, clipPlane, selectedLatticeType
   );
 }
 
-function DemoGridView({ params, runId, viewMode, clipPlane, selectedLatticeType, sourceMesh, sphereMode, sphereRadius, sampleShape, keepOutTris }: {
+function DemoGridView({ params, runId, viewMode, clipPlane, selectedLatticeType, onSelectLatticeType, sourceMesh, sphereMode, sphereRadius, sampleShape, keepOutTris }: {
   params: LatticeParams;
   runId: number;
   viewMode: 'original' | 'lattice' | 'cross_section' | 'xray';
   clipPlane: ClipPlaneState;
   selectedLatticeType: LatticeType;
+  onSelectLatticeType: (type: LatticeType) => void;
   sourceMesh: TriangleMesh | null;
   sphereMode: boolean;
   sphereRadius: number;
@@ -440,6 +462,7 @@ function DemoGridView({ params, runId, viewMode, clipPlane, selectedLatticeType,
           viewMode={viewMode}
           clipPlane={clipPlane}
           selectedLatticeType={selectedLatticeType}
+          onSelectLatticeType={onSelectLatticeType}
         />
       ))}
     </div>
@@ -451,7 +474,7 @@ export function Viewer3D() {
     originalMesh, sphereMode, sphereRadius, sampleShape, viewMode, clipPlane,
     keepOutTris, keepInTris, selectionMode, resultMesh,
     toggleKeepOut, toggleKeepIn, viewerBackground, demoModeActive,
-    demoRunId, params,
+    demoRunId, params, setLatticeType,
   } = useStore();
 
   const handleFaceClick = useCallback((triIdx: number) => {
@@ -470,6 +493,7 @@ export function Viewer3D() {
           viewMode={viewMode}
           clipPlane={clipPlane}
           selectedLatticeType={params.latticeType}
+          onSelectLatticeType={setLatticeType}
           sourceMesh={originalMesh}
           sphereMode={sphereMode}
           sphereRadius={sphereRadius}
