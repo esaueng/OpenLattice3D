@@ -89,10 +89,14 @@ function paramsForType(base: LatticeParams, type: LatticeType): LatticeParams {
   };
 }
 
-function seedDemoParamsMap(seed: LatticeParams, existing: DemoParamsByType): DemoParamsByType {
+function defaultParamsForType(type: LatticeType): LatticeParams {
+  return paramsForType(DEFAULT_PARAMS, type);
+}
+
+function seedDemoParamsMap(existing: DemoParamsByType): DemoParamsByType {
   const out: DemoParamsByType = { ...existing };
   for (const type of ALL_LATTICE_TYPES) {
-    if (!out[type]) out[type] = paramsForType(seed, type);
+    if (!out[type]) out[type] = defaultParamsForType(type);
   }
   return out;
 }
@@ -318,7 +322,7 @@ export const useStore = create<AppState>((set) => ({
         ...s.demoParamsByType,
         [currentType]: { ...s.params, latticeType: currentType },
       };
-      const nextParams = nextMap[type] ? { ...nextMap[type]!, latticeType: type } : paramsForType(s.params, type);
+      const nextParams = nextMap[type] ? { ...nextMap[type]!, latticeType: type } : defaultParamsForType(type);
       nextMap[type] = nextParams;
       return {
         params: nextParams,
@@ -373,7 +377,7 @@ export const useStore = create<AppState>((set) => ({
       ...s.demoParamsByType,
       [currentType]: { ...s.params, latticeType: currentType },
     };
-    const nextMap = seedDemoParamsMap(s.params, mapWithCurrent);
+    const nextMap = seedDemoParamsMap(mapWithCurrent);
     const activeParams = nextMap[currentType] ?? s.params;
     return {
       demoModeActive: true,
