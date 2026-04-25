@@ -27,9 +27,10 @@ export function RightPanel() {
   } = store;
 
   return (
-    <div className="panel right-panel">
+    <div className="panel-content">
       <div className="panel-intro">
-        <h2>Inspect & Export</h2>
+        <span className="panel-eyebrow">context</span>
+        <h2>Inspect and export</h2>
         <p>Review validation, explore views, and export outputs.</p>
       </div>
       {/* View Controls */}
