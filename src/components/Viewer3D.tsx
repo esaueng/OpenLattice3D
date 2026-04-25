@@ -157,7 +157,6 @@ function ResultMeshView({ result }: { result: MarchingCubesResult }) {
 }
 
 function CrossSectionView({ result, clip }: { result: MarchingCubesResult; clip: ClipPlaneState }) {
-  const { gl } = useThree();
   const meshRef = useRef<THREE.Mesh>(null);
 
   const geom = useMemo(() => {
@@ -169,11 +168,6 @@ function CrossSectionView({ result, clip }: { result: MarchingCubesResult; clip:
 
   const bounds = useMemo(() => resultBounds(result), [result]);
   const plane = useMemo(() => clipStateTo3(clip, bounds), [clip, bounds]);
-
-  useEffect(() => {
-    gl.localClippingEnabled = true;
-    return () => { gl.localClippingEnabled = false; };
-  }, [gl]);
 
   useFrame(() => {
     const p = clipStateTo3(clip, bounds);
@@ -234,7 +228,7 @@ function AutoFit() {
   const store = useStore();
   const fitted = useRef(false);
 
-  useMemo(() => {
+  useEffect(() => {
     if (fitted.current) return;
     const mesh = store.originalMesh;
     const sphereMode = store.sphereMode;
@@ -454,26 +448,34 @@ function DemoGridView({ params, demoParamsByType, runId, viewMode, clipPlane, se
 
   useEffect(() => {
     const allTypes = DEMO_TILE_ITEMS.map((item) => item.type);
+    let cancelled = false;
 
     if (!sourceMesh && !sphereMode) {
       for (const type of allTypes) stopTileWorker(type);
-      setTiles(DEMO_TILE_ITEMS.map((item) => ({
-        ...item,
-        status: 'error',
-        result: null,
-        error: 'Import or select a sample model',
-      })));
+      queueMicrotask(() => {
+        if (cancelled) return;
+        setTiles(DEMO_TILE_ITEMS.map((item) => ({
+          ...item,
+          status: 'error',
+          result: null,
+          error: 'Import or select a sample model',
+        })));
+      });
       hasCompletedInitialFullRun.current = false;
-      return;
+      return () => { cancelled = true; };
     }
 
     completedSigRef.current = {};
     runningSigRef.current = {};
-    setTiles(DEMO_TILE_ITEMS.map((item) => ({ ...item, status: 'pending', result: null, error: undefined })));
-    generateTiles(allTypes, latestParamsRef.current, true);
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setTiles(DEMO_TILE_ITEMS.map((item) => ({ ...item, status: 'pending', result: null, error: undefined })));
+      generateTiles(allTypes, latestParamsRef.current, true);
+    });
     hasCompletedInitialFullRun.current = true;
 
     return () => {
+      cancelled = true;
       for (const type of allTypes) stopTileWorker(type);
     };
   }, [runId, sourceMesh, sphereMode, sphereRadius, sampleShape, keepOutTris, stopTileWorker, generateTiles]);
@@ -481,7 +483,9 @@ function DemoGridView({ params, demoParamsByType, runId, viewMode, clipPlane, se
   useEffect(() => {
     if (!hasCompletedInitialFullRun.current) return;
     if (!sourceMesh && !sphereMode) return;
-    generateTiles([selectedLatticeType], params, false);
+    queueMicrotask(() => {
+      generateTiles([selectedLatticeType], params, false);
+    });
   }, [params, selectedLatticeType, sourceMesh, sphereMode, generateTiles]);
 
   useEffect(() => () => {
