@@ -169,16 +169,16 @@ export function generateCylinderMesh(radius: number, height: number, segments: n
     const a1 = (2 * Math.PI * (i + 1)) / segments;
     const c0 = Math.cos(a0), s0 = Math.sin(a0);
     const c1 = Math.cos(a1), s1 = Math.sin(a1);
-    const x0 = radius * c0, z0 = radius * s0;
-    const x1 = radius * c1, z1 = radius * s1;
+    const x0 = radius * c0, y0 = radius * s0;
+    const x1 = radius * c1, y1 = radius * s1;
 
     // Side quad (two triangles)
-    tris.push(x0, -hh, z0, x1, -hh, z1, x1, hh, z1);
-    tris.push(x0, -hh, z0, x1, hh, z1, x0, hh, z0);
+    tris.push(x0, y0, -hh, x1, y1, -hh, x1, y1, hh);
+    tris.push(x0, y0, -hh, x1, y1, hh, x0, y0, hh);
     // Top cap
-    tris.push(0, hh, 0, x0, hh, z0, x1, hh, z1);
+    tris.push(0, 0, hh, x0, y0, hh, x1, y1, hh);
     // Bottom cap
-    tris.push(0, -hh, 0, x1, -hh, z1, x0, -hh, z0);
+    tris.push(0, 0, -hh, x1, y1, -hh, x0, y0, -hh);
   }
 
   const triCount = tris.length / 9;
@@ -210,8 +210,8 @@ export function generateTorusMesh(majorRadius: number, tubeRadius: number, major
 
       const torusPoint = (u: number, v: number): [number, number, number] => [
         (majorRadius + tubeRadius * Math.cos(v)) * Math.cos(u),
-        tubeRadius * Math.sin(v),
         (majorRadius + tubeRadius * Math.cos(v)) * Math.sin(u),
+        tubeRadius * Math.sin(v),
       ];
 
       const p00 = torusPoint(u0, v0);
@@ -251,10 +251,10 @@ export function generateCapsuleMesh(radius: number, height: number, segments: nu
     const a1 = (2 * Math.PI * (i + 1)) / segments;
     const c0 = Math.cos(a0), s0 = Math.sin(a0);
     const c1 = Math.cos(a1), s1 = Math.sin(a1);
-    const x0 = radius * c0, z0 = radius * s0;
-    const x1 = radius * c1, z1 = radius * s1;
-    tris.push(x0, -hh, z0, x1, -hh, z1, x1, hh, z1);
-    tris.push(x0, -hh, z0, x1, hh, z1, x0, hh, z0);
+    const x0 = radius * c0, y0 = radius * s0;
+    const x1 = radius * c1, y1 = radius * s1;
+    tris.push(x0, y0, -hh, x1, y1, -hh, x1, y1, hh);
+    tris.push(x0, y0, -hh, x1, y1, hh, x0, y0, hh);
   }
 
   // Hemisphere caps (lat/lon)
@@ -266,22 +266,22 @@ export function generateCapsuleMesh(radius: number, height: number, segments: nu
       const phi0 = (2 * Math.PI * lon) / segments;
       const phi1 = (2 * Math.PI * (lon + 1)) / segments;
 
-      // Top cap (centered at y = hh)
+      // Top cap (centered at z = hh)
       const tp = (th: number, ph: number): [number, number, number] => [
         radius * Math.cos(th) * Math.cos(ph),
-        hh + radius * Math.sin(th),
         radius * Math.cos(th) * Math.sin(ph),
+        hh + radius * Math.sin(th),
       ];
       const t00 = tp(theta0, phi0), t01 = tp(theta0, phi1);
       const t10 = tp(theta1, phi0), t11 = tp(theta1, phi1);
       tris.push(...t00, ...t01, ...t10);
       tris.push(...t01, ...t11, ...t10);
 
-      // Bottom cap (centered at y = -hh)
+      // Bottom cap (centered at z = -hh)
       const bp = (th: number, ph: number): [number, number, number] => [
         radius * Math.cos(th) * Math.cos(ph),
-        -hh - radius * Math.sin(th),
         radius * Math.cos(th) * Math.sin(ph),
+        -hh - radius * Math.sin(th),
       ];
       const b00 = bp(theta0, phi0), b01 = bp(theta0, phi1);
       const b10 = bp(theta1, phi0), b11 = bp(theta1, phi1);

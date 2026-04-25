@@ -829,8 +829,8 @@ export function buildCylinderLattice(
   params: LatticeParams,
 ): (x: number, y: number, z: number) => number {
   return buildAnalyticLattice((x, y, z) => {
-    const dRadial = Math.sqrt(x*x + z*z) - radius;
-    const dAxial = Math.abs(y) - halfHeight;
+    const dRadial = Math.sqrt(x*x + y*y) - radius;
+    const dAxial = Math.abs(z) - halfHeight;
     const outside = Math.sqrt(Math.max(dRadial,0)**2 + Math.max(dAxial,0)**2);
     const inside = Math.min(Math.max(dRadial, dAxial), 0);
     return outside + inside;
@@ -843,8 +843,8 @@ export function buildTorusLattice(
   params: LatticeParams,
 ): (x: number, y: number, z: number) => number {
   return buildAnalyticLattice((x, y, z) => {
-    const qx = Math.sqrt(x*x + z*z) - majorRadius;
-    return Math.sqrt(qx*qx + y*y) - tubeRadius;
+    const qx = Math.sqrt(x*x + y*y) - majorRadius;
+    return Math.sqrt(qx*qx + z*z) - tubeRadius;
   }, params);
 }
 
@@ -854,8 +854,8 @@ export function buildCapsuleLattice(
   params: LatticeParams,
 ): (x: number, y: number, z: number) => number {
   return buildAnalyticLattice((x, y, z) => {
-    // Clamp y to the cylinder body, then measure distance to that clamped point
-    const cy = Math.max(-halfHeight, Math.min(halfHeight, y));
-    return Math.sqrt(x*x + (y - cy)*(y - cy) + z*z) - radius;
+    // Clamp z to the cylinder body, then measure distance to that clamped point.
+    const cz = Math.max(-halfHeight, Math.min(halfHeight, z));
+    return Math.sqrt(x*x + y*y + (z - cz)*(z - cz)) - radius;
   }, params);
 }
