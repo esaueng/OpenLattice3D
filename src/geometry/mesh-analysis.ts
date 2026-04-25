@@ -274,7 +274,7 @@ export function generateCapsuleMesh(radius: number, height: number, segments: nu
       ];
       const t00 = tp(theta0, phi0), t01 = tp(theta0, phi1);
       const t10 = tp(theta1, phi0), t11 = tp(theta1, phi1);
-      if (lat > 0 || true) tris.push(...t00, ...t01, ...t10);
+      tris.push(...t00, ...t01, ...t10);
       tris.push(...t01, ...t11, ...t10);
 
       // Bottom cap (centered at y = -hh)

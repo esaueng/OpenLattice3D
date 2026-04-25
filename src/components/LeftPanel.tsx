@@ -196,15 +196,16 @@ export function LeftPanel() {
   const generateDisabledByMultiview = store.demoModeActive;
 
   return (
-    <div className="panel left-panel">
+    <div className="panel-content">
       <div className="panel-intro">
-        <h2>Setup</h2>
-        <p>Import a model, tune lattice parameters, then generate.</p>
+        <span className="panel-eyebrow">setup</span>
+        <h2>Model and lattice</h2>
+        <p>Import a mesh, select a sample part, tune parameters, and generate.</p>
       </div>
 
       {/* Import Section */}
       <section className="panel-section">
-        <h3>Import</h3>
+        <h3>Model</h3>
         <input
           ref={fileRef}
           type="file"
@@ -284,7 +285,7 @@ export function LeftPanel() {
       {/* Lattice Parameters */}
       {hasModelOrDemo && (
         <section className="panel-section">
-          <h3>Lattice Parameters</h3>
+          <h3>Lattice</h3>
 
           <div className="row">
             <label>Lattice Type:</label>

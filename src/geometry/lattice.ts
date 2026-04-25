@@ -611,13 +611,6 @@ function basisFromNormal(n: Vec3): { t: Vec3; b: Vec3; n: Vec3 } {
   return { t, b, n: normal };
 }
 
-function hexPrismSdf(local: Vec3, inRadius: number, depth: number): number {
-  const circumRadius = inRadius / Math.cos(Math.PI / 6);
-  const d2 = sdHexagon2D(local[0], local[1], circumRadius);
-  const dz = Math.abs(local[2]) - depth * 0.5;
-  return Math.max(d2, dz);
-}
-
 function sdRegularPolygon2D(px: number, py: number, radius: number, sides: number): number {
   const verts = Array.from({ length: sides }, (_, i) => {
     const angle = (TWO_PI / sides) * i;
