@@ -135,6 +135,7 @@ interface AppState {
   viewMode: ViewMode;
   clipPlane: ClipPlaneState;
   viewerBackground: string;
+  viewportResetSignal: number;
   demoModeActive: boolean;
   demoRunId: number;
 
@@ -162,6 +163,7 @@ interface AppState {
   setViewMode: (mode: ViewMode) => void;
   setClipPlane: (partial: Partial<ClipPlaneState>) => void;
   setViewerBackground: (color: string) => void;
+  resetViewport: () => void;
   setDemoModeActive: (active: boolean) => void;
   startDemoRun: () => void;
   importParams: (imported: Partial<LatticeParams>) => void;
@@ -200,6 +202,7 @@ export const useStore = create<AppState>((set) => ({
   viewMode: persisted?.viewMode ?? 'original',
   clipPlane: persisted?.clipPlane ?? { axis: 'z', position: 0.5, flipped: false },
   viewerBackground: persisted?.viewerBackground ?? '#000000',
+  viewportResetSignal: 0,
   demoModeActive: false,
   demoRunId: 0,
   logs: [],
@@ -369,6 +372,8 @@ export const useStore = create<AppState>((set) => ({
 
   setViewerBackground: (color) => set({ viewerBackground: color }),
 
+  resetViewport: () => set((s) => ({ viewportResetSignal: s.viewportResetSignal + 1 })),
+
   setDemoModeActive: (active) => set({ demoModeActive: active }),
 
   startDemoRun: () => set((s) => {
@@ -438,6 +443,7 @@ export const useStore = create<AppState>((set) => ({
       viewMode: 'original',
       clipPlane: { axis: 'z', position: 0.5, flipped: false },
       viewerBackground: '#000000',
+      viewportResetSignal: 0,
       logs: [],
       demoModeActive: false,
       demoRunId: 0,
