@@ -252,7 +252,8 @@ function AutoFit() {
     camera.up.set(0, 0, 1);
     (camera as THREE.PerspectiveCamera).position.set(size * 2, -size * 2, size * 1.5);
     camera.lookAt(0, 0, 0);
-  }, [store.originalMesh, store.sphereMode, store.sphereRadius, store.sampleShape, camera]);
+    camera.updateProjectionMatrix();
+  }, [store.originalMesh, store.sphereMode, store.sphereRadius, store.sampleShape, store.viewportResetSignal, camera]);
 
   return null;
 }
@@ -515,7 +516,7 @@ export function Viewer3D() {
     originalMesh, sphereMode, sphereRadius, sampleShape, viewMode, clipPlane,
     keepOutTris, keepInTris, selectionMode, resultMesh,
     toggleKeepOut, toggleKeepIn, viewerBackground, demoModeActive,
-    demoRunId, params, demoParamsByType, setLatticeType,
+    demoRunId, params, demoParamsByType, setLatticeType, viewportResetSignal,
   } = useStore();
 
   const handleFaceClick = useCallback((triIdx: number) => {
@@ -523,12 +524,11 @@ export function Viewer3D() {
     else if (selectionMode === 'keep_in') toggleKeepIn(triIdx);
   }, [selectionMode, toggleKeepOut, toggleKeepIn]);
 
-  const hasContent = originalMesh || sphereMode;
-
   if (demoModeActive) {
     return (
       <div style={{ width: '100%', height: '100%', background: viewerBackground }}>
         <DemoGridView
+          key={viewportResetSignal}
           params={params}
           demoParamsByType={demoParamsByType}
           runId={demoRunId}
@@ -559,7 +559,7 @@ export function Viewer3D() {
         <directionalLight position={[50, 50, 50]} intensity={0.8} />
         <directionalLight position={[-30, -20, 40]} intensity={0.3} />
 
-        {hasContent && <AutoFit />}
+        <AutoFit />
 
         {viewMode === 'original' && originalMesh && (
           <OriginalMeshView
