@@ -9,7 +9,7 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5173 in your browser.
+Open http://127.0.0.1:5174 in your browser.
 
 ## Deploy to Cloudflare Workers
 
