@@ -226,10 +226,8 @@ function XRayView({ result }: { result: MarchingCubesResult }) {
 function AutoFit() {
   const { camera } = useThree();
   const store = useStore();
-  const fitted = useRef(false);
 
   useEffect(() => {
-    if (fitted.current) return;
     const mesh = store.originalMesh;
     const sphereMode = store.sphereMode;
     const sphereRadius = store.sphereRadius;
@@ -251,9 +249,9 @@ function AutoFit() {
         default: size = sphereRadius; break;
       }
     }
-    (camera as THREE.PerspectiveCamera).position.set(size * 2, size * 1.5, size * 2);
+    camera.up.set(0, 0, 1);
+    (camera as THREE.PerspectiveCamera).position.set(size * 2, -size * 2, size * 1.5);
     camera.lookAt(0, 0, 0);
-    fitted.current = true;
   }, [store.originalMesh, store.sphereMode, store.sphereRadius, store.sampleShape, camera]);
 
   return null;
@@ -300,7 +298,10 @@ function DemoTileViewerWithMode({ tile, viewMode, clipPlane, selectedLatticeType
       onKeyDown={handleKeyDown}
     >
       <div className="demo-window-label">{tile.label}</div>
-      <Canvas camera={{ fov: 58, near: 0.1, far: 10000, position: [22, 16, 22] }} gl={{ localClippingEnabled: true }}>
+      <Canvas
+        camera={{ fov: 58, near: 0.1, far: 10000, position: [22, -22, 16], up: [0, 0, 1] }}
+        gl={{ localClippingEnabled: true }}
+      >
         <ambientLight intensity={0.5} />
         <directionalLight position={[40, 40, 40]} intensity={0.8} />
         {showPlaceholder ? (
@@ -547,7 +548,13 @@ export function Viewer3D() {
 
   return (
     <div style={{ width: '100%', height: '100%', background: viewerBackground }}>
-      <Canvas camera={{ fov: 50, near: 0.1, far: 10000 }} gl={{ localClippingEnabled: true }}>
+      <Canvas
+        camera={{ fov: 50, near: 0.1, far: 10000, up: [0, 0, 1] }}
+        gl={{ localClippingEnabled: true }}
+        onCreated={({ camera }) => {
+          camera.up.set(0, 0, 1);
+        }}
+      >
         <ambientLight intensity={0.4} />
         <directionalLight position={[50, 50, 50]} intensity={0.8} />
         <directionalLight position={[-30, -20, 40]} intensity={0.3} />
