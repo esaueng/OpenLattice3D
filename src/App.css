@@ -421,6 +421,12 @@ svg {
   background: rgba(239, 68, 68, 0.2);
 }
 
+.btn-danger-confirm {
+  color: #fff1f2;
+  background: rgba(239, 68, 68, 0.28);
+  border-color: rgba(248, 113, 113, 0.88);
+}
+
 .btn-small {
   min-height: 28px;
   padding: 5px 8px;
