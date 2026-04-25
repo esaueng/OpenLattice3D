@@ -36,7 +36,6 @@
   --radius-md: 4px;
   --topbar-h: 44px;
   --statusbar-h: 30px;
-  --stepbar-w: 152px;
   --context-w: 344px;
   --border-thin: 1px solid var(--color-border);
   --shadow-panel: 0 14px 38px rgba(0, 0, 0, 0.32);
@@ -240,102 +239,16 @@ svg {
 .workspace {
   min-height: 0;
   display: grid;
-  grid-template-columns: var(--stepbar-w) 344px minmax(360px, 1fr) var(--context-w);
+  grid-template-columns: 344px minmax(360px, 1fr) var(--context-w);
   background: var(--color-bg);
 }
 
-.stepbar {
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  padding: var(--sp-4) var(--sp-2);
-  background: var(--color-surface);
-  border-right: var(--border-thin);
-}
-
-.stepbar-eyebrow,
-.panel-eyebrow,
-.stepbar-footer {
+.panel-eyebrow {
   color: var(--color-text-subtle);
   font-family: var(--font-mono);
   font-size: var(--fs-mini);
   letter-spacing: 0.14em;
   text-transform: uppercase;
-}
-
-.step-list {
-  display: grid;
-  gap: var(--sp-1);
-  margin-top: var(--sp-3);
-}
-
-.step {
-  height: 48px;
-  display: grid;
-  grid-template-columns: 30px minmax(64px, 1fr) 6px;
-  align-items: center;
-  gap: var(--sp-2);
-  padding: 0 var(--sp-2);
-  color: var(--color-text-muted);
-  border-left: 2px solid transparent;
-  border-radius: 0 var(--radius-md) var(--radius-md) 0;
-  text-align: left;
-}
-
-.step.active {
-  color: var(--color-text);
-  background: var(--color-surface-2);
-  border-left-color: var(--color-accent);
-}
-
-.step-icon {
-  width: 30px;
-  height: 30px;
-  display: inline-grid;
-  place-items: center;
-  color: var(--color-text-subtle);
-  border: var(--border-thin);
-  border-radius: var(--radius-md);
-  background: rgba(11, 15, 20, 0.28);
-  font-family: var(--font-mono);
-  font-size: var(--fs-xs);
-}
-
-.step-icon.done {
-  color: var(--color-success);
-  border-color: rgba(34, 197, 94, 0.45);
-  background: rgba(34, 197, 94, 0.08);
-}
-
-.step.active .step-icon {
-  color: var(--color-accent);
-  border-color: var(--color-accent-border);
-  background: var(--color-accent-dim);
-}
-
-.step-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 999px;
-  background: var(--color-border-strong);
-}
-
-.stepbar-footer {
-  display: grid;
-  gap: 5px;
-  margin-top: auto;
-  letter-spacing: 0;
-  text-transform: lowercase;
-}
-
-.stepbar-footer div {
-  display: flex;
-  justify-content: space-between;
-}
-
-.stepbar-footer strong {
-  color: var(--color-text-muted);
-  font-weight: var(--fw-regular);
 }
 
 .tool-panel,
@@ -917,7 +830,7 @@ svg {
 
 @media (max-width: 1440px) {
   .workspace {
-    grid-template-columns: 136px 316px minmax(320px, 1fr) 316px;
+    grid-template-columns: 316px minmax(320px, 1fr) 316px;
   }
 
   .row label {
@@ -952,33 +865,7 @@ svg {
   .workspace {
     display: grid;
     grid-template-columns: 1fr;
-    grid-template-rows: auto auto minmax(360px, 58vh) auto;
-  }
-
-  .stepbar {
-    border-right: 0;
-    border-bottom: var(--border-thin);
-  }
-
-  .step-list {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-  }
-
-  .step {
-    height: 42px;
-    grid-template-columns: 28px minmax(0, 1fr);
-    border-left: 0;
-    border-bottom: 2px solid transparent;
-    border-radius: var(--radius-md);
-  }
-
-  .step.active {
-    border-bottom-color: var(--color-accent);
-  }
-
-  .step-dot,
-  .stepbar-footer {
-    display: none;
+    grid-template-rows: auto minmax(360px, 58vh) auto;
   }
 
   .tool-panel,
@@ -1005,18 +892,6 @@ svg {
 
   .topbar-divider {
     display: none;
-  }
-
-  .step-list {
-    grid-template-columns: 1fr;
-  }
-
-  .step {
-    grid-template-columns: 30px minmax(0, 1fr) 6px;
-  }
-
-  .step-dot {
-    display: block;
   }
 
   .row {
