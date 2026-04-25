@@ -103,7 +103,7 @@ export function LeftPanel() {
   const handleReset = useCallback(() => {
     if (!clearAllArmed) {
       setClearAllArmed(true);
-      store.addLog('Click Clear All again to confirm reset.', 'warn');
+      store.addLog('Click Confirm to reset.', 'warn');
       return;
     }
     setClearAllArmed(false);
@@ -243,12 +243,12 @@ export function LeftPanel() {
           <button
             className={`btn btn-small btn-danger ${clearAllArmed ? 'btn-danger-confirm' : ''}`}
             title={clearAllArmed
-              ? 'Click again to reset the project, parameters, and generated results.'
+              ? 'Confirm reset of the project, parameters, and generated results.'
               : 'Reset the project, parameters, and generated results.'}
             onClick={handleReset}
             aria-live="polite"
           >
-            {clearAllArmed ? 'Click again to clear' : 'Clear All'}
+            {clearAllArmed ? 'Confirm' : 'Clear All'}
           </button>
         </div>
         <div className="row" style={{ marginTop: '8px' }}>
