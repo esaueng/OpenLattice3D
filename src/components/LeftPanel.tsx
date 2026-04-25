@@ -1,5 +1,5 @@
 // Left Panel: Import, Constraints, Lattice Type, Parameters
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useStore } from '../store/useStore';
 import { parseSTL } from '../geometry/stl-parser';
 import { analyzeMesh, repairMesh } from '../geometry/mesh-analysis';
@@ -15,6 +15,13 @@ export function LeftPanel() {
   const fileRef = useRef<HTMLInputElement>(null);
   const jsonRef = useRef<HTMLInputElement>(null);
   const workerRef = useRef<Worker | null>(null);
+  const [clearAllArmed, setClearAllArmed] = useState(false);
+
+  useEffect(() => {
+    if (!clearAllArmed) return;
+    const timeout = window.setTimeout(() => setClearAllArmed(false), 4000);
+    return () => window.clearTimeout(timeout);
+  }, [clearAllArmed]);
 
   const requestNotificationPermissionOnce = useCallback(() => {
     void requestNotificationPermission();
@@ -94,9 +101,15 @@ export function LeftPanel() {
   }, [store]);
 
   const handleReset = useCallback(() => {
+    if (!clearAllArmed) {
+      setClearAllArmed(true);
+      store.addLog('Click Clear All again to confirm reset.', 'warn');
+      return;
+    }
+    setClearAllArmed(false);
     store.resetProject();
     store.addLog('Project reset to defaults');
-  }, [store]);
+  }, [clearAllArmed, store]);
 
   const startGeneration = useCallback(() => {
     if (store.generating) return;
@@ -227,8 +240,15 @@ export function LeftPanel() {
           <button className="btn btn-small" title="Import saved lattice parameters from a JSON file." onClick={() => jsonRef.current?.click()}>
             Import JSON
           </button>
-          <button className="btn btn-small btn-danger" title="Reset the project, parameters, and generated results." onClick={handleReset}>
-            Clear All
+          <button
+            className={`btn btn-small btn-danger ${clearAllArmed ? 'btn-danger-confirm' : ''}`}
+            title={clearAllArmed
+              ? 'Click again to reset the project, parameters, and generated results.'
+              : 'Reset the project, parameters, and generated results.'}
+            onClick={handleReset}
+            aria-live="polite"
+          >
+            {clearAllArmed ? 'Click again to clear' : 'Clear All'}
           </button>
         </div>
         <div className="row" style={{ marginTop: '8px' }}>
