@@ -27,6 +27,8 @@ const DEMO_TILE_ITEMS: Array<{ type: LatticeType; label: string }> = [
 ];
 
 const DEMO_VIEW_TARGET_RADIUS = 8;
+const VIEWPORT_PADDING = 1.2;
+const ISO_VIEW_DIRECTION = new THREE.Vector3(1, -1, 0.75).normalize();
 
 type DemoTileState = {
   type: LatticeType;
@@ -42,6 +44,27 @@ function resultBounds(result: MarchingCubesResult): THREE.Box3 {
   const p = result.positions;
   for (let i = 0; i < p.length; i += 3) box.expandByPoint(new THREE.Vector3(p[i], p[i + 1], p[i + 2]));
   return box;
+}
+
+function meshBounds(mesh: TriangleMesh): THREE.Box3 {
+  const box = new THREE.Box3();
+  const p = mesh.positions;
+  const point = new THREE.Vector3();
+  for (let i = 0; i < p.length; i += 3) {
+    box.expandByPoint(point.set(p[i], p[i + 1], p[i + 2]));
+  }
+  return box;
+}
+
+function distanceToFitBoundingSphere(camera: THREE.Camera, radius: number): number {
+  if (!(camera instanceof THREE.PerspectiveCamera)) return radius * 4;
+
+  const vFov = THREE.MathUtils.degToRad(camera.fov);
+  const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
+  const verticalDistance = radius / Math.sin(vFov / 2);
+  const horizontalDistance = radius / Math.sin(hFov / 2);
+
+  return Math.max(verticalDistance, horizontalDistance) * VIEWPORT_PADDING;
 }
 
 /** Convert normalised clip-plane state → THREE.Plane */
@@ -224,36 +247,46 @@ function XRayView({ result }: { result: MarchingCubesResult }) {
 }
 
 function AutoFit() {
-  const { camera } = useThree();
+  const { camera, controls, size: canvasSize } = useThree();
   const store = useStore();
 
   useEffect(() => {
     const mesh = store.originalMesh;
-    const sphereMode = store.sphereMode;
-    const sphereRadius = store.sphereRadius;
-    let size = 50;
+    let bounds = new THREE.Box3().setFromCenterAndSize(
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(50, 50, 50),
+    );
+
     if (mesh) {
-      const p = mesh.positions;
-      let maxDist = 0;
-      for (let i = 0; i < p.length; i += 3) {
-        const d = Math.sqrt(p[i] * p[i] + p[i + 1] * p[i + 1] + p[i + 2] * p[i + 2]);
-        if (d > maxDist) maxDist = d;
-      }
-      size = maxDist;
-    } else if (sphereMode) {
-      switch (store.sampleShape) {
-        case 'cube': size = 15 * 1.73; break;
-        case 'cylinder': size = Math.sqrt(15 * 15 + 20 * 20); break;
-        case 'torus': size = 28; break;
-        case 'capsule': size = Math.sqrt(12 * 12 + 27 * 27); break;
-        default: size = sphereRadius; break;
-      }
+      bounds = meshBounds(mesh);
+    } else if (store.sphereMode && store.sampleShape) {
+      bounds = meshBounds(generateSampleMesh(store.sampleShape, store.sphereRadius));
     }
+
+    const center = bounds.getCenter(new THREE.Vector3());
+    const sphere = bounds.getBoundingSphere(new THREE.Sphere());
+    const radius = Math.max(sphere.radius, 1);
+    const distance = distanceToFitBoundingSphere(camera, radius);
+
     camera.up.set(0, 0, 1);
-    (camera as THREE.PerspectiveCamera).position.set(size * 2, -size * 2, size * 1.5);
-    camera.lookAt(0, 0, 0);
+    camera.position.copy(center).add(ISO_VIEW_DIRECTION.clone().multiplyScalar(distance));
+    camera.lookAt(center);
     camera.updateProjectionMatrix();
-  }, [store.originalMesh, store.sphereMode, store.sphereRadius, store.sampleShape, store.viewportResetSignal, camera]);
+
+    const orbitControls = controls as { target?: THREE.Vector3; update?: () => void } | null;
+    orbitControls?.target?.copy(center);
+    orbitControls?.update?.();
+  }, [
+    store.originalMesh,
+    store.sphereMode,
+    store.sphereRadius,
+    store.sampleShape,
+    store.viewportResetSignal,
+    camera,
+    controls,
+    canvasSize.width,
+    canvasSize.height,
+  ]);
 
   return null;
 }
