@@ -14,7 +14,6 @@ function App() {
     generating,
     progress,
     params,
-    logs,
     meshFileName,
     demoModeActive,
   } = useStore();
@@ -24,7 +23,6 @@ function App() {
   }, []);
 
   const hasModel = Boolean(originalMesh || sphereMode);
-  const latestLog = logs[0]?.message ?? 'Ready';
 
   return (
     <div className="app-shell">
@@ -95,10 +93,8 @@ function App() {
       </main>
 
       <footer className="statusbar">
-        <span className="statusbar-brand">Esau Engineering</span>
-        <span className="statusbar-message">{latestLog}</span>
         <a href="https://esauengineering.com/" target="_blank" rel="noreferrer">
-          esauengineering.com
+          Built by Esau Engineering
         </a>
       </footer>
     </div>
