@@ -727,26 +727,15 @@ svg {
 
 .statusbar {
   min-width: 0;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  display: flex;
+  justify-content: flex-end;
   align-items: center;
-  gap: var(--sp-3);
   padding: 0 var(--sp-3);
   color: var(--color-text-subtle);
   background: var(--color-surface);
   border-top: var(--border-thin);
   font-family: var(--font-mono);
   font-size: var(--fs-mini);
-}
-
-.statusbar-brand {
-  color: var(--color-text-muted);
-}
-
-.statusbar-message {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .statusbar a {
@@ -949,13 +938,9 @@ svg {
   }
 
   .statusbar {
-    grid-template-columns: 1fr;
+    justify-content: flex-end;
     height: auto;
     min-height: var(--statusbar-h);
     padding: 6px var(--sp-3);
-  }
-
-  .statusbar a {
-    display: none;
   }
 }
