@@ -149,4 +149,4 @@ Wall thickness derived from iso-value `c = wallThickness * pi / cellSize`.
 
 ## License
 
-MIT. See [LICENSE](./LICENSE).
+Apache-2.0. See [LICENSE](./LICENSE).
