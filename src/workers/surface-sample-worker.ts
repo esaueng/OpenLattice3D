@@ -116,17 +116,17 @@ function sampleSurfacePointForShape(shape: SampleShape, params: ShapeSampleParam
     const pick = Math.random() * totalArea;
     if (pick < sideArea) {
       const theta = Math.random() * 2 * Math.PI;
-      const y = (Math.random() * 2 - 1) * h;
+      const z = (Math.random() * 2 - 1) * h;
       const x = r * Math.cos(theta);
-      const z = r * Math.sin(theta);
-      return { pos: [x, y, z], normal: normalize([x, 0, z]) };
+      const y = r * Math.sin(theta);
+      return { pos: [x, y, z], normal: normalize([x, y, 0]) };
     }
     const theta = Math.random() * 2 * Math.PI;
     const rr = Math.sqrt(Math.random()) * r;
     const x = rr * Math.cos(theta);
-    const z = rr * Math.sin(theta);
+    const y = rr * Math.sin(theta);
     const top = pick < sideArea + capArea;
-    return { pos: [x, top ? h : -h, z], normal: [0, top ? 1 : -1, 0] };
+    return { pos: [x, y, top ? h : -h], normal: [0, 0, top ? 1 : -1] };
   }
   if (shape === 'torus') {
     const major = params.torusMajor ?? 20;
@@ -135,9 +135,9 @@ function sampleSurfacePointForShape(shape: SampleShape, params: ShapeSampleParam
     const v = Math.random() * 2 * Math.PI;
     const cx = (major + tube * Math.cos(v));
     const x = cx * Math.cos(u);
-    const z = cx * Math.sin(u);
-    const y = tube * Math.sin(v);
-    const normal = normalize([Math.cos(u) * Math.cos(v), Math.sin(v), Math.sin(u) * Math.cos(v)]);
+    const y = cx * Math.sin(u);
+    const z = tube * Math.sin(v);
+    const normal = normalize([Math.cos(u) * Math.cos(v), Math.sin(u) * Math.cos(v), Math.sin(v)]);
     return { pos: [x, y, z], normal };
   }
   const r = params.capRadius ?? 12;
@@ -148,21 +148,21 @@ function sampleSurfacePointForShape(shape: SampleShape, params: ShapeSampleParam
   const pick = Math.random() * totalArea;
   if (pick < cylArea) {
     const theta = Math.random() * 2 * Math.PI;
-    const y = (Math.random() * 2 - 1) * h;
+    const z = (Math.random() * 2 - 1) * h;
     const x = r * Math.cos(theta);
-    const z = r * Math.sin(theta);
-    return { pos: [x, y, z], normal: normalize([x, 0, z]) };
+    const y = r * Math.sin(theta);
+    return { pos: [x, y, z], normal: normalize([x, y, 0]) };
   }
   const u = Math.random();
   const v = Math.random();
   const theta = 2 * Math.PI * u;
   const phi = Math.acos(2 * v - 1);
   const sx = r * Math.sin(phi) * Math.cos(theta);
-  const sy = r * Math.cos(phi);
-  const sz = r * Math.sin(phi) * Math.sin(theta);
+  const sy = r * Math.sin(phi) * Math.sin(theta);
+  const sz = r * Math.cos(phi);
   const top = Math.random() > 0.5;
-  const centerY = top ? h : -h;
-  return { pos: [sx, sy + centerY, sz], normal: normalize([sx, sy, sz]) };
+  const centerZ = top ? h : -h;
+  return { pos: [sx, sy, sz + centerZ], normal: normalize([sx, sy, sz]) };
 }
 
 function generatePoissonSamples(
