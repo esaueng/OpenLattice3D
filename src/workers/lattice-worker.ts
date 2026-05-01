@@ -371,17 +371,17 @@ function sampleSurfacePointForShape(
     const pick = Math.random() * totalArea;
     if (pick < sideArea) {
       const theta = Math.random() * 2 * Math.PI;
-      const y = (Math.random() * 2 - 1) * h;
+      const z = (Math.random() * 2 - 1) * h;
       const x = r * Math.cos(theta);
-      const z = r * Math.sin(theta);
-      return { pos: [x, y, z], normal: normalize([x, 0, z]) };
+      const y = r * Math.sin(theta);
+      return { pos: [x, y, z], normal: normalize([x, y, 0]) };
     }
     const theta = Math.random() * 2 * Math.PI;
     const rr = Math.sqrt(Math.random()) * r;
     const x = rr * Math.cos(theta);
-    const z = rr * Math.sin(theta);
+    const y = rr * Math.sin(theta);
     const top = pick < sideArea + capArea;
-    return { pos: [x, top ? h : -h, z], normal: [0, top ? 1 : -1, 0] };
+    return { pos: [x, y, top ? h : -h], normal: [0, 0, top ? 1 : -1] };
   }
   if (shape === 'torus') {
     const major = params.torusMajor ?? 20;
@@ -390,9 +390,9 @@ function sampleSurfacePointForShape(
     const v = Math.random() * 2 * Math.PI;
     const cx = (major + tube * Math.cos(v));
     const x = cx * Math.cos(u);
-    const z = cx * Math.sin(u);
-    const y = tube * Math.sin(v);
-    const normal = normalize([Math.cos(u) * Math.cos(v), Math.sin(v), Math.sin(u) * Math.cos(v)]);
+    const y = cx * Math.sin(u);
+    const z = tube * Math.sin(v);
+    const normal = normalize([Math.cos(u) * Math.cos(v), Math.sin(u) * Math.cos(v), Math.sin(v)]);
     return { pos: [x, y, z], normal };
   }
   if (shape === 'capsule') {
@@ -404,25 +404,25 @@ function sampleSurfacePointForShape(
     const pick = Math.random() * totalArea;
     if (pick < cylArea) {
       const theta = Math.random() * 2 * Math.PI;
-      const y = (Math.random() * 2 - 1) * h;
+      const z = (Math.random() * 2 - 1) * h;
       const x = r * Math.cos(theta);
-      const z = r * Math.sin(theta);
-      return { pos: [x, y, z], normal: normalize([x, 0, z]) };
+      const y = r * Math.sin(theta);
+      return { pos: [x, y, z], normal: normalize([x, y, 0]) };
     }
     const u = Math.random();
     const v = Math.random();
     const theta = 2 * Math.PI * u;
     const phi = Math.acos(2 * v - 1);
     const sx = r * Math.sin(phi) * Math.cos(theta);
-    const sy = r * Math.cos(phi);
-    const sz = r * Math.sin(phi) * Math.sin(theta);
+    const sy = r * Math.sin(phi) * Math.sin(theta);
+    const sz = r * Math.cos(phi);
     const top = Math.random() > 0.5;
-    const centerY = top ? h : -h;
-    const pos: Vec3 = [sx, sy + centerY, sz];
+    const centerZ = top ? h : -h;
+    const pos: Vec3 = [sx, sy, sz + centerZ];
     const normal = normalize([sx, sy, sz]);
     return { pos, normal };
   }
-  return { pos: [0, 0, 0], normal: [0, 1, 0] };
+  return { pos: [0, 0, 0], normal: [0, 0, 1] };
 }
 
 function buildFibonacciSphereSamples(radius: number, count: number): SurfaceHexSample[] {
@@ -430,11 +430,11 @@ function buildFibonacciSphereSamples(radius: number, count: number): SurfaceHexS
   const goldenAngle = Math.PI * (3 - Math.sqrt(5));
   for (let i = 0; i < count; i++) {
     const t = (i + 0.5) / count;
-    const y = 1 - 2 * t;
-    const ring = Math.sqrt(1 - y * y);
+    const z = 1 - 2 * t;
+    const ring = Math.sqrt(1 - z * z);
     const theta = goldenAngle * i;
     const x = Math.cos(theta) * ring;
-    const z = Math.sin(theta) * ring;
+    const y = Math.sin(theta) * ring;
     const pos: Vec3 = [x * radius, y * radius, z * radius];
     samples.push({ pos, normal: normalize(pos) });
   }
@@ -744,10 +744,10 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
           }
           case 'cylinder': {
             const cr = 15, ch = 20; // R=15, H=40 → halfH=20
-            bounds = { min: [-cr-pad, -ch-pad, -cr-pad], max: [cr+pad, ch+pad, cr+pad] };
+            bounds = { min: [-cr-pad, -cr-pad, -ch-pad], max: [cr+pad, cr+pad, ch+pad] };
             objectSdf = (x, y, z) => {
-              const dRadial = Math.sqrt(x * x + z * z) - cr;
-              const dAxial = Math.abs(y) - ch;
+              const dRadial = Math.sqrt(x * x + y * y) - cr;
+              const dAxial = Math.abs(z) - ch;
               const outside = Math.sqrt(Math.max(dRadial, 0) ** 2 + Math.max(dAxial, 0) ** 2);
               const inside = Math.min(Math.max(dRadial, dAxial), 0);
               return outside + inside;
@@ -758,10 +758,10 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
           case 'torus': {
             const mR = 20, tR = 8; // major=20, tube=8
             const xy = mR + tR + pad;
-            bounds = { min: [-xy, -(tR+pad), -xy], max: [xy, tR+pad, xy] };
+            bounds = { min: [-xy, -xy, -(tR+pad)], max: [xy, xy, tR+pad] };
             objectSdf = (x, y, z) => {
-              const qx = Math.sqrt(x * x + z * z) - mR;
-              return Math.sqrt(qx * qx + y * y) - tR;
+              const qx = Math.sqrt(x * x + y * y) - mR;
+              return Math.sqrt(qx * qx + z * z) - tR;
             };
             sdf = isSurfacePolygon ? objectSdf : buildTorusLattice(mR, tR, params);
             break;
@@ -769,10 +769,10 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
           case 'capsule': {
             const capR = 12, capHH = 15; // R=12, H=30 → halfH=15, total extent = 15+12
             const capExt = capHH + capR + pad;
-            bounds = { min: [-(capR+pad), -capExt, -(capR+pad)], max: [capR+pad, capExt, capR+pad] };
+            bounds = { min: [-(capR+pad), -(capR+pad), -capExt], max: [capR+pad, capR+pad, capExt] };
             objectSdf = (x, y, z) => {
-              const cy = Math.max(-capHH, Math.min(capHH, y));
-              return Math.sqrt(x * x + (y - cy) * (y - cy) + z * z) - capR;
+              const cz = Math.max(-capHH, Math.min(capHH, z));
+              return Math.sqrt(x * x + y * y + (z - cz) * (z - cz)) - capR;
             };
             sdf = isSurfacePolygon ? objectSdf : buildCapsuleLattice(capR, capHH, params);
             break;

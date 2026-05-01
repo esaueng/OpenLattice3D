@@ -6,24 +6,14 @@ import { useStore } from './store/useStore';
 import { registerNotificationServiceWorker } from './utils/notifications';
 import './App.css';
 
-type WorkflowStep = {
-  id: string;
-  label: string;
-  icon: string;
-  complete: boolean;
-  active: boolean;
-};
-
 function App() {
   const {
     originalMesh,
     sphereMode,
     resultMesh,
-    validation,
     generating,
     progress,
     params,
-    logs,
     meshFileName,
     demoModeActive,
   } = useStore();
@@ -33,14 +23,6 @@ function App() {
   }, []);
 
   const hasModel = Boolean(originalMesh || sphereMode);
-  const latestLog = logs[0]?.message ?? 'Ready';
-  const workflow: WorkflowStep[] = [
-    { id: 'model', label: 'Model', icon: 'M', complete: hasModel, active: !hasModel },
-    { id: 'lattice', label: 'Lattice', icon: 'L', complete: hasModel, active: hasModel && !resultMesh && !generating },
-    { id: 'generate', label: 'Generate', icon: 'G', complete: Boolean(resultMesh), active: generating },
-    { id: 'inspect', label: 'Inspect', icon: 'I', complete: Boolean(validation), active: Boolean(resultMesh) && !validation },
-    { id: 'export', label: 'Export', icon: 'E', complete: Boolean(resultMesh), active: Boolean(resultMesh) && Boolean(validation) },
-  ];
 
   return (
     <div className="app-shell">
@@ -91,26 +73,6 @@ function App() {
       </header>
 
       <main className="workspace">
-        <nav className="stepbar" aria-label="Lattice workflow">
-          <div className="stepbar-eyebrow">workflow</div>
-          <div className="step-list">
-            {workflow.map((step) => (
-              <div key={step.id} className={`step ${step.active ? 'active' : ''}`}>
-                <span className={`step-icon ${step.complete ? 'done' : ''}`} aria-hidden="true">
-                  {step.icon}
-                </span>
-                <span>{step.label}</span>
-                <span className="step-dot" />
-              </div>
-            ))}
-          </div>
-          <div className="stepbar-footer">
-            <div><span>units</span><strong>mm</strong></div>
-            <div><span>kernel</span><strong>local</strong></div>
-            <div><span>mode</span><strong>{demoModeActive ? 'grid' : 'single'}</strong></div>
-          </div>
-        </nav>
-
         <section className="tool-panel left-panel" aria-label="Lattice setup">
           <LeftPanel />
         </section>
@@ -131,10 +93,8 @@ function App() {
       </main>
 
       <footer className="statusbar">
-        <span className="statusbar-brand">Esau Engineering</span>
-        <span className="statusbar-message">{latestLog}</span>
         <a href="https://esauengineering.com/" target="_blank" rel="noreferrer">
-          esauengineering.com
+          Built by Esau Engineering
         </a>
       </footer>
     </div>

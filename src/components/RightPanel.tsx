@@ -57,6 +57,15 @@ export function RightPanel() {
           ))}
         </div>
 
+        <button
+          className="btn btn-small btn-full"
+          title="Reset the 3D viewport to the standard Z-up isometric view."
+          onClick={store.resetViewport}
+          type="button"
+        >
+          Reset Viewport
+        </button>
+
         {/* Clip plane controls – only shown in cross-section mode */}
         {viewMode === 'cross_section' && (
           <div className="clip-controls">
