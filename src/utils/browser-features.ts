@@ -1,6 +1,8 @@
 export interface BrowserFeatureFlags {
   crossOriginIsolated: boolean;
   sharedArrayBuffer: boolean;
+  webAssembly: boolean;
+  wasmSingleThreadedReady: boolean;
   threadedWasmReady: boolean;
 }
 
@@ -23,11 +25,14 @@ export type BackendGeometryBuffers = SharedGeometryBuffers | TransferGeometryBuf
 export function getBrowserFeatureFlags(): BrowserFeatureFlags {
   const crossOriginIsolated = globalThis.crossOriginIsolated === true;
   const sharedArrayBuffer = typeof globalThis.SharedArrayBuffer === 'function';
+  const webAssembly = typeof globalThis.WebAssembly === 'object';
 
   return {
     crossOriginIsolated,
     sharedArrayBuffer,
-    threadedWasmReady: crossOriginIsolated && sharedArrayBuffer,
+    webAssembly,
+    wasmSingleThreadedReady: webAssembly,
+    threadedWasmReady: webAssembly && crossOriginIsolated && sharedArrayBuffer,
   };
 }
 
@@ -35,6 +40,7 @@ export function formatBrowserFeatureFlags(flags: BrowserFeatureFlags): string {
   return [
     `crossOriginIsolated=${flags.crossOriginIsolated ? 'yes' : 'no'}`,
     `SharedArrayBuffer=${flags.sharedArrayBuffer ? 'yes' : 'no'}`,
+    `WASM=${flags.wasmSingleThreadedReady ? 'yes' : 'no'}`,
     `threadedWasmReady=${flags.threadedWasmReady ? 'yes' : 'no'}`,
   ].join(', ');
 }
