@@ -3,7 +3,8 @@ export type GenerationBackendName =
   | 'cpu-tiled'
   | 'wasm-single-placeholder'
   | 'wasm-threaded-placeholder'
-  | 'webgpu-placeholder';
+  | 'webgpu-placeholder'
+  | 'webgpu-field-cpu-mc';
 
 export interface GenerationBackendCapabilities {
   hasWebGPU: boolean;
@@ -20,6 +21,7 @@ export interface GenerationBackendSelectionOptions {
   enableWasmSinglePlaceholder?: boolean;
   enableWasmThreadedPlaceholder?: boolean;
   enableWebGPUPlaceholder?: boolean;
+  enableWebGPUFieldCpuMc?: boolean;
   preferTiledCpu?: boolean;
 }
 
@@ -49,9 +51,11 @@ export function selectBestBackend(options: GenerationBackendSelectionOptions): G
     enableWasmSinglePlaceholder = false,
     enableWasmThreadedPlaceholder = false,
     enableWebGPUPlaceholder = false,
+    enableWebGPUFieldCpuMc = false,
     preferTiledCpu = true,
   } = options;
 
+  if (enableWebGPUFieldCpuMc && capabilities.hasWebGPU) return 'webgpu-field-cpu-mc';
   if (enableWebGPUPlaceholder && capabilities.hasWebGPU) return 'webgpu-placeholder';
   if (
     enableWasmThreadedPlaceholder &&

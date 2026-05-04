@@ -257,9 +257,7 @@ export function marchingCubesRectangular(
   const strideY = nx + 1;
   const strideZ = strideY * (ny + 1);
 
-  // Sample the field
   const field = new Float32Array((nx + 1) * (ny + 1) * (nz + 1));
-
   if (nx === ny && ny === nz && hasGridSampler(sdf)) {
     sdf.sampleField(bounds, nx, field, onProgress ? (fraction) => onProgress(fraction * 0.45) : undefined);
   } else {
@@ -276,12 +274,35 @@ export function marchingCubesRectangular(
     }
   }
 
+  return marchingCubesFromField(field, bounds, cells, isoValue, onProgress ? (fraction) => onProgress(0.45 + fraction * 0.55) : undefined);
+}
+
+export function marchingCubesFromField(
+  field: Float32Array,
+  bounds: { min: Vec3; max: Vec3 },
+  cells: Vec3,
+  isoValue: number = 0,
+  onProgress?: (fraction: number) => void
+): MarchingCubesResult {
+  const nx = cells[0], ny = cells[1], nz = cells[2];
+  const expectedLength = (nx + 1) * (ny + 1) * (nz + 1);
+  if (field.length !== expectedLength) {
+    throw new Error(`Scalar field length ${field.length} does not match expected length ${expectedLength}`);
+  }
+  const minX = bounds.min[0];
+  const minY = bounds.min[1];
+  const minZ = bounds.min[2];
+  const dx = (bounds.max[0] - bounds.min[0]) / nx;
+  const dy = (bounds.max[1] - bounds.min[1]) / ny;
+  const dz = (bounds.max[2] - bounds.min[2]) / nz;
+  const strideY = nx + 1;
+  const strideZ = strideY * (ny + 1);
   const vals = new Float32Array(8);
   const edgeVerts = new Float32Array(12 * 3);
   let triCount = 0;
 
   for (let z = 0; z < nz; z++) {
-    if (onProgress) onProgress(0.45 + (z / nz) * 0.2);
+    if (onProgress) onProgress((z / nz) * 0.36);
     for (let y = 0; y < ny; y++) {
       const base = fieldIndex(0, y, z, strideY, strideZ);
       for (let x = 0; x < nx; x++) {
@@ -295,7 +316,7 @@ export function marchingCubesRectangular(
   let writeOffset = 0;
 
   for (let z = 0; z < nz; z++) {
-    if (onProgress) onProgress(0.65 + (z / nz) * 0.35);
+    if (onProgress) onProgress(0.36 + (z / nz) * 0.64);
     const z0 = minZ + z * dz;
     const z1 = minZ + (z + 1) * dz;
     for (let y = 0; y < ny; y++) {
