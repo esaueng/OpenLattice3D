@@ -113,6 +113,19 @@ export interface MarchingCubesResult {
   triCount: number;
 }
 
+export interface GridSdfSampler {
+  sampleField(
+    bounds: { min: Vec3; max: Vec3 },
+    resolution: number,
+    out: Float32Array,
+    onProgress?: (fraction: number) => void
+  ): void;
+}
+
+function hasGridSampler(sdf: (x: number, y: number, z: number) => number): sdf is ((x: number, y: number, z: number) => number) & GridSdfSampler {
+  return typeof (sdf as Partial<GridSdfSampler>).sampleField === 'function';
+}
+
 function fieldIndex(x: number, y: number, z: number, strideY: number, strideZ: number): number {
   return x + y * strideY + z * strideZ;
 }
@@ -237,14 +250,18 @@ export function marchingCubes(
   // Sample the field
   const field = new Float32Array((nx + 1) * (ny + 1) * (nz + 1));
 
-  for (let z = 0; z <= nz; z++) {
-    if (onProgress) onProgress((z / nz) * 0.45);
-    const pz = minZ + z * dz;
-    for (let y = 0; y <= ny; y++) {
-      const py = minY + y * dy;
-      const rowOffset = fieldIndex(0, y, z, strideY, strideZ);
-      for (let x = 0; x <= nx; x++) {
-        field[rowOffset + x] = sdf(minX + x * dx, py, pz);
+  if (hasGridSampler(sdf)) {
+    sdf.sampleField(bounds, resolution, field, onProgress ? (fraction) => onProgress(fraction * 0.45) : undefined);
+  } else {
+    for (let z = 0; z <= nz; z++) {
+      if (onProgress) onProgress((z / nz) * 0.45);
+      const pz = minZ + z * dz;
+      for (let y = 0; y <= ny; y++) {
+        const py = minY + y * dy;
+        const rowOffset = fieldIndex(0, y, z, strideY, strideZ);
+        for (let x = 0; x <= nx; x++) {
+          field[rowOffset + x] = sdf(minX + x * dx, py, pz);
+        }
       }
     }
   }
