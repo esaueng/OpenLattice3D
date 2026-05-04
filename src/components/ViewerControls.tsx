@@ -64,7 +64,7 @@ export function ViewerControls() {
                 {VIEW_LABELS[mode]}
               </button>
               <button
-                className={`btn btn-small view-settings-button ${crossSectionSettingsOpen ? 'btn-active' : ''}`}
+                className={`btn btn-small view-settings-button ${viewMode === mode || crossSectionSettingsOpen ? 'btn-active' : ''}`}
                 type="button"
                 title="Cross-section settings"
                 aria-label="Cross-section settings"
@@ -72,7 +72,14 @@ export function ViewerControls() {
                 onClick={() => setCrossSectionSettingsOpen((open) => !open)}
                 disabled={crossSectionDisabled}
               >
-                ...
+                <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                  <path d="M3 4h10" />
+                  <path d="M3 8h10" />
+                  <path d="M3 12h10" />
+                  <path d="M6 2.75v2.5" />
+                  <path d="M10 6.75v2.5" />
+                  <path d="M7.5 10.75v2.5" />
+                </svg>
               </button>
               {crossSectionSettingsOpen && !crossSectionDisabled && (
                 <div className="cross-section-popover" role="menu" aria-label="Cross-section settings">
