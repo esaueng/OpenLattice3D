@@ -1,7 +1,7 @@
 // Web Worker for lattice generation (SDF sampling + marching cubes)
 // This runs heavy computation off the main thread.
 
-import { marchingCubes } from '../geometry/marching-cubes';
+import { marchingCubes, marchingCubesFromField } from '../geometry/marching-cubes';
 import type { MarchingCubesResult } from '../geometry/marching-cubes';
 import type { GridSdfSampler } from '../geometry/marching-cubes';
 import { buildCombinedSDF, buildSurfaceHexLattice, buildSphereLattice, buildCubeLattice, buildCylinderLattice, buildTorusLattice, buildCapsuleLattice } from '../geometry/lattice';
@@ -16,6 +16,7 @@ import {
   formatBackendCapabilities,
   selectBestBackend,
 } from '../backend/generation-backend';
+import { sampleFieldWebGPU } from '../backend/webgpu/webgpu-backend';
 
 type SdfFunction = ((x: number, y: number, z: number) => number) & Partial<GridSdfSampler>;
 type WorkerPostMessage = (message: unknown, transfer: Transferable[]) => void;
@@ -27,6 +28,7 @@ const ENABLE_SPARSE_TILE_SKIPPING = true;
 const ENABLE_WASM_SINGLE_PLACEHOLDER = false;
 const ENABLE_WASM_THREADED_PLACEHOLDER = false;
 const ENABLE_WEBGPU_PLACEHOLDER = false;
+const ENABLE_WEBGPU_FIELD_CPU_MC = false;
 
 let activeTileWorkers: Worker[] = [];
 
@@ -1256,12 +1258,78 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         enableWasmSinglePlaceholder: ENABLE_WASM_SINGLE_PLACEHOLDER,
         enableWasmThreadedPlaceholder: ENABLE_WASM_THREADED_PLACEHOLDER,
         enableWebGPUPlaceholder: ENABLE_WEBGPU_PLACEHOLDER,
+        enableWebGPUFieldCpuMc: ENABLE_WEBGPU_FIELD_CPU_MC &&
+          Boolean(shape && !isSurfacePolygon && !isDemoGrid && (params.latticeType === 'gyroid' || params.latticeType === 'schwarzP')),
       });
       postMessage({
         type: 'progress',
         progress: 0.11,
         message: `Selected backend ${selectedBackend} (${formatBackendCapabilities(backendCapabilities)})`
       } as WorkerResponse);
+
+      if (selectedBackend === 'webgpu-field-cpu-mc' && shape) {
+        try {
+          const backendStart = performance.now();
+          postMessage({
+            type: 'progress',
+            progress: 0.12,
+            message: `Backend ${selectedBackend}: WebGPU field sampling, CPU marching cubes`
+          } as WorkerResponse);
+          const sampled = await sampleFieldWebGPU({
+            bounds,
+            resolution,
+            shape,
+            sphereRadius: sphereRadius ?? msg.sphereRadius ?? 25,
+            params,
+          });
+          if (cancelled) throw new Error('Cancelled');
+          postMessage({
+            type: 'progress',
+            progress: 0.45,
+            message: `WebGPU field ${Math.round(sampled.timing.webgpuFieldMs)}ms, GPU readback ${Math.round(sampled.timing.readbackMs)}ms`
+          } as WorkerResponse);
+          const cpuMcStart = performance.now();
+          const rawResult = marchingCubesFromField(sampled.field, bounds, [resolution, resolution, resolution], 0, (frac) => {
+            if (cancelled) throw new Error('Cancelled');
+            postMessage({
+              type: 'progress',
+              progress: 0.45 + frac * 0.45,
+              message: `CPU marching cubes from WebGPU field: ${Math.round(frac * 100)}%`
+            } as WorkerResponse);
+          });
+          const cpuMcMs = performance.now() - cpuMcStart;
+          const result = removeDisconnectedFragments(rawResult, 0.004);
+          if (result.removedTriangles > 0) {
+            postMessage({
+              type: 'progress',
+              progress: 0.9,
+              message: `Removed ${result.removedTriangles.toLocaleString()} disconnected fragment triangles`
+            } as WorkerResponse);
+          }
+          postMessage({
+            type: 'progress',
+            progress: 0.95,
+            message: `Geometry ready via ${selectedBackend} in ${Math.round(performance.now() - backendStart)}ms (webgpu field ${Math.round(sampled.timing.webgpuFieldMs)}ms, readback ${Math.round(sampled.timing.readbackMs)}ms, CPU marching cubes ${Math.round(cpuMcMs)}ms)`
+          } as WorkerResponse);
+          const response: WorkerResponse = {
+            type: 'result',
+            positions: result.positions,
+            normals: result.normals,
+            triCount: result.triCount,
+            backend: selectedBackend,
+          };
+          postWorkerMessage(response, generatedResultTransferList(response));
+          return;
+        } catch (err: unknown) {
+          if (cancelled) throw new Error('Cancelled');
+          const message = err instanceof Error ? err.message : 'unknown error';
+          postMessage({
+            type: 'progress',
+            progress: 0.12,
+            message: `${selectedBackend} unavailable (${message}); falling back to cpu-single`
+          } as WorkerResponse);
+        }
+      }
 
       if (selectedBackend === 'cpu-tiled' && shape) {
         try {
