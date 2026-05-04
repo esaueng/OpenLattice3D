@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { useStore } from '../store/useStore';
 import type { TriangleMesh } from '../geometry/stl-parser';
 import type { MarchingCubesResult } from '../geometry/marching-cubes';
-import type { ClipPlaneState } from '../store/useStore';
+import type { ClipPlaneState, ViewerCameraState, ViewerVector3 } from '../store/useStore';
 import { generateSphereMesh, generateCubeMesh, generateCylinderMesh, generateTorusMesh, generateCapsuleMesh } from '../geometry/mesh-analysis';
 import type { LatticeParams, LatticeType, SampleShape } from '../types/project';
 import type { WorkerMessage, WorkerResponse } from '../workers/lattice-worker';
@@ -66,6 +66,8 @@ type ResettableOrbitControls = {
   enabled?: boolean;
   target?: THREE.Vector3;
   update?: () => void;
+  addEventListener?: (type: 'change', listener: () => void) => void;
+  removeEventListener?: (type: 'change', listener: () => void) => void;
   state?: number;
   _sphericalDelta?: { set: (radius: number, phi: number, theta: number) => void };
   _panOffset?: { set: (x: number, y: number, z: number) => void };
@@ -236,6 +238,72 @@ function finishOrbitControlsAfterCameraReset(
     window.cancelAnimationFrame(frameId);
     restoreControls();
   };
+}
+
+function vectorToTuple(vector: THREE.Vector3): ViewerVector3 {
+  return [vector.x, vector.y, vector.z];
+}
+
+function tupleToVector(tuple: ViewerVector3): THREE.Vector3 {
+  return new THREE.Vector3(tuple[0], tuple[1], tuple[2]);
+}
+
+function isFiniteTuple(tuple: ViewerVector3 | undefined): tuple is ViewerVector3 {
+  return Array.isArray(tuple) && tuple.length === 3 && tuple.every((value) => Number.isFinite(value));
+}
+
+function isValidViewerCameraState(cameraState: ViewerCameraState | null | undefined): cameraState is ViewerCameraState {
+  if (!cameraState) return false;
+  if (!isFiniteTuple(cameraState.position) || !isFiniteTuple(cameraState.target) || !isFiniteTuple(cameraState.up)) return false;
+  if (!Number.isFinite(cameraState.zoom) || cameraState.zoom <= 0) return false;
+
+  const position = tupleToVector(cameraState.position);
+  const target = tupleToVector(cameraState.target);
+  const up = tupleToVector(cameraState.up);
+  return position.distanceToSquared(target) > 1e-8 && up.lengthSq() > 1e-8;
+}
+
+function viewerCameraStateSignature(cameraState: ViewerCameraState | null | undefined) {
+  if (!isValidViewerCameraState(cameraState)) return '';
+  return [
+    ...cameraState.position,
+    ...cameraState.target,
+    ...cameraState.up,
+    cameraState.zoom,
+  ].map((value) => value.toFixed(4)).join(':');
+}
+
+function captureViewerCameraState(camera: THREE.Camera, controls: unknown): ViewerCameraState | null {
+  const orbitControls = controls as ResettableOrbitControls | null;
+  const target = orbitControls?.target ?? new THREE.Vector3(0, 0, 0);
+  const zoom = camera instanceof THREE.PerspectiveCamera || camera instanceof THREE.OrthographicCamera ? camera.zoom : 1;
+
+  const cameraState: ViewerCameraState = {
+    position: vectorToTuple(camera.position),
+    target: vectorToTuple(target),
+    up: vectorToTuple(camera.up),
+    zoom,
+    savedAt: Date.now(),
+  };
+
+  return isValidViewerCameraState(cameraState) ? cameraState : null;
+}
+
+function applyViewerCameraState(cameraState: ViewerCameraState, camera: THREE.Camera, controls: unknown) {
+  const resetSession = prepareOrbitControlsForCameraReset(controls);
+  const target = tupleToVector(cameraState.target);
+
+  camera.up.copy(tupleToVector(cameraState.up).normalize());
+  camera.position.copy(tupleToVector(cameraState.position));
+  camera.lookAt(target);
+  camera.updateMatrixWorld();
+
+  if (camera instanceof THREE.PerspectiveCamera || camera instanceof THREE.OrthographicCamera) {
+    camera.zoom = cameraState.zoom;
+    camera.updateProjectionMatrix();
+  }
+
+  return finishOrbitControlsAfterCameraReset(resetSession, target);
 }
 
 /** Convert normalised clip-plane state → THREE.Plane */
@@ -962,6 +1030,103 @@ function AutoFit() {
   return null;
 }
 
+function ViewerCameraSession() {
+  const { camera, controls } = useThree();
+  const {
+    viewerCameraState,
+    setViewerCameraState,
+    originalMesh,
+    sphereMode,
+    sphereRadius,
+    sampleShape,
+    resultMesh,
+    viewMode,
+    viewportResetSignal,
+  } = useStore();
+  const restoredSignatureRef = useRef<string>('');
+  const applyingPersistedCameraRef = useRef(false);
+  const saveTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!isValidViewerCameraState(viewerCameraState)) return;
+
+    const signature = viewerCameraStateSignature(viewerCameraState);
+    if (signature === restoredSignatureRef.current) return;
+
+    const bounds = activeViewerBounds({
+      originalMesh,
+      sphereMode,
+      sphereRadius,
+      sampleShape,
+      resultMesh,
+      viewMode,
+    });
+    if (bounds.isEmpty()) return;
+
+    applyingPersistedCameraRef.current = true;
+    restoredSignatureRef.current = signature;
+    const cleanup = applyViewerCameraState(viewerCameraState, camera, controls);
+
+    if (typeof window === 'undefined') {
+      applyingPersistedCameraRef.current = false;
+      return cleanup;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      applyingPersistedCameraRef.current = false;
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      applyingPersistedCameraRef.current = false;
+      cleanup?.();
+    };
+  }, [
+    viewerCameraState,
+    camera,
+    controls,
+    originalMesh,
+    sphereMode,
+    sphereRadius,
+    sampleShape,
+    resultMesh,
+    viewMode,
+  ]);
+
+  useEffect(() => {
+    const orbitControls = controls as ResettableOrbitControls | null;
+    if (!orbitControls?.addEventListener || !orbitControls.removeEventListener) return undefined;
+
+    const saveCameraState = () => {
+      if (applyingPersistedCameraRef.current || typeof window === 'undefined') return;
+
+      if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = window.setTimeout(() => {
+        saveTimerRef.current = null;
+        if (applyingPersistedCameraRef.current) return;
+
+        const nextCameraState = captureViewerCameraState(camera, controls);
+        if (!nextCameraState) return;
+
+        const nextSignature = viewerCameraStateSignature(nextCameraState);
+        restoredSignatureRef.current = nextSignature;
+        setViewerCameraState(nextCameraState);
+      }, 200);
+    };
+
+    orbitControls.addEventListener('change', saveCameraState);
+    return () => {
+      orbitControls.removeEventListener?.('change', saveCameraState);
+      if (saveTimerRef.current && typeof window !== 'undefined') {
+        window.clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+    };
+  }, [camera, controls, setViewerCameraState, viewportResetSignal]);
+
+  return null;
+}
+
 function DemoTileViewerWithMode({ tile, viewMode, clipPlane, selectedLatticeType, onSelectLatticeType }: {
   tile: DemoTileState;
   viewMode: 'original' | 'lattice' | 'cross_section' | 'xray';
@@ -1290,6 +1455,7 @@ export function Viewer3D() {
         {viewMode === 'xray' && resultMesh && <XRayView result={resultMesh} />}
 
         <OrbitControls makeDefault target={[0, 0, 0]} />
+        <ViewerCameraSession />
         <GizmoHelper alignment={VIEWER_GIZMO_ALIGNMENT} margin={VIEWER_GIZMO_MARGIN}>
           <CleanAxisGizmo
             onSelectView={(view) => setGizmoViewRequest((request) => ({ view, signal: request.signal + 1 }))}

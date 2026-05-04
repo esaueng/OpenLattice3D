@@ -21,6 +21,16 @@ export interface LogEntry {
   level: 'info' | 'warn' | 'error';
 }
 
+export type ViewerVector3 = [number, number, number];
+
+export interface ViewerCameraState {
+  position: ViewerVector3;
+  target: ViewerVector3;
+  up: ViewerVector3;
+  zoom: number;
+  savedAt: number;
+}
+
 // ── Persistence helpers ──────────────────────────────────
 const STORAGE_KEY = 'gen-lattice-1-state';
 const DB_NAME = 'openlattice3d-state';
@@ -54,6 +64,7 @@ interface PersistedAppState extends PersistedState {
   demoParamsByType: DemoParamsByType;
   resultMesh: MarchingCubesResult | null;
   validation: ValidationResult | null;
+  viewerCameraState: ViewerCameraState | null;
   demoModeActive: boolean;
   demoRunId: number;
   logs: LogEntry[];
@@ -252,6 +263,7 @@ interface AppState {
   clipPlane: ClipPlaneState;
   viewerBackground: string;
   viewportResetSignal: number;
+  viewerCameraState: ViewerCameraState | null;
   demoModeActive: boolean;
   demoRunId: number;
 
@@ -280,6 +292,7 @@ interface AppState {
   setClipPlane: (partial: Partial<ClipPlaneState>) => void;
   setViewerBackground: (color: string) => void;
   resetViewport: () => void;
+  setViewerCameraState: (cameraState: ViewerCameraState | null) => void;
   setDemoModeActive: (active: boolean) => void;
   startDemoRun: () => void;
   importParams: (imported: Partial<LatticeParams>) => void;
@@ -319,6 +332,7 @@ export const useStore = create<AppState>((set) => ({
   clipPlane: persisted?.clipPlane ?? { axis: 'z', position: 0.5, flipped: false },
   viewerBackground: persisted?.viewerBackground ?? '#000000',
   viewportResetSignal: 0,
+  viewerCameraState: null,
   demoModeActive: false,
   demoRunId: 0,
   logs: [],
@@ -334,6 +348,7 @@ export const useStore = create<AppState>((set) => ({
     keepOutTris: new Set(),
     keepInTris: new Set(),
     demoParamsByType: {},
+    viewerCameraState: null,
   }),
 
   setMeshRepaired: (repaired) => set((s) => ({
@@ -353,6 +368,7 @@ export const useStore = create<AppState>((set) => ({
     keepOutTris: new Set(),
     keepInTris: new Set(),
     demoParamsByType: {},
+    viewerCameraState: null,
     params: {
       ...DEFAULT_PARAMS,
       toleranceMm: 0.2,
@@ -376,6 +392,7 @@ export const useStore = create<AppState>((set) => ({
     keepOutTris: new Set(),
     keepInTris: new Set(),
     demoParamsByType: {},
+    viewerCameraState: null,
     params: {
       ...DEFAULT_PARAMS,
       toleranceMm: 0.2,
@@ -490,6 +507,8 @@ export const useStore = create<AppState>((set) => ({
 
   resetViewport: () => set((s) => ({ viewportResetSignal: s.viewportResetSignal + 1 })),
 
+  setViewerCameraState: (cameraState) => set({ viewerCameraState: cameraState }),
+
   setDemoModeActive: (active) => set({ demoModeActive: active }),
 
   startDemoRun: () => set((s) => {
@@ -562,6 +581,7 @@ export const useStore = create<AppState>((set) => ({
       clipPlane: { axis: 'z', position: 0.5, flipped: false },
       viewerBackground: '#000000',
       viewportResetSignal: 0,
+      viewerCameraState: null,
       logs: [],
       demoModeActive: false,
       demoRunId: 0,
@@ -596,6 +616,7 @@ function buildPersistedAppState(state: AppState): PersistedAppState {
     demoParamsByType: state.demoParamsByType,
     resultMesh: state.resultMesh,
     validation: state.validation,
+    viewerCameraState: state.viewerCameraState,
     demoModeActive: state.demoModeActive,
     demoRunId: state.demoRunId,
     logs: state.logs.slice(-MAX_PERSISTED_LOGS),
@@ -624,6 +645,7 @@ function hydrateFromSnapshot(snapshot: Partial<PersistedAppState>): Partial<AppS
     viewMode: snapshot.viewMode ?? 'original',
     clipPlane: snapshot.clipPlane ?? { axis: 'z', position: 0.5, flipped: false },
     viewerBackground: snapshot.viewerBackground ?? '#000000',
+    viewerCameraState: snapshot.viewerCameraState ?? null,
     demoModeActive: snapshot.demoModeActive ?? false,
     demoRunId: snapshot.demoRunId ?? 0,
     logs: snapshot.logs ?? [],
