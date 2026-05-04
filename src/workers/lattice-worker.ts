@@ -12,6 +12,9 @@ import { add, sub, dot, cross, length, scale, normalize } from '../geometry/vec3
 import type { SurfaceHexSample } from '../geometry/lattice';
 
 type SdfFunction = ((x: number, y: number, z: number) => number) & Partial<GridSdfSampler>;
+type WorkerPostMessage = (message: unknown, transfer: Transferable[]) => void;
+
+const postWorkerMessage = self.postMessage.bind(self) as WorkerPostMessage;
 
 function withThinSectionFilter(sdf: SdfFunction, filter: number): SdfFunction {
   if (filter <= 0) return sdf;
@@ -23,6 +26,23 @@ function withThinSectionFilter(sdf: SdfFunction, filter: number): SdfFunction {
     };
   }
   return filtered;
+}
+
+function generatedResultTransferList(response: WorkerResponse): Transferable[] {
+  const transfers: Transferable[] = [];
+  // Generated result buffers are worker-owned after marching/cleanup and are
+  // transferred to the UI so the viewer receives usable Float32Arrays without
+  // copying the large position/normal payloads.
+  if (response.positions) transfers.push(response.positions.buffer);
+  if (response.normals) transfers.push(response.normals.buffer);
+  return transfers;
+}
+
+function surfaceSampleWorkerTransferList(payload: ShapeSampleWorkerMessage | MeshSampleWorkerMessage): Transferable[] {
+  if (payload.mode !== 'mesh') return [];
+  // Mesh sample workers receive copies made in this worker with .slice() below.
+  // Transferring those copies does not detach UI-owned imported mesh buffers.
+  return [payload.positions.buffer, payload.normals.buffer];
 }
 
 export interface WorkerMessage {
@@ -128,9 +148,7 @@ async function generatePoissonSamplesParallel(
       worker.onmessage = (ev: MessageEvent<SurfaceSampleWorkerResponse>) => resolve(ev.data);
       worker.onerror = (err) => reject(err);
       const payload = msgFactory(count);
-      worker.postMessage(payload, payload.mode === 'mesh'
-        ? [payload.positions.buffer, payload.normals.buffer]
-        : []);
+      worker.postMessage(payload, surfaceSampleWorkerTransferList(payload));
     }).finally(() => worker.terminate());
 
     const samples: SurfaceHexSample[] = [];
@@ -993,19 +1011,15 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
 
       postMessage({ type: 'progress', progress: 0.95, message: 'Done!' } as WorkerResponse);
 
-      // Send result
-      postMessage(
-        {
-          type: 'result',
-          positions: result.positions,
-          normals: result.normals,
-          triCount: result.triCount,
-          validation,
-        } as WorkerResponse,
-        // Transfer buffers for performance
-        // @ts-expect-error transfer list
-        [result.positions.buffer, result.normals.buffer]
-      );
+      // Send generated result. positions/normals are transferred; validation is cloned.
+      const response: WorkerResponse = {
+        type: 'result',
+        positions: result.positions,
+        normals: result.normals,
+        triCount: result.triCount,
+        validation,
+      };
+      postWorkerMessage(response, generatedResultTransferList(response));
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Unknown error';
       if (message === 'Cancelled') {
