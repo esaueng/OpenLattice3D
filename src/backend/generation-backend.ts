@@ -7,6 +7,8 @@ export type GenerationBackendName =
 
 export interface GenerationBackendCapabilities {
   hasWebGPU: boolean;
+  hasWasm: boolean;
+  hasThreadedWasm: boolean;
   hasSharedArrayBuffer: boolean;
   crossOriginIsolated: boolean;
   hardwareConcurrency: number;
@@ -30,10 +32,14 @@ export function detectGenerationBackendCapabilities(
   const navigatorLike = scope.navigator as NavigatorWithGPU | undefined;
   return {
     hasWebGPU: Boolean(navigatorLike?.gpu),
+    hasWasm: typeof scope.WebAssembly === 'object',
     hasSharedArrayBuffer: typeof scope.SharedArrayBuffer === 'function',
     crossOriginIsolated: scope.crossOriginIsolated === true,
     hardwareConcurrency: navigatorLike?.hardwareConcurrency ?? 1,
     tileWorkerPoolAvailable: options.tileWorkerPoolAvailable === true,
+    hasThreadedWasm: typeof scope.WebAssembly === 'object' &&
+      scope.crossOriginIsolated === true &&
+      typeof scope.SharedArrayBuffer === 'function',
   };
 }
 
@@ -49,12 +55,11 @@ export function selectBestBackend(options: GenerationBackendSelectionOptions): G
   if (enableWebGPUPlaceholder && capabilities.hasWebGPU) return 'webgpu-placeholder';
   if (
     enableWasmThreadedPlaceholder &&
-    capabilities.crossOriginIsolated &&
-    capabilities.hasSharedArrayBuffer
+    capabilities.hasThreadedWasm
   ) {
     return 'wasm-threaded-placeholder';
   }
-  if (enableWasmSinglePlaceholder) return 'wasm-single-placeholder';
+  if (enableWasmSinglePlaceholder && capabilities.hasWasm) return 'wasm-single-placeholder';
 
   if (preferTiledCpu && capabilities.tileWorkerPoolAvailable) return 'cpu-tiled';
   return 'cpu-single';
@@ -64,6 +69,8 @@ export function formatBackendCapabilities(capabilities: GenerationBackendCapabil
   return [
     `tileWorkers=${capabilities.tileWorkerPoolAvailable ? 'yes' : 'no'}`,
     `webgpu=${capabilities.hasWebGPU ? 'yes' : 'no'}`,
+    `wasm=${capabilities.hasWasm ? 'yes' : 'no'}`,
+    `wasmThreads=${capabilities.hasThreadedWasm ? 'yes' : 'no'}`,
     `sab=${capabilities.hasSharedArrayBuffer ? 'yes' : 'no'}`,
     `isolated=${capabilities.crossOriginIsolated ? 'yes' : 'no'}`,
     `cores=${capabilities.hardwareConcurrency}`,
