@@ -23,10 +23,27 @@ npx wrangler deploy
 
 The Worker serves files from `dist/` and falls back to `index.html` for client-side routing.
 
+### Cross-origin isolation
+
+The app sends these headers in Vite dev, Vite preview, and Cloudflare static assets:
+
+```
+Cross-Origin-Opener-Policy: same-origin
+Cross-Origin-Embedder-Policy: require-corp
+```
+
+These headers prepare the app for `SharedArrayBuffer` and threaded WebAssembly, but generation
+does not currently require either feature. When generation starts, the app logs runtime support
+for `crossOriginIsolated`, `SharedArrayBuffer`, and threaded-WASM readiness.
+
+COEP can block third-party iframes, scripts, images, or worker resources unless those resources
+send compatible CORS or `Cross-Origin-Resource-Policy` headers. Keep third-party embeds on a
+non-isolated page or use an external link when the provider cannot opt in.
+
 ### Feedback form
 
-Feedback is collected through an embedded Tally form, which handles storage and notifications
-outside of the Worker.
+Feedback is collected through an external form link rather than an embedded iframe. This avoids
+COEP compatibility problems with third-party form resources.
 
 ## How to Use
 

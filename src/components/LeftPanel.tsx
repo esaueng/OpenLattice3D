@@ -10,6 +10,7 @@ import { SAMPLE_SHAPE_INFO } from '../store/useStore';
 import type { WorkerMessage, WorkerResponse } from '../workers/lattice-worker';
 import type { ValidationWorkerMessage, ValidationWorkerResponse } from '../workers/validation-worker';
 import { requestNotificationPermission, sendNotification } from '../utils/notifications';
+import { formatBrowserFeatureFlags, getBrowserFeatureFlags } from '../utils/browser-features';
 
 function buildGenerationTransferList(msg: WorkerMessage): Transferable[] {
   const transfers: Transferable[] = [];
@@ -143,6 +144,10 @@ export function LeftPanel() {
     store.setGenerating(true);
     store.setProgress(0, 'Starting...');
     store.addLog('Starting lattice generation...');
+    const browserFeatures = getBrowserFeatureFlags();
+    const browserFeatureSummary = formatBrowserFeatureFlags(browserFeatures);
+    store.addLog(`Browser features: ${browserFeatureSummary}`, browserFeatures.threadedWasmReady ? 'info' : 'warn');
+    console.info('[OpenLattice3D] Browser features at generation start', browserFeatures);
     // Clear previous result without changing viewMode — view is preserved for regeneration
     store.setValidation(null);
     store.setDemoModeActive(false);
