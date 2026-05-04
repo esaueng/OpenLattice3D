@@ -1,4 +1,4 @@
-// Right Panel: Validation results, logs, export, view controls + clip plane
+// Inspection controls: validation, export, view controls + clip plane
 import { useStore } from '../store/useStore';
 import { downloadSTL, downloadValidationReport, downloadProjectJSON } from '../utils/export';
 import type { ViewMode, ClipAxis } from '../store/useStore';
@@ -33,7 +33,7 @@ export function RightPanel() {
   } = store;
 
   return (
-    <div className="panel-content">
+    <>
       <div className="panel-intro">
         <span className="panel-eyebrow">context</span>
         <h2>Inspect and export</h2>
@@ -227,6 +227,6 @@ export function RightPanel() {
         </section>
       )}
 
-    </div>
+    </>
   );
 }

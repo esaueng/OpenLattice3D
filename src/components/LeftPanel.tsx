@@ -8,6 +8,7 @@ import { DEFAULT_PARAMS } from '../types/project';
 import { isSheetType } from '../geometry/lattice';
 import { SAMPLE_SHAPE_INFO } from '../store/useStore';
 import type { LatticeGenerationControls } from '../hooks/useLatticeGeneration';
+import { RightPanel } from './RightPanel';
 
 type LeftPanelProps = {
   generationControls: LatticeGenerationControls;
@@ -391,7 +392,7 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
 
       {/* Generate */}
       {hasModel && (
-        <section className="panel-section panel-section-sticky">
+        <section className="panel-section">
           <h3>Generate</h3>
           {!store.generating ? (
             <button
@@ -416,6 +417,10 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
           )}
         </section>
       )}
+
+      <div className="left-inspection-panel">
+        <RightPanel />
+      </div>
 
     </div>
   );
