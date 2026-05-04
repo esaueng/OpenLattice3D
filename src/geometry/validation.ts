@@ -5,6 +5,166 @@ import type { MeshBVH } from './bvh';
 import type { LatticeParams, ValidationResult } from '../types/project';
 import type { MarchingCubesResult } from './marching-cubes';
 
+type EdgeTopology = {
+  edgeToTris: Map<number, number[]>;
+};
+
+function edgeKey(a: number, b: number): number {
+  const lo = a < b ? a : b;
+  const hi = a < b ? b : a;
+  return lo * 0x100000000 + hi;
+}
+
+function vertexBucketKey(qx: number, qy: number, qz: number): number {
+  let h = 2166136261;
+  h = Math.imul(h ^ qx, 16777619);
+  h = Math.imul(h ^ qy, 16777619);
+  h = Math.imul(h ^ qz, 16777619);
+  return h >>> 0;
+}
+
+function getQuantizedVertexId(
+  buckets: Map<number, number[]>,
+  qxById: number[],
+  qyById: number[],
+  qzById: number[],
+  qx: number,
+  qy: number,
+  qz: number
+): number {
+  const bucketKey = vertexBucketKey(qx, qy, qz);
+  let bucket = buckets.get(bucketKey);
+  if (bucket) {
+    for (let i = 0; i < bucket.length; i++) {
+      const id = bucket[i];
+      if (qxById[id] === qx && qyById[id] === qy && qzById[id] === qz) return id;
+    }
+  } else {
+    bucket = [];
+    buckets.set(bucketKey, bucket);
+  }
+
+  const id = qxById.length;
+  qxById.push(qx);
+  qyById.push(qy);
+  qzById.push(qz);
+  bucket.push(id);
+  return id;
+}
+
+function addEdge(edgeToTris: Map<number, number[]>, a: number, b: number, triIndex: number): void {
+  const key = edgeKey(a, b);
+  const tris = edgeToTris.get(key);
+  if (tris) tris.push(triIndex);
+  else edgeToTris.set(key, [triIndex]);
+}
+
+function buildEdgeTopology(result: MarchingCubesResult): EdgeTopology {
+  const { positions, triCount } = result;
+  const buckets = new Map<number, number[]>();
+  const qxById: number[] = [];
+  const qyById: number[] = [];
+  const qzById: number[] = [];
+  const edgeToTris = new Map<number, number[]>();
+
+  for (let i = 0; i < triCount; i++) {
+    const base = i * 9;
+    const v0 = getQuantizedVertexId(
+      buckets,
+      qxById,
+      qyById,
+      qzById,
+      Math.round(positions[base] * 1e3),
+      Math.round(positions[base + 1] * 1e3),
+      Math.round(positions[base + 2] * 1e3)
+    );
+    const v1 = getQuantizedVertexId(
+      buckets,
+      qxById,
+      qyById,
+      qzById,
+      Math.round(positions[base + 3] * 1e3),
+      Math.round(positions[base + 4] * 1e3),
+      Math.round(positions[base + 5] * 1e3)
+    );
+    const v2 = getQuantizedVertexId(
+      buckets,
+      qxById,
+      qyById,
+      qzById,
+      Math.round(positions[base + 6] * 1e3),
+      Math.round(positions[base + 7] * 1e3),
+      Math.round(positions[base + 8] * 1e3)
+    );
+
+    addEdge(edgeToTris, v0, v1, i);
+    addEdge(edgeToTris, v1, v2, i);
+    addEdge(edgeToTris, v2, v0, i);
+  }
+
+  return { edgeToTris };
+}
+
+function checkManifoldFromTopology(topology: EdgeTopology): { passed: boolean; details: string } {
+  let nonManifold = 0;
+  let boundary = 0;
+  for (const tris of topology.edgeToTris.values()) {
+    const c = tris.length;
+    if (c === 1) boundary++;
+    if (c > 2) nonManifold++;
+  }
+
+  const passed = nonManifold === 0 && boundary === 0;
+  const details = passed
+    ? 'Mesh is manifold and watertight'
+    : `Non-manifold edges: ${nonManifold}, boundary edges: ${boundary}`;
+  return { passed, details };
+}
+
+function checkDisconnectedFromTopology(result: MarchingCubesResult, topology: EdgeTopology): { passed: boolean; fragmentCount: number } {
+  const { triCount } = result;
+  if (triCount === 0) return { passed: true, fragmentCount: 0 };
+
+  const adj: number[][] = Array.from({ length: triCount }, () => []);
+  for (const tris of topology.edgeToTris.values()) {
+    for (let i = 0; i < tris.length; i++) {
+      for (let j = i + 1; j < tris.length; j++) {
+        adj[tris[i]].push(tris[j]);
+        adj[tris[j]].push(tris[i]);
+      }
+    }
+  }
+
+  const visited = new Uint8Array(triCount);
+  let components = 0;
+  for (let i = 0; i < triCount; i++) {
+    if (visited[i]) continue;
+    components++;
+    const stack = [i];
+    while (stack.length > 0) {
+      const t = stack.pop()!;
+      if (visited[t]) continue;
+      visited[t] = 1;
+      for (const nb of adj[t]) {
+        if (!visited[nb]) stack.push(nb);
+      }
+    }
+  }
+
+  return { passed: components <= 1, fragmentCount: components };
+}
+
+export function checkTopology(result: MarchingCubesResult): {
+  manifold: { passed: boolean; details: string };
+  disconnected: { passed: boolean; fragmentCount: number };
+} {
+  const topology = buildEdgeTopology(result);
+  return {
+    manifold: checkManifoldFromTopology(topology),
+    disconnected: checkDisconnectedFromTopology(result, topology),
+  };
+}
+
 /** Check outer deviation: sample points on the result surface and measure distance to original mesh */
 export function checkOuterDeviation(
   result: MarchingCubesResult,
@@ -110,90 +270,12 @@ export function checkMinThickness(
 
 /** Basic manifold check: count edges shared by != 2 triangles */
 export function checkManifold(result: MarchingCubesResult): { passed: boolean; details: string } {
-  const { positions, triCount } = result;
-  const edgeCounts = new Map<string, number>();
-  const q = (v: number) => Math.round(v * 1e3);
-
-  for (let i = 0; i < triCount; i++) {
-    const verts: string[] = [];
-    for (let v = 0; v < 3; v++) {
-      const o = i * 9 + v * 3;
-      verts.push(`${q(positions[o])},${q(positions[o + 1])},${q(positions[o + 2])}`);
-    }
-    for (let e = 0; e < 3; e++) {
-      const a = verts[e], b = verts[(e + 1) % 3];
-      const key = a < b ? `${a}-${b}` : `${b}-${a}`;
-      edgeCounts.set(key, (edgeCounts.get(key) || 0) + 1);
-    }
-  }
-
-  let nonManifold = 0;
-  let boundary = 0;
-  for (const c of edgeCounts.values()) {
-    if (c === 1) boundary++;
-    if (c > 2) nonManifold++;
-  }
-
-  // MC output is generally manifold but may have boundary edges
-  const passed = nonManifold === 0 && boundary === 0;
-  const details = passed
-    ? 'Mesh is manifold and watertight'
-    : `Non-manifold edges: ${nonManifold}, boundary edges: ${boundary}`;
-  return { passed, details };
+  return checkTopology(result).manifold;
 }
 
 /** Disconnected pieces check using flood fill on triangle adjacency */
 export function checkDisconnected(result: MarchingCubesResult): { passed: boolean; fragmentCount: number } {
-  const { positions, triCount } = result;
-  if (triCount === 0) return { passed: true, fragmentCount: 0 };
-
-  // Build adjacency via shared edges
-  const q = (v: number) => Math.round(v * 1e3);
-  const edgeToTris = new Map<string, number[]>();
-
-  for (let i = 0; i < triCount; i++) {
-    const verts: string[] = [];
-    for (let v = 0; v < 3; v++) {
-      const o = i * 9 + v * 3;
-      verts.push(`${q(positions[o])},${q(positions[o + 1])},${q(positions[o + 2])}`);
-    }
-    for (let e = 0; e < 3; e++) {
-      const a = verts[e], b = verts[(e + 1) % 3];
-      const key = a < b ? `${a}-${b}` : `${b}-${a}`;
-      if (!edgeToTris.has(key)) edgeToTris.set(key, []);
-      edgeToTris.get(key)!.push(i);
-    }
-  }
-
-  // Build adjacency list
-  const adj: number[][] = Array.from({ length: triCount }, () => []);
-  for (const tris of edgeToTris.values()) {
-    for (let i = 0; i < tris.length; i++) {
-      for (let j = i + 1; j < tris.length; j++) {
-        adj[tris[i]].push(tris[j]);
-        adj[tris[j]].push(tris[i]);
-      }
-    }
-  }
-
-  // Flood fill
-  const visited = new Uint8Array(triCount);
-  let components = 0;
-  for (let i = 0; i < triCount; i++) {
-    if (visited[i]) continue;
-    components++;
-    const stack = [i];
-    while (stack.length > 0) {
-      const t = stack.pop()!;
-      if (visited[t]) continue;
-      visited[t] = 1;
-      for (const nb of adj[t]) {
-        if (!visited[nb]) stack.push(nb);
-      }
-    }
-  }
-
-  return { passed: components <= 1, fragmentCount: components };
+  return checkTopology(result).disconnected;
 }
 
 /** Run full validation suite */
@@ -220,11 +302,7 @@ export function runValidation(
   // Min thickness
   const minThickness = checkMinThickness(sdf, result, params.minFeatureSize);
 
-  // Manifold
-  const manifold = checkManifold(result);
-
-  // Disconnected
-  const disconnected = checkDisconnected(result);
+  const { manifold, disconnected } = checkTopology(result);
   if (disconnected.fragmentCount > 1) {
     warnings.push(`${disconnected.fragmentCount} disconnected fragments detected`);
   }
