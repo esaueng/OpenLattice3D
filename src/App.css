@@ -181,50 +181,6 @@ svg {
   color: var(--color-text-subtle);
 }
 
-.topbar-tools {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-left: auto;
-}
-
-.run-pill {
-  min-height: 28px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 9px;
-  color: var(--color-success);
-  background: rgba(11, 15, 20, 0.32);
-  border: var(--border-thin);
-  border-radius: var(--radius-sm);
-  font-family: var(--font-mono);
-  font-size: var(--fs-xs);
-  text-transform: lowercase;
-}
-
-.run-pill strong {
-  color: var(--color-text-subtle);
-  font-weight: var(--fw-regular);
-}
-
-.run-pill span {
-  width: 7px;
-  height: 7px;
-  border-radius: 999px;
-  background: var(--color-success);
-  box-shadow: 0 0 10px rgba(34, 197, 94, 0.65);
-}
-
-.run-pill.running {
-  color: var(--color-accent);
-}
-
-.run-pill.running span {
-  background: var(--color-accent);
-  box-shadow: 0 0 10px rgba(77, 163, 255, 0.65);
-}
-
 .icon-button,
 .topbar-action {
   min-height: 28px;
@@ -755,7 +711,7 @@ svg {
 .statusbar {
   min-width: 0;
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-start;
   align-items: center;
   gap: 10px;
   padding: 0 10px;
@@ -769,15 +725,12 @@ svg {
 
 .statusbar-group {
   min-width: 0;
+  flex: 0 1 auto;
   display: inline-flex;
   align-items: center;
   gap: 0;
   overflow: hidden;
   white-space: nowrap;
-}
-
-.statusbar-group-primary {
-  flex: 1 1 28%;
 }
 
 .statusbar-segment {
@@ -801,32 +754,11 @@ svg {
   border-right: 0;
 }
 
-.statusbar-strong {
-  color: var(--color-text-muted);
-}
-
-.status-dot {
-  width: 6px;
-  height: 6px;
-  flex: 0 0 auto;
-  border-radius: 999px;
-  background: var(--color-success);
-  box-shadow: 0 0 8px rgba(34, 197, 94, 0.46);
-}
-
-.status-dot-active {
-  background: var(--color-accent);
-  box-shadow: 0 0 8px rgba(77, 163, 255, 0.58);
-}
-
-.statusbar-link {
-  flex: 0 0 auto;
-  color: var(--color-text-muted);
-  text-decoration: none;
-}
-
-.statusbar-link:hover {
-  color: var(--color-accent);
+.statusbar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
 }
 
 .demo-grid-view {
@@ -948,10 +880,6 @@ svg {
     min-height: var(--statusbar-h);
   }
 
-  .statusbar-group-primary {
-    flex: 1 1 auto;
-  }
-
   .workspace {
     display: grid;
     grid-template-columns: 1fr;
@@ -970,12 +898,6 @@ svg {
 }
 
 @media (max-width: 720px) {
-  .topbar-tools {
-    width: 100%;
-    margin-left: 0;
-    justify-content: space-between;
-  }
-
   .brand {
     width: 100%;
   }
@@ -1033,17 +955,17 @@ svg {
   }
 
   .statusbar {
-    align-items: flex-start;
-    flex-direction: column;
+    align-items: center;
+    flex-direction: row;
     justify-content: center;
-    gap: 5px;
+    gap: 8px;
     height: auto;
     min-height: var(--statusbar-h);
     padding: 6px 10px;
   }
 
   .statusbar-group {
-    width: 100%;
+    width: auto;
     flex-wrap: wrap;
     row-gap: 4px;
   }
@@ -1053,7 +975,7 @@ svg {
     max-width: none;
   }
 
-  .statusbar-link {
-    align-self: flex-end;
+  .statusbar-actions {
+    align-self: center;
   }
 }
