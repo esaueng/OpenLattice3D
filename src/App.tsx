@@ -1,8 +1,8 @@
-import { useEffect } from 'react';
+import { useEffect, useRef, useState, type MouseEvent, type PointerEvent } from 'react';
 import { LeftPanel } from './components/LeftPanel';
 import { Viewer3D } from './components/Viewer3D';
 import { RightPanel } from './components/RightPanel';
-import { useStore } from './store/useStore';
+import { useStore, type LogEntry } from './store/useStore';
 import { registerNotificationServiceWorker } from './utils/notifications';
 import { useLatticeGeneration } from './hooks/useLatticeGeneration';
 import { useWorkspaceHotkeys } from './hooks/useWorkspaceHotkeys';
@@ -18,6 +18,8 @@ function App() {
     params,
     meshFileName,
     demoModeActive,
+    logs,
+    clearLogs,
   } = useStore();
   const generationControls = useLatticeGeneration();
 
@@ -78,6 +80,7 @@ function App() {
       </main>
 
       <footer className="statusbar">
+        <BottomLogDrawer logs={logs} onClearLogs={clearLogs} />
         <div className="statusbar-group" aria-label="Model and solver status">
           <span className="statusbar-segment">Lattice: {params.latticeType}</span>
           <span className="statusbar-segment">Result: {resultStats}</span>
@@ -129,6 +132,108 @@ function App() {
       </footer>
     </div>
   );
+}
+
+function BottomLogDrawer({ logs, onClearLogs }: { logs: LogEntry[]; onClearLogs: () => void }) {
+  const [expanded, setExpanded] = useState(false);
+  const [drawerHeight, setDrawerHeight] = useState(320);
+  const [clearPromptVisible, setClearPromptVisible] = useState(false);
+  const dragStart = useRef<{ y: number; height: number } | null>(null);
+  const formattedLogs = logs.map(formatLogEntry);
+
+  useEffect(() => {
+    if (!clearPromptVisible) return undefined;
+    const timeoutId = window.setTimeout(() => setClearPromptVisible(false), 2200);
+    return () => window.clearTimeout(timeoutId);
+  }, [clearPromptVisible]);
+
+  function toggleLogs(event: MouseEvent<HTMLButtonElement>) {
+    setExpanded((current) => !current);
+    event.currentTarget.blur();
+  }
+
+  function startDrawerResize(event: PointerEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    dragStart.current = { y: event.clientY, height: drawerHeight };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function resizeDrawer(event: PointerEvent<HTMLButtonElement>) {
+    if (!dragStart.current) return;
+    const maxHeight = Math.max(260, window.innerHeight - 120);
+    const nextHeight = dragStart.current.height + dragStart.current.y - event.clientY;
+    setDrawerHeight(Math.min(maxHeight, Math.max(260, nextHeight)));
+  }
+
+  function stopDrawerResize(event: PointerEvent<HTMLButtonElement>) {
+    dragStart.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }
+
+  function copyLogs() {
+    if (typeof navigator === 'undefined' || !navigator.clipboard) return;
+    void navigator.clipboard.writeText(formattedLogs.join('\n'));
+  }
+
+  function clearLogEntries(event: MouseEvent<HTMLButtonElement>) {
+    if (!logs.length) return;
+    if (clearPromptVisible || event.detail >= 2) {
+      setClearPromptVisible(false);
+      onClearLogs();
+      event.currentTarget.blur();
+      return;
+    }
+    setClearPromptVisible(true);
+  }
+
+  return (
+    <>
+      {expanded && (
+        <div className="bottom-content logs-content" style={{ height: drawerHeight }}>
+          <button
+            type="button"
+            className="bottom-resize-handle"
+            aria-label="Resize drawer"
+            title="Drag up to resize"
+            onPointerDown={startDrawerResize}
+            onPointerMove={resizeDrawer}
+            onPointerUp={stopDrawerResize}
+            onPointerCancel={stopDrawerResize}
+          />
+          <div className="logs-drawer-header">
+            <span>Run logs</span>
+            <div className="logs-drawer-actions">
+              <button type="button" className="log-copy-button" onClick={copyLogs}>Copy logs</button>
+              <button
+                type="button"
+                className="log-clear-button"
+                disabled={!logs.length}
+                title="Double-click to clear run logs"
+                aria-label="Clear logs. Double-click to clear."
+                onClick={clearLogEntries}
+              >
+                {clearPromptVisible ? 'Double-click to clear' : 'Clear logs'}
+              </button>
+            </div>
+          </div>
+          <pre>{formattedLogs.length ? formattedLogs.join('\n') : 'No log entries.'}</pre>
+        </div>
+      )}
+      <div className="status-tabs">
+        <button type="button" className={expanded ? 'active' : ''} onClick={toggleLogs}>
+          Logs
+          <span className="count-pill">{logs.length}</span>
+        </button>
+      </div>
+    </>
+  );
+}
+
+function formatLogEntry(entry: LogEntry) {
+  const level = entry.level === 'error' ? 'ERR' : entry.level === 'warn' ? 'WARN' : 'INFO';
+  return `${new Date(entry.time).toLocaleTimeString([], { hour12: false })} ${level.padEnd(4, ' ')} ${entry.message}`;
 }
 
 export default App;

@@ -25,7 +25,6 @@ export function RightPanel() {
     params,
     viewMode,
     clipPlane,
-    logs,
     meshFileName,
     keepOutTris,
     keepInTris,
@@ -228,23 +227,6 @@ export function RightPanel() {
         </section>
       )}
 
-      {/* Logs */}
-      <section className="panel-section logs-section">
-        <h3>
-          Logs
-          <button className="btn btn-tiny" title="Clear the log output list." onClick={store.clearLogs}>Clear</button>
-        </h3>
-        <div className="log-container">
-          {logs.map((entry, i) => (
-            <div key={i} className={`log-entry log-${entry.level}`}>
-              <span className="log-time">
-                {new Date(entry.time).toLocaleTimeString()}
-              </span>
-              {entry.message}
-            </div>
-          ))}
-        </div>
-      </section>
     </div>
   );
 }
