@@ -369,14 +369,6 @@ svg {
   color: var(--color-text-muted);
 }
 
-.export-controls-label {
-  color: var(--color-text-subtle);
-  font-family: var(--font-mono);
-  font-size: var(--fs-mini);
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-}
-
 .export-controls-actions {
   display: flex;
   flex-wrap: wrap;
@@ -393,7 +385,7 @@ svg {
 .viewer-controls-overlay {
   position: absolute;
   right: 132px;
-  bottom: 26px;
+  bottom: 6px;
   left: 132px;
   z-index: 8;
   display: flex;
