@@ -61,6 +61,7 @@ type ViewCubeCornerDirection = [number, number, number];
 type GizmoViewRequest = ViewAxis | 'iso' | { kind: 'corner'; direction: ViewCubeCornerDirection };
 type ViewCubeFaceLabel = 'Front' | 'Back' | 'Right' | 'Left' | 'Top' | 'Bottom';
 type GizmoViewTarget = '+x' | '+y' | '+z' | 'front' | 'right' | 'top' | 'iso';
+type ViewCubeFaceDirection = ViewCubeCornerDirection;
 
 type ResettableOrbitControls = {
   enabled?: boolean;
@@ -698,6 +699,7 @@ interface ViewCubeFaceDescriptor {
   position: [number, number, number];
   rotation: [number, number, number];
   normal: [number, number, number];
+  direction: ViewCubeFaceDirection;
 }
 
 function getViewCubeFaceDescriptors(): ViewCubeFaceDescriptor[] {
@@ -705,12 +707,12 @@ function getViewCubeFaceDescriptors(): ViewCubeFaceDescriptor[] {
   const faceOffset = 0.006;
   const half = VIEWER_VIEW_CUBE_SIZE / 2;
   return [
-    { label: 'Front', position: [half, cubeSize + faceOffset, half], rotation: [-Math.PI / 2, 0, -Math.PI], normal: [0, 1, 0] },
-    { label: 'Back', position: [half, -faceOffset, half], rotation: [Math.PI / 2, 0, 0], normal: [0, -1, 0] },
-    { label: 'Left', position: [cubeSize + faceOffset, half, half], rotation: [Math.PI / 2, Math.PI / 2, 0], normal: [1, 0, 0] },
-    { label: 'Right', position: [-faceOffset, half, half], rotation: [Math.PI / 2, -Math.PI / 2, 0], normal: [-1, 0, 0] },
-    { label: 'Top', position: [half, half, cubeSize + faceOffset], rotation: [0, 0, Math.PI / 2], normal: [0, 0, 1] },
-    { label: 'Bottom', position: [half, half, -faceOffset], rotation: [-Math.PI, 0, -Math.PI / 2], normal: [0, 0, -1] },
+    { label: 'Front', position: [half, cubeSize + faceOffset, half], rotation: [-Math.PI / 2, 0, -Math.PI], normal: [0, 1, 0], direction: [0, 1, 0] },
+    { label: 'Back', position: [half, -faceOffset, half], rotation: [Math.PI / 2, 0, 0], normal: [0, -1, 0], direction: [0, -1, 0] },
+    { label: 'Left', position: [cubeSize + faceOffset, half, half], rotation: [Math.PI / 2, Math.PI / 2, 0], normal: [1, 0, 0], direction: [1, 0, 0] },
+    { label: 'Right', position: [-faceOffset, half, half], rotation: [Math.PI / 2, -Math.PI / 2, 0], normal: [-1, 0, 0], direction: [-1, 0, 0] },
+    { label: 'Top', position: [half, half, cubeSize + faceOffset], rotation: [0, 0, Math.PI / 2], normal: [0, 0, 1], direction: [0, 0, 1] },
+    { label: 'Bottom', position: [half, half, -faceOffset], rotation: [-Math.PI, 0, -Math.PI / 2], normal: [0, 0, -1], direction: [0, 0, -1] },
   ];
 }
 
@@ -777,6 +779,7 @@ function ViewCubeFace({
   position,
   rotation,
   normal,
+  direction,
   onSelectView,
 }: ViewCubeFaceDescriptor & {
   onSelectView: (view: GizmoViewRequest) => void;
@@ -811,7 +814,7 @@ function ViewCubeFace({
       }}
       onClick={(event: ThreeEvent<MouseEvent>) => {
         event.stopPropagation();
-        onSelectView(gizmoViewTargetToRequest(viewCubeFaceToGizmoTarget(label)));
+        onSelectView({ kind: 'corner', direction });
       }}
       onPointerOver={(event: ThreeEvent<PointerEvent>) => {
         event.stopPropagation();
@@ -970,12 +973,6 @@ function GizmoTextLabel({
       {children}
     </Text>
   );
-}
-
-function viewCubeFaceToGizmoTarget(label: ViewCubeFaceLabel): GizmoViewTarget {
-  if (label === 'Front' || label === 'Back') return 'front';
-  if (label === 'Right' || label === 'Left') return 'right';
-  return 'top';
 }
 
 function shouldShowViewCubeFaceLabel(
