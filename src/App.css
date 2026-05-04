@@ -355,6 +355,113 @@ svg {
   font-weight: var(--fw-medium);
 }
 
+.opencae-gizmo {
+  position: absolute;
+  right: 18px;
+  bottom: 20px;
+  z-index: 4;
+  width: 86px;
+  height: 86px;
+  pointer-events: none;
+  user-select: none;
+}
+
+.opencae-gizmo-cube {
+  position: absolute;
+  right: 24px;
+  bottom: 16px;
+  width: 34px;
+  height: 34px;
+  transform: rotateX(58deg) rotateZ(-38deg);
+  transform-style: preserve-3d;
+}
+
+.opencae-gizmo-face {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: rgba(226, 238, 250, 0.82);
+  background: rgba(82, 110, 139, 0.4);
+  border: 1px solid rgba(155, 182, 210, 0.76);
+  font-family: var(--font-mono);
+  font-size: 7px;
+  line-height: 1;
+  text-transform: lowercase;
+}
+
+.opencae-gizmo-face-front {
+  transform: translateZ(17px);
+}
+
+.opencae-gizmo-face-right {
+  transform: rotateY(90deg) translateZ(17px);
+}
+
+.opencae-gizmo-face-top {
+  transform: rotateX(90deg) translateZ(17px);
+}
+
+.opencae-gizmo-axis,
+.opencae-gizmo-dot {
+  position: absolute;
+  border-radius: 999px;
+}
+
+.opencae-gizmo-axis {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  color: #ffffff;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: var(--fw-medium);
+  line-height: 1;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.14), 0 4px 12px rgba(0, 0, 0, 0.42);
+}
+
+.opencae-gizmo-axis-x {
+  right: 0;
+  bottom: 6px;
+  background: #ff2f68;
+}
+
+.opencae-gizmo-axis-y {
+  right: 0;
+  bottom: 33px;
+  background: #22e28a;
+}
+
+.opencae-gizmo-axis-z {
+  right: 30px;
+  bottom: 58px;
+  background: #2d86ff;
+}
+
+.opencae-gizmo-dot {
+  width: 14px;
+  height: 14px;
+}
+
+.opencae-gizmo-dot-x {
+  right: 56px;
+  bottom: 12px;
+  background: #cf174a;
+}
+
+.opencae-gizmo-dot-y {
+  right: 56px;
+  bottom: 38px;
+  background: #11a66a;
+}
+
+.opencae-gizmo-dot-z {
+  right: 28px;
+  bottom: 0;
+  background: #1266d2;
+}
+
 .btn {
   min-height: 30px;
   display: inline-flex;
