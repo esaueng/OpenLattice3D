@@ -11,10 +11,9 @@ import {
 } from '../geometry/lattice';
 import type { SurfaceHexSample } from '../geometry/lattice';
 import {
-  checkDisconnected,
-  checkManifold,
   checkMinThickness,
   checkSphereDeviation,
+  checkTopology,
   runValidation,
 } from '../geometry/validation';
 import type { LatticeParams, SampleShape, ValidationResult } from '../types/project';
@@ -137,8 +136,7 @@ function runProceduralValidation(
     ? checkSphereDeviation(result, msg.sphereRadius || 25, msg.params.toleranceMm)
     : { passed: true, maxDeviation: 0 };
   const minThickness = checkMinThickness(sdf, result, msg.params.minFeatureSize, 200);
-  const manifold = checkManifold(result);
-  const disconnected = checkDisconnected(result);
+  const { manifold, disconnected } = checkTopology(result);
   const warnings: string[] = [];
 
   if (!msg.params.escapeHoles && msg.params.variant === 'shell_core') {
