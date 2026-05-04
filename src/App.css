@@ -435,15 +435,26 @@ svg {
 }
 
 .view-mode-slot-settings > .view-settings-button {
-  width: 28px;
-  flex: 0 0 28px;
+  width: 30px;
+  flex: 0 0 30px;
   padding: 0;
-  border-left-color: rgba(148, 163, 184, 0.18);
+  color: var(--color-text-muted);
+  border-left-color: rgba(148, 163, 184, 0.2);
   border-top-left-radius: 0;
   border-bottom-left-radius: 0;
-  font-family: var(--font-mono);
-  font-size: var(--fs-xs);
-  line-height: 1;
+}
+
+.view-mode-slot-settings > .view-settings-button svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  fill: none;
+}
+
+.view-mode-slot-settings > .view-settings-button.btn-active {
+  color: var(--color-accent);
 }
 
 .viewer-controls-panel .view-buttons .btn:hover,
