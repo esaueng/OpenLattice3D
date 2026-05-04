@@ -421,11 +421,105 @@ svg {
   background: transparent;
 }
 
+.view-mode-slot-settings {
+  position: relative;
+  display: flex;
+  min-width: 0;
+}
+
+.view-mode-slot-settings > .btn:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.view-mode-slot-settings > .view-settings-button {
+  width: 28px;
+  flex: 0 0 28px;
+  padding: 0;
+  border-left-color: rgba(148, 163, 184, 0.18);
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  line-height: 1;
+}
+
 .viewer-controls-panel .view-buttons .btn:hover,
 .viewer-controls-panel .view-buttons .btn:focus-visible,
 .viewer-controls-panel .view-buttons .btn-active {
   border-color: var(--color-accent-border);
   background: var(--color-accent-dim);
+}
+
+.cross-section-popover {
+  position: absolute;
+  bottom: calc(100% + 9px);
+  left: 50%;
+  z-index: 20;
+  display: grid;
+  width: 270px;
+  gap: 9px;
+  padding: 10px;
+  color: var(--color-text);
+  background: rgba(17, 24, 33, 0.94);
+  border: var(--border-thin);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-panel);
+  transform: translateX(-50%);
+  backdrop-filter: blur(10px);
+}
+
+.cross-section-popover::after {
+  position: absolute;
+  bottom: -5px;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  content: '';
+  background: rgba(17, 24, 33, 0.94);
+  border-right: var(--border-thin);
+  border-bottom: var(--border-thin);
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.popover-row {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+}
+
+.popover-row > span:first-child {
+  color: var(--color-text-muted);
+}
+
+.popover-row strong {
+  min-width: 34px;
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  text-align: right;
+}
+
+.popover-row input[type='range'] {
+  width: 100%;
+  min-width: 0;
+  accent-color: var(--color-accent);
+}
+
+.popover-checkbox-row {
+  grid-template-columns: auto 1fr;
+  justify-content: start;
+}
+
+.popover-checkbox-row input {
+  margin: 0;
 }
 
 .viewer-background-swatch {
