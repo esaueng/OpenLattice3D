@@ -100,10 +100,114 @@ const TRI_TABLE: number[][] = [
   [1,3,8,9,1,8], [0,9,1], [0,3,8], []
 ];
 
+const EDGE_START = new Uint8Array([0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3]);
+const EDGE_END = new Uint8Array([1, 2, 3, 0, 5, 6, 7, 4, 4, 5, 6, 7]);
+const CORNER_X = new Uint8Array([0, 1, 1, 0, 0, 1, 1, 0]);
+const CORNER_Y = new Uint8Array([0, 0, 1, 1, 0, 0, 1, 1]);
+const CORNER_Z = new Uint8Array([0, 0, 0, 0, 1, 1, 1, 1]);
+const TRI_COUNTS = new Uint8Array(TRI_TABLE.map((triList) => triList.length / 3));
+
 export interface MarchingCubesResult {
   positions: Float32Array;
   normals: Float32Array;
   triCount: number;
+}
+
+function fieldIndex(x: number, y: number, z: number, strideY: number, strideZ: number): number {
+  return x + y * strideY + z * strideZ;
+}
+
+function loadCubeValues(
+  field: Float32Array,
+  base: number,
+  strideY: number,
+  strideZ: number,
+  isoValue: number,
+  vals: Float32Array
+): number {
+  const v0 = field[base];
+  const v1 = field[base + 1];
+  const v2 = field[base + 1 + strideY];
+  const v3 = field[base + strideY];
+  const v4 = field[base + strideZ];
+  const v5 = field[base + 1 + strideZ];
+  const v6 = field[base + 1 + strideY + strideZ];
+  const v7 = field[base + strideY + strideZ];
+
+  vals[0] = v0;
+  vals[1] = v1;
+  vals[2] = v2;
+  vals[3] = v3;
+  vals[4] = v4;
+  vals[5] = v5;
+  vals[6] = v6;
+  vals[7] = v7;
+
+  let cubeIndex = 0;
+  if (v0 < isoValue) cubeIndex |= 1;
+  if (v1 < isoValue) cubeIndex |= 2;
+  if (v2 < isoValue) cubeIndex |= 4;
+  if (v3 < isoValue) cubeIndex |= 8;
+  if (v4 < isoValue) cubeIndex |= 16;
+  if (v5 < isoValue) cubeIndex |= 32;
+  if (v6 < isoValue) cubeIndex |= 64;
+  if (v7 < isoValue) cubeIndex |= 128;
+  return cubeIndex;
+}
+
+function interpolateEdgeVertices(
+  edges: number,
+  vals: Float32Array,
+  edgeVerts: Float32Array,
+  isoValue: number,
+  x0: number,
+  x1: number,
+  y0: number,
+  y1: number,
+  z0: number,
+  z1: number
+): void {
+  for (let edge = 0; edge < 12; edge++) {
+    if ((edges & (1 << edge)) === 0) continue;
+
+    const a = EDGE_START[edge];
+    const b = EDGE_END[edge];
+    const va = vals[a];
+    const vb = vals[b];
+    let t = 0.5;
+    if (Math.abs(va - vb) > 1e-10) {
+      t = (isoValue - va) / (vb - va);
+    }
+    if (t < 0) t = 0;
+    else if (t > 1) t = 1;
+
+    const ax = CORNER_X[a] === 0 ? x0 : x1;
+    const ay = CORNER_Y[a] === 0 ? y0 : y1;
+    const az = CORNER_Z[a] === 0 ? z0 : z1;
+    const bx = CORNER_X[b] === 0 ? x0 : x1;
+    const by = CORNER_Y[b] === 0 ? y0 : y1;
+    const bz = CORNER_Z[b] === 0 ? z0 : z1;
+    const offset = edge * 3;
+    edgeVerts[offset] = ax + t * (bx - ax);
+    edgeVerts[offset + 1] = ay + t * (by - ay);
+    edgeVerts[offset + 2] = az + t * (bz - az);
+  }
+}
+
+function emitCubeTriangles(
+  triList: number[],
+  edgeVerts: Float32Array,
+  positions: Float32Array,
+  writeOffset: number
+): number {
+  let offset = writeOffset;
+  for (let i = 0; i < triList.length; i++) {
+    const edgeOffset = triList[i] * 3;
+    positions[offset++] = edgeVerts[edgeOffset];
+    positions[offset++] = edgeVerts[edgeOffset + 1];
+    positions[offset++] = edgeVerts[edgeOffset + 2];
+  }
+  return offset;
 }
 
 /**
@@ -121,119 +225,95 @@ export function marchingCubes(
   onProgress?: (fraction: number) => void
 ): MarchingCubesResult {
   const nx = resolution, ny = resolution, nz = resolution;
+  const minX = bounds.min[0];
+  const minY = bounds.min[1];
+  const minZ = bounds.min[2];
   const dx = (bounds.max[0] - bounds.min[0]) / nx;
   const dy = (bounds.max[1] - bounds.min[1]) / ny;
   const dz = (bounds.max[2] - bounds.min[2]) / nz;
+  const strideY = nx + 1;
+  const strideZ = strideY * (ny + 1);
 
   // Sample the field
   const field = new Float32Array((nx + 1) * (ny + 1) * (nz + 1));
-  const idx = (x: number, y: number, z: number) => x + (nx + 1) * (y + (ny + 1) * z);
 
   for (let z = 0; z <= nz; z++) {
-    if (onProgress) onProgress(z / nz * 0.5);
+    if (onProgress) onProgress((z / nz) * 0.45);
+    const pz = minZ + z * dz;
     for (let y = 0; y <= ny; y++) {
+      const py = minY + y * dy;
+      const rowOffset = fieldIndex(0, y, z, strideY, strideZ);
       for (let x = 0; x <= nx; x++) {
-        const px = bounds.min[0] + x * dx;
-        const py = bounds.min[1] + y * dy;
-        const pz = bounds.min[2] + z * dz;
-        field[idx(x, y, z)] = sdf(px, py, pz);
+        field[rowOffset + x] = sdf(minX + x * dx, py, pz);
       }
     }
   }
 
-  // March through cubes
-  const vertices: number[] = [];
+  const vals = new Float32Array(8);
+  const edgeVerts = new Float32Array(12 * 3);
+  let triCount = 0;
 
   for (let z = 0; z < nz; z++) {
-    if (onProgress) onProgress(0.5 + z / nz * 0.5);
+    if (onProgress) onProgress(0.45 + (z / nz) * 0.2);
     for (let y = 0; y < ny; y++) {
+      const base = fieldIndex(0, y, z, strideY, strideZ);
       for (let x = 0; x < nx; x++) {
-        const vals = [
-          field[idx(x, y, z)],
-          field[idx(x + 1, y, z)],
-          field[idx(x + 1, y + 1, z)],
-          field[idx(x, y + 1, z)],
-          field[idx(x, y, z + 1)],
-          field[idx(x + 1, y, z + 1)],
-          field[idx(x + 1, y + 1, z + 1)],
-          field[idx(x, y + 1, z + 1)],
-        ];
-
-        let cubeIndex = 0;
-        for (let i = 0; i < 8; i++) {
-          if (vals[i] < isoValue) cubeIndex |= (1 << i);
-        }
-
-        if (EDGE_TABLE[cubeIndex] === 0) continue;
-
-        // Corner positions
-        const corners: Vec3[] = [
-          [bounds.min[0] + x * dx, bounds.min[1] + y * dy, bounds.min[2] + z * dz],
-          [bounds.min[0] + (x + 1) * dx, bounds.min[1] + y * dy, bounds.min[2] + z * dz],
-          [bounds.min[0] + (x + 1) * dx, bounds.min[1] + (y + 1) * dy, bounds.min[2] + z * dz],
-          [bounds.min[0] + x * dx, bounds.min[1] + (y + 1) * dy, bounds.min[2] + z * dz],
-          [bounds.min[0] + x * dx, bounds.min[1] + y * dy, bounds.min[2] + (z + 1) * dz],
-          [bounds.min[0] + (x + 1) * dx, bounds.min[1] + y * dy, bounds.min[2] + (z + 1) * dz],
-          [bounds.min[0] + (x + 1) * dx, bounds.min[1] + (y + 1) * dy, bounds.min[2] + (z + 1) * dz],
-          [bounds.min[0] + x * dx, bounds.min[1] + (y + 1) * dy, bounds.min[2] + (z + 1) * dz],
-        ];
-
-        // Edge endpoints
-        const edgePairs: [number, number][] = [
-          [0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]
-        ];
-
-        // Interpolate edge vertices
-        const edgeVerts: Vec3[] = new Array(12);
-        const edges = EDGE_TABLE[cubeIndex];
-        for (let i = 0; i < 12; i++) {
-          if (edges & (1 << i)) {
-            const [a, b] = edgePairs[i];
-            const va = vals[a], vb = vals[b];
-            let t = 0.5;
-            if (Math.abs(va - vb) > 1e-10) {
-              t = (isoValue - va) / (vb - va);
-            }
-            t = Math.max(0, Math.min(1, t));
-            edgeVerts[i] = [
-              corners[a][0] + t * (corners[b][0] - corners[a][0]),
-              corners[a][1] + t * (corners[b][1] - corners[a][1]),
-              corners[a][2] + t * (corners[b][2] - corners[a][2]),
-            ];
-          }
-        }
-
-        // Generate triangles
-        const triList = TRI_TABLE[cubeIndex];
-        for (let i = 0; i < triList.length; i += 3) {
-          const v0 = edgeVerts[triList[i]];
-          const v1 = edgeVerts[triList[i + 1]];
-          const v2 = edgeVerts[triList[i + 2]];
-          if (v0 && v1 && v2) {
-            vertices.push(v0[0], v0[1], v0[2], v1[0], v1[1], v1[2], v2[0], v2[1], v2[2]);
-          }
-        }
+        triCount += TRI_COUNTS[loadCubeValues(field, base + x, strideY, strideZ, isoValue, vals)];
       }
     }
   }
 
-  const triCount = vertices.length / 9;
-  const positions = new Float32Array(vertices);
+  const positions = new Float32Array(triCount * 9);
   const normals = new Float32Array(triCount * 3);
+  let writeOffset = 0;
+
+  for (let z = 0; z < nz; z++) {
+    if (onProgress) onProgress(0.65 + (z / nz) * 0.35);
+    const z0 = minZ + z * dz;
+    const z1 = minZ + (z + 1) * dz;
+    for (let y = 0; y < ny; y++) {
+      const y0 = minY + y * dy;
+      const y1 = minY + (y + 1) * dy;
+      const base = fieldIndex(0, y, z, strideY, strideZ);
+      for (let x = 0; x < nx; x++) {
+        const cubeIndex = loadCubeValues(field, base + x, strideY, strideZ, isoValue, vals);
+        const edges = EDGE_TABLE[cubeIndex];
+        if (edges === 0) continue;
+
+        interpolateEdgeVertices(
+          edges,
+          vals,
+          edgeVerts,
+          isoValue,
+          minX + x * dx,
+          minX + (x + 1) * dx,
+          y0,
+          y1,
+          z0,
+          z1
+        );
+        writeOffset = emitCubeTriangles(TRI_TABLE[cubeIndex], edgeVerts, positions, writeOffset);
+      }
+    }
+  }
 
   // Compute face normals
   for (let i = 0; i < triCount; i++) {
     const o = i * 9;
-    const e1: Vec3 = [positions[o+3]-positions[o], positions[o+4]-positions[o+1], positions[o+5]-positions[o+2]];
-    const e2: Vec3 = [positions[o+6]-positions[o], positions[o+7]-positions[o+1], positions[o+8]-positions[o+2]];
-    const nx = e1[1]*e2[2] - e1[2]*e2[1];
-    const ny = e1[2]*e2[0] - e1[0]*e2[2];
-    const nz2 = e1[0]*e2[1] - e1[1]*e2[0];
-    const len = Math.sqrt(nx*nx + ny*ny + nz2*nz2);
+    const e1x = positions[o + 3] - positions[o];
+    const e1y = positions[o + 4] - positions[o + 1];
+    const e1z = positions[o + 5] - positions[o + 2];
+    const e2x = positions[o + 6] - positions[o];
+    const e2y = positions[o + 7] - positions[o + 1];
+    const e2z = positions[o + 8] - positions[o + 2];
+    const nx = e1y * e2z - e1z * e2y;
+    const ny = e1z * e2x - e1x * e2z;
+    const nz2 = e1x * e2y - e1y * e2x;
+    const len = Math.sqrt(nx * nx + ny * ny + nz2 * nz2);
     if (len > 1e-12) {
-      normals[i*3] = nx/len;
-      normals[i*3+1] = ny/len;
-      normals[i*3+2] = nz2/len;
+      normals[i * 3] = nx / len;
+      normals[i * 3 + 1] = ny / len;
+      normals[i * 3 + 2] = nz2 / len;
     }
   }
 
