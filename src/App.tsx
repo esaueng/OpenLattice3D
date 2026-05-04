@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type MouseEvent, type PointerEvent } from 'react';
 import { LeftPanel } from './components/LeftPanel';
 import { Viewer3D } from './components/Viewer3D';
+import { ViewerControls } from './components/ViewerControls';
 import { useStore, type LogEntry } from './store/useStore';
 import { registerNotificationServiceWorker } from './utils/notifications';
 import { useLatticeGeneration } from './hooks/useLatticeGeneration';
@@ -71,6 +72,9 @@ function App() {
             </div>
           </div>
           <Viewer3D />
+          <div className="viewer-controls-overlay">
+            <ViewerControls />
+          </div>
         </section>
       </main>
 
