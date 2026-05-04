@@ -861,58 +861,48 @@ svg {
   border-right: 0;
 }
 
-.statusbar-actions {
+.status-links {
+  margin-left: auto;
   display: inline-flex;
   align-items: center;
-  gap: 9px;
-  margin-left: auto;
+  gap: 10px;
 }
 
-.footer-link {
+.status-link {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  color: var(--color-text-muted);
+  gap: 5px;
+  color: var(--color-text-subtle);
   font-family: var(--font-mono);
   font-size: var(--fs-mini);
-  line-height: 1;
-  text-decoration: none;
   text-transform: lowercase;
+  text-decoration: none;
 }
 
-.footer-link:hover {
-  color: var(--color-text);
-}
-
-.footer-link-icon {
-  width: 10px;
-  height: 10px;
+.status-link svg {
+  width: 13px;
+  height: 13px;
   flex: 0 0 auto;
-  color: currentColor;
-  fill: currentColor;
-  opacity: 0.82;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
 }
 
-.footer-link-icon-box {
-  border: 1px solid currentColor;
-  border-radius: 1px;
-  opacity: 0.7;
+.status-link:hover,
+.status-link:focus-visible {
+  color: var(--color-accent);
 }
 
-.footer-link-support {
-  color: #f6c177;
+.status-link.donate-link {
+  color: #ffd6a3;
   text-transform: none;
 }
 
-.footer-link-support:hover {
-  color: #ffd58a;
-}
-
-.footer-link-icon-coffee {
-  width: 12px;
-  height: 12px;
-  fill: none;
-  opacity: 0.95;
+.status-link.donate-link:hover,
+.status-link.donate-link:focus-visible {
+  color: #ffe2bd;
 }
 
 .demo-grid-view {
@@ -1129,7 +1119,7 @@ svg {
     max-width: none;
   }
 
-  .statusbar-actions {
+  .status-links {
     align-self: center;
   }
 }
