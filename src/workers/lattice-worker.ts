@@ -11,6 +11,11 @@ import type { Vec3 } from '../geometry/vec3';
 import { add, sub, dot, cross, length, scale, normalize } from '../geometry/vec3';
 import type { SurfaceHexSample } from '../geometry/lattice';
 import type { LatticeTileJob, LatticeTileResponse, LatticeTileResult, TileBackend, TileSkipStats } from './tile-types';
+import {
+  detectGenerationBackendCapabilities,
+  formatBackendCapabilities,
+  selectBestBackend,
+} from '../backend/generation-backend';
 
 type SdfFunction = ((x: number, y: number, z: number) => number) & Partial<GridSdfSampler>;
 type WorkerPostMessage = (message: unknown, transfer: Transferable[]) => void;
@@ -19,6 +24,9 @@ const postWorkerMessage = self.postMessage.bind(self) as WorkerPostMessage;
 const TILE_SIZE = 32;
 const MAX_TILE_WORKERS = 8;
 const ENABLE_SPARSE_TILE_SKIPPING = true;
+const ENABLE_WASM_SINGLE_PLACEHOLDER = false;
+const ENABLE_WASM_THREADED_PLACEHOLDER = false;
+const ENABLE_WEBGPU_PLACEHOLDER = false;
 
 let activeTileWorkers: Worker[] = [];
 
@@ -1241,13 +1249,27 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         }
       }
 
-      if (shape && !isSurfacePolygon && !isDemoGrid) {
+      const tileWorkerPoolAvailable = Boolean(shape && !isSurfacePolygon && !isDemoGrid && tileWorkerCount() > 0);
+      const backendCapabilities = detectGenerationBackendCapabilities(self, { tileWorkerPoolAvailable });
+      const selectedBackend = selectBestBackend({
+        capabilities: backendCapabilities,
+        enableWasmSinglePlaceholder: ENABLE_WASM_SINGLE_PLACEHOLDER,
+        enableWasmThreadedPlaceholder: ENABLE_WASM_THREADED_PLACEHOLDER,
+        enableWebGPUPlaceholder: ENABLE_WEBGPU_PLACEHOLDER,
+      });
+      postMessage({
+        type: 'progress',
+        progress: 0.11,
+        message: `Selected backend ${selectedBackend} (${formatBackendCapabilities(backendCapabilities)})`
+      } as WorkerResponse);
+
+      if (selectedBackend === 'cpu-tiled' && shape) {
         try {
           const tiledStart = performance.now();
           postMessage({
             type: 'progress',
             progress: 0.12,
-            message: `Backend cpu-tiled: ${tileWorkerCount()} workers, ${TILE_SIZE}^3 tiles, sparse skip ${ENABLE_SPARSE_TILE_SKIPPING ? 'on' : 'off'}`
+            message: `Backend ${selectedBackend}: ${tileWorkerCount()} workers, ${TILE_SIZE}^3 tiles, sparse skip ${ENABLE_SPARSE_TILE_SKIPPING ? 'on' : 'off'}`
           } as WorkerResponse);
           const { result: rawTiledResult, stats: tileStats } = await runTiledGeneration(
             params,
@@ -1275,14 +1297,14 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
           postMessage({
             type: 'progress',
             progress: 0.95,
-            message: `Geometry ready via cpu-tiled in ${Math.round(performance.now() - tiledStart)}ms (${tileStats.tilesSkipped}/${tileStats.tilesTotal} tiles skipped)`
+            message: `Geometry ready via ${selectedBackend} in ${Math.round(performance.now() - tiledStart)}ms (${tileStats.tilesSkipped}/${tileStats.tilesTotal} tiles skipped)`
           } as WorkerResponse);
           const response: WorkerResponse = {
             type: 'result',
             positions: result.positions,
             normals: result.normals,
             triCount: result.triCount,
-            backend: 'cpu-tiled',
+            backend: selectedBackend,
           };
           postWorkerMessage(response, generatedResultTransferList(response));
           return;
@@ -1296,6 +1318,12 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
             message: `cpu-tiled unavailable (${message}); falling back to cpu-single`
           } as WorkerResponse);
         }
+      } else if (selectedBackend !== 'cpu-single') {
+        postMessage({
+          type: 'progress',
+          progress: 0.12,
+          message: `${selectedBackend} is not enabled for execution yet; falling back to cpu-single`
+        } as WorkerResponse);
       }
 
       const initialEstimate = estimateGenerationTimings(params, resolution, !shape);

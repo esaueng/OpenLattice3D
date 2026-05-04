@@ -1,7 +1,8 @@
 import type { LatticeParams, SampleShape } from '../types/project';
 import type { Vec3 } from '../geometry/vec3';
+import type { GenerationBackendName } from '../backend/generation-backend';
 
-export type TileBackend = 'cpu-tiled' | 'cpu-single';
+export type TileBackend = GenerationBackendName;
 
 export interface LatticeTileJob {
   type: 'tile';
