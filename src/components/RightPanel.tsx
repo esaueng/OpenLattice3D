@@ -9,11 +9,6 @@ export function RightPanel() {
 
   return (
     <>
-      <div className="panel-intro">
-        <span className="panel-eyebrow">context</span>
-        <h2>Inspect and export</h2>
-        <p>Review validation, explore views, and export outputs.</p>
-      </div>
       {/* Validation Panel */}
       {validation && (
         <section className="panel-section">
