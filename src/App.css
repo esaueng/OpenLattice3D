@@ -816,6 +816,7 @@ svg {
 }
 
 .statusbar {
+  position: relative;
   min-width: 0;
   display: flex;
   justify-content: flex-start;
@@ -828,6 +829,47 @@ svg {
   font-family: var(--font-mono);
   font-size: var(--fs-mini);
   overflow: hidden;
+}
+
+.status-tabs {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.status-tabs button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 22px;
+  padding: 0 8px;
+  color: var(--color-text-muted);
+  background: rgba(11, 15, 20, 0.24);
+  border: var(--border-thin);
+  border-radius: var(--radius-md);
+  font-size: var(--fs-xs);
+}
+
+.status-tabs button:hover,
+.status-tabs button:focus-visible,
+.status-tabs button.active {
+  color: var(--color-text);
+  background: var(--color-surface-2);
+  border-color: var(--color-accent-border);
+  outline: none;
+}
+
+.count-pill {
+  min-width: 18px;
+  padding: 0 5px;
+  color: var(--color-text);
+  background: var(--color-surface-2);
+  border: var(--border-thin);
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 10px;
 }
 
 .statusbar-group {
@@ -903,6 +945,120 @@ svg {
 .status-link.donate-link:hover,
 .status-link.donate-link:focus-visible {
   color: #ffe2bd;
+}
+
+.bottom-content {
+  position: fixed;
+  right: var(--context-w);
+  bottom: var(--statusbar-h);
+  left: 0;
+  z-index: 20;
+  height: 320px;
+  background: rgba(17, 24, 33, 0.98);
+  border-top: var(--border-thin);
+  border-right: var(--border-thin);
+  border-left: var(--border-thin);
+}
+
+.bottom-resize-handle {
+  position: absolute;
+  top: -5px;
+  right: 0;
+  left: 0;
+  z-index: 1;
+  height: 10px;
+  cursor: ns-resize;
+  touch-action: none;
+  background: transparent;
+  border: 0;
+}
+
+.bottom-resize-handle::before {
+  position: absolute;
+  top: 4px;
+  left: 50%;
+  width: 64px;
+  height: 2px;
+  content: "";
+  background: var(--color-border-strong);
+  border-radius: 999px;
+  transform: translateX(-50%);
+}
+
+.bottom-resize-handle:hover::before,
+.bottom-resize-handle:focus-visible::before {
+  background: var(--color-accent);
+}
+
+.logs-content {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.logs-content pre {
+  min-height: 0;
+  height: auto;
+  margin: 0;
+  padding: 12px 12px 10px;
+  overflow: auto;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  white-space: pre-wrap;
+}
+
+.logs-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: 12px 12px 10px;
+  color: var(--color-text);
+  border-bottom: var(--border-thin);
+}
+
+.logs-drawer-header span {
+  font-weight: var(--fw-medium);
+}
+
+.logs-drawer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+}
+
+.log-copy-button,
+.log-clear-button {
+  min-height: 26px;
+  padding: 0 10px;
+  color: var(--color-text-muted);
+  background: rgba(11, 15, 20, 0.32);
+  border: var(--border-thin);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+}
+
+.log-copy-button:hover,
+.log-copy-button:focus-visible,
+.log-clear-button:hover,
+.log-clear-button:focus-visible {
+  color: var(--color-text);
+  background: var(--color-surface-2);
+  border-color: var(--color-accent-border);
+  outline: none;
+}
+
+.log-clear-button {
+  color: #e7b25a;
+  border-color: rgba(231, 178, 90, 0.35);
+}
+
+.log-clear-button:disabled {
+  color: var(--color-text-subtle);
+  cursor: not-allowed;
+  border-color: var(--color-border);
 }
 
 .demo-grid-view {
@@ -991,6 +1147,10 @@ svg {
     grid-template-columns: 316px minmax(320px, 1fr) 316px;
   }
 
+  .bottom-content {
+    right: 316px;
+  }
+
   .row label {
     flex-basis: 108px;
   }
@@ -1022,6 +1182,11 @@ svg {
 
   .statusbar {
     min-height: var(--statusbar-h);
+  }
+
+  .bottom-content {
+    right: 0;
+    left: 0;
   }
 
   .workspace {
@@ -1106,6 +1271,10 @@ svg {
     height: auto;
     min-height: var(--statusbar-h);
     padding: 6px 10px;
+  }
+
+  .status-tabs {
+    height: auto;
   }
 
   .statusbar-group {
