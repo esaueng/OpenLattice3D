@@ -1,5 +1,5 @@
 import { useStore } from '../store/useStore';
-import { downloadProjectJSON, downloadSTL, downloadValidationReport } from '../utils/export';
+import { downloadProjectJSON, downloadSTL } from '../utils/export';
 
 export function ExportControls() {
   const {
@@ -21,17 +21,8 @@ export function ExportControls() {
           title="Download the generated lattice mesh as an STL file."
           onClick={() => downloadSTL(resultMesh, `${meshFileName.replace(/\.stl$/i, '')}-lattice.stl`)}
         >
-          Export STL ({resultMesh.triCount.toLocaleString()} tris)
+          Export STL
         </button>
-        {validation && (
-          <button
-            className="btn btn-small"
-            title="Download a text report of validation checks and outcomes."
-            onClick={() => downloadValidationReport(validation, params, meshFileName)}
-          >
-            Export Validation Report
-          </button>
-        )}
         <button
           className="btn btn-small"
           title="Export current parameters and metadata to a project JSON file."
