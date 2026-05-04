@@ -255,7 +255,7 @@ export function LeftPanel() {
         store.setGenerating(false);
         store.setProgress(1, 'Complete');
         store.setDemoModeActive(false);
-        store.addLog(`Generation complete: ${resp.triCount} triangles`);
+        store.addLog(`Generation complete (${resp.backend || 'cpu-single'}): ${resp.triCount} triangles`);
         startValidation(resp);
         const elapsedMs = performance.now() - generationStartedAt;
         void notifyGenerationComplete(resp.triCount || 0, elapsedMs);
@@ -286,7 +286,9 @@ export function LeftPanel() {
 
   const cancelGeneration = useCallback(() => {
     if (workerRef.current) {
-      workerRef.current.terminate();
+      const worker = workerRef.current;
+      worker.postMessage({ type: 'cancel' } satisfies WorkerMessage);
+      window.setTimeout(() => worker.terminate(), 50);
       workerRef.current = null;
     }
     store.setGenerating(false);

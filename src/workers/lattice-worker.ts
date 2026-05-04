@@ -2,6 +2,7 @@
 // This runs heavy computation off the main thread.
 
 import { marchingCubes } from '../geometry/marching-cubes';
+import type { MarchingCubesResult } from '../geometry/marching-cubes';
 import type { GridSdfSampler } from '../geometry/marching-cubes';
 import { buildCombinedSDF, buildSurfaceHexLattice, buildSphereLattice, buildCubeLattice, buildCylinderLattice, buildTorusLattice, buildCapsuleLattice } from '../geometry/lattice';
 import { MeshBVH } from '../geometry/bvh';
@@ -9,11 +10,16 @@ import type { LatticeParams, ValidationResult, SampleShape } from '../types/proj
 import type { Vec3 } from '../geometry/vec3';
 import { add, sub, dot, cross, length, scale, normalize } from '../geometry/vec3';
 import type { SurfaceHexSample } from '../geometry/lattice';
+import type { LatticeTileJob, LatticeTileResponse, LatticeTileResult, TileBackend } from './tile-types';
 
 type SdfFunction = ((x: number, y: number, z: number) => number) & Partial<GridSdfSampler>;
 type WorkerPostMessage = (message: unknown, transfer: Transferable[]) => void;
 
 const postWorkerMessage = self.postMessage.bind(self) as WorkerPostMessage;
+const TILE_SIZE = 32;
+const MAX_TILE_WORKERS = 8;
+
+let activeTileWorkers: Worker[] = [];
 
 function withThinSectionFilter(sdf: SdfFunction, filter: number): SdfFunction {
   if (filter <= 0) return sdf;
@@ -38,6 +44,11 @@ function generatedResultTransferList(response: WorkerResponse): Transferable[] {
   if (response.surfaceSampleNormals) transfers.push(response.surfaceSampleNormals.buffer);
   if (response.surfaceSampleHoleScales) transfers.push(response.surfaceSampleHoleScales.buffer);
   return transfers;
+}
+
+function terminateTileWorkers(): void {
+  for (const worker of activeTileWorkers) worker.terminate();
+  activeTileWorkers = [];
 }
 
 function surfaceSampleWorkerTransferList(payload: ShapeSampleWorkerMessage | MeshSampleWorkerMessage): Transferable[] {
@@ -95,6 +106,7 @@ export interface WorkerResponse {
   surfaceSamplePositions?: Float32Array;
   surfaceSampleNormals?: Float32Array;
   surfaceSampleHoleScales?: Float32Array;
+  backend?: TileBackend;
 }
 
 let cancelled = false;
@@ -690,11 +702,143 @@ function formatDuration(seconds: number): string {
   return `${hours.toFixed(1)}h`;
 }
 
+function tileWorkerCount(): number {
+  return Math.max(1, Math.min(MAX_TILE_WORKERS, (self.navigator?.hardwareConcurrency || 4) - 1));
+}
+
+function buildTileJobs(
+  params: LatticeParams,
+  shape: SampleShape,
+  sphereRadius: number,
+  bounds: { min: Vec3; max: Vec3 },
+  resolution: number
+): LatticeTileJob[] {
+  const jobs: LatticeTileJob[] = [];
+  const dx = (bounds.max[0] - bounds.min[0]) / resolution;
+  const dy = (bounds.max[1] - bounds.min[1]) / resolution;
+  const dz = (bounds.max[2] - bounds.min[2]) / resolution;
+  let tileId = 0;
+
+  for (let z = 0; z < resolution; z += TILE_SIZE) {
+    const cz = Math.min(TILE_SIZE, resolution - z);
+    for (let y = 0; y < resolution; y += TILE_SIZE) {
+      const cy = Math.min(TILE_SIZE, resolution - y);
+      for (let x = 0; x < resolution; x += TILE_SIZE) {
+        const cx = Math.min(TILE_SIZE, resolution - x);
+        jobs.push({
+          type: 'tile',
+          tileId: tileId++,
+          params,
+          shape,
+          sphereRadius,
+          cells: [cx, cy, cz],
+          bounds: {
+            min: [bounds.min[0] + x * dx, bounds.min[1] + y * dy, bounds.min[2] + z * dz],
+            max: [bounds.min[0] + (x + cx) * dx, bounds.min[1] + (y + cy) * dy, bounds.min[2] + (z + cz) * dz],
+          },
+        });
+      }
+    }
+  }
+
+  return jobs;
+}
+
+function mergeTileResults(results: LatticeTileResult[]): MarchingCubesResult {
+  const sorted = [...results].sort((a, b) => a.tileId - b.tileId);
+  let triCount = 0;
+  let positionLength = 0;
+  let normalLength = 0;
+  for (const result of sorted) {
+    triCount += result.triCount;
+    positionLength += result.positions.length;
+    normalLength += result.normals.length;
+  }
+
+  const positions = new Float32Array(positionLength);
+  const normals = new Float32Array(normalLength);
+  let po = 0;
+  let no = 0;
+  for (const result of sorted) {
+    positions.set(result.positions, po);
+    normals.set(result.normals, no);
+    po += result.positions.length;
+    no += result.normals.length;
+  }
+
+  return { positions, normals, triCount };
+}
+
+function runTiledGeneration(
+  params: LatticeParams,
+  shape: SampleShape,
+  sphereRadius: number,
+  bounds: { min: Vec3; max: Vec3 },
+  resolution: number,
+  onProgress: (completed: number, total: number, timingMs: number) => void
+): Promise<MarchingCubesResult> {
+  const jobs = buildTileJobs(params, shape, sphereRadius, bounds, resolution);
+  const workerCount = Math.min(tileWorkerCount(), jobs.length);
+  const results: LatticeTileResult[] = [];
+  let nextJob = 0;
+  let completed = 0;
+  let timingMs = 0;
+
+  return new Promise<MarchingCubesResult>((resolve, reject) => {
+    const finish = () => {
+      terminateTileWorkers();
+      resolve(mergeTileResults(results));
+    };
+
+    const startWorker = () => {
+      const worker = new Worker(new URL('./lattice-tile-worker.ts', import.meta.url), { type: 'module' });
+      activeTileWorkers.push(worker);
+
+      const postNext = () => {
+        if (cancelled) {
+          reject(new Error('Cancelled'));
+          return;
+        }
+        const job = jobs[nextJob++];
+        if (!job) {
+          if (completed === jobs.length) finish();
+          return;
+        }
+        worker.postMessage(job);
+      };
+
+      worker.onmessage = (event: MessageEvent<LatticeTileResponse>) => {
+        const response = event.data;
+        if (response.type === 'error') {
+          reject(new Error(response.message));
+          return;
+        }
+        results[response.tileId] = response;
+        completed++;
+        timingMs += response.timing.totalMs;
+        onProgress(completed, jobs.length, timingMs);
+        if (completed === jobs.length) finish();
+        else postNext();
+      };
+      worker.onerror = () => reject(new Error('Tile worker failed'));
+      postNext();
+    };
+
+    try {
+      for (let i = 0; i < workerCount; i++) startWorker();
+    } catch (err) {
+      terminateTileWorkers();
+      reject(err instanceof Error ? err : new Error('Tile worker creation failed'));
+    }
+  }).finally(() => terminateTileWorkers());
+}
+
 self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
   const msg = e.data;
 
   if (msg.type === 'cancel') {
     cancelled = true;
+    terminateTileWorkers();
     return;
   }
 
@@ -956,6 +1100,63 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         }
       }
 
+      if (shape && !isSurfacePolygon && !isDemoGrid) {
+        try {
+          const tiledStart = performance.now();
+          postMessage({
+            type: 'progress',
+            progress: 0.12,
+            message: `Backend cpu-tiled: ${tileWorkerCount()} workers, ${TILE_SIZE}^3 tiles`
+          } as WorkerResponse);
+          const rawTiledResult = await runTiledGeneration(
+            params,
+            shape,
+            sphereRadius ?? msg.sphereRadius ?? 25,
+            bounds,
+            resolution,
+            (completed, total, timingMs) => {
+              postMessage({
+                type: 'progress',
+                progress: 0.12 + (completed / total) * 0.76,
+                message: `cpu-tiled: ${completed}/${total} tiles (${Math.round(timingMs)}ms worker time)`
+              } as WorkerResponse);
+            }
+          );
+          if (cancelled) throw new Error('Cancelled');
+          const result = removeDisconnectedFragments(rawTiledResult, 0.004);
+          if (result.removedTriangles > 0) {
+            postMessage({
+              type: 'progress',
+              progress: 0.9,
+              message: `Removed ${result.removedTriangles.toLocaleString()} disconnected fragment triangles`
+            } as WorkerResponse);
+          }
+          postMessage({
+            type: 'progress',
+            progress: 0.95,
+            message: `Geometry ready via cpu-tiled in ${Math.round(performance.now() - tiledStart)}ms`
+          } as WorkerResponse);
+          const response: WorkerResponse = {
+            type: 'result',
+            positions: result.positions,
+            normals: result.normals,
+            triCount: result.triCount,
+            backend: 'cpu-tiled',
+          };
+          postWorkerMessage(response, generatedResultTransferList(response));
+          return;
+        } catch (err: unknown) {
+          terminateTileWorkers();
+          if (cancelled) throw new Error('Cancelled');
+          const message = err instanceof Error ? err.message : 'unknown error';
+          postMessage({
+            type: 'progress',
+            progress: 0.12,
+            message: `cpu-tiled unavailable (${message}); falling back to cpu-single`
+          } as WorkerResponse);
+        }
+      }
+
       const initialEstimate = estimateGenerationTimings(params, resolution, !shape);
       let smoothedMarchSeconds = initialEstimate.marchSeconds;
       let estimateLabel = formatDuration(initialEstimate.preSeconds + initialEstimate.marchSeconds);
@@ -1013,6 +1214,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         surfaceSamplePositions: packedSamples?.positions,
         surfaceSampleNormals: packedSamples?.normals,
         surfaceSampleHoleScales: packedSamples?.holeScales,
+        backend: 'cpu-single',
       };
       postWorkerMessage(response, generatedResultTransferList(response));
     } catch (err: unknown) {

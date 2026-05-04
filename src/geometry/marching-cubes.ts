@@ -237,7 +237,17 @@ export function marchingCubes(
   isoValue: number = 0,
   onProgress?: (fraction: number) => void
 ): MarchingCubesResult {
-  const nx = resolution, ny = resolution, nz = resolution;
+  return marchingCubesRectangular(sdf, bounds, [resolution, resolution, resolution], isoValue, onProgress);
+}
+
+export function marchingCubesRectangular(
+  sdf: (x: number, y: number, z: number) => number,
+  bounds: { min: Vec3; max: Vec3 },
+  cells: Vec3,
+  isoValue: number = 0,
+  onProgress?: (fraction: number) => void
+): MarchingCubesResult {
+  const nx = cells[0], ny = cells[1], nz = cells[2];
   const minX = bounds.min[0];
   const minY = bounds.min[1];
   const minZ = bounds.min[2];
@@ -250,8 +260,8 @@ export function marchingCubes(
   // Sample the field
   const field = new Float32Array((nx + 1) * (ny + 1) * (nz + 1));
 
-  if (hasGridSampler(sdf)) {
-    sdf.sampleField(bounds, resolution, field, onProgress ? (fraction) => onProgress(fraction * 0.45) : undefined);
+  if (nx === ny && ny === nz && hasGridSampler(sdf)) {
+    sdf.sampleField(bounds, nx, field, onProgress ? (fraction) => onProgress(fraction * 0.45) : undefined);
   } else {
     for (let z = 0; z <= nz; z++) {
       if (onProgress) onProgress((z / nz) * 0.45);
