@@ -63,6 +63,7 @@ type ViewCubeFaceLabel = 'Front' | 'Back' | 'Right' | 'Left' | 'Top' | 'Bottom';
 type GizmoViewTarget = '+x' | '+y' | '+z' | 'front' | 'right' | 'top' | 'iso';
 
 type ResettableOrbitControls = {
+  enabled?: boolean;
   target?: THREE.Vector3;
   update?: () => void;
   state?: number;
@@ -71,6 +72,11 @@ type ResettableOrbitControls = {
   _scale?: number;
   _performCursorZoom?: boolean;
   _dollyDirection?: { set: (x: number, y: number, z: number) => void };
+};
+
+type OrbitControlsResetSession = {
+  controls: ResettableOrbitControls;
+  wasEnabled: boolean | undefined;
 };
 
 type DemoTileState = {
@@ -189,18 +195,47 @@ function cameraViewForRequest(viewRequest: GizmoViewRequest): { direction: THREE
   return cameraViewForAxis(viewRequest);
 }
 
-function syncOrbitControlsAfterCameraReset(controls: unknown, target: THREE.Vector3) {
+function prepareOrbitControlsForCameraReset(controls: unknown): OrbitControlsResetSession | null {
   const orbitControls = controls as ResettableOrbitControls | null;
-  if (!orbitControls) return;
+  if (!orbitControls) return null;
 
+  const wasEnabled = orbitControls.enabled;
+  orbitControls.enabled = false;
   orbitControls.state = -1;
   orbitControls._sphericalDelta?.set(0, 0, 0);
   orbitControls._panOffset?.set(0, 0, 0);
   orbitControls._scale = 1;
   orbitControls._performCursorZoom = false;
   orbitControls._dollyDirection?.set(0, 0, 0);
-  orbitControls.target?.copy(target);
-  orbitControls.update?.();
+  return { controls: orbitControls, wasEnabled };
+}
+
+function finishOrbitControlsAfterCameraReset(
+  resetSession: OrbitControlsResetSession | null,
+  target: THREE.Vector3
+): (() => void) | undefined {
+  if (!resetSession) return undefined;
+
+  const { controls, wasEnabled } = resetSession;
+  controls.target?.copy(target);
+  controls.update?.();
+
+  const restoreControls = () => {
+    if (wasEnabled !== undefined) controls.enabled = wasEnabled;
+    controls.state = -1;
+    controls.update?.();
+  };
+
+  if (typeof window === 'undefined') {
+    restoreControls();
+    return undefined;
+  }
+
+  const frameId = window.requestAnimationFrame(restoreControls);
+  return () => {
+    window.cancelAnimationFrame(frameId);
+    restoreControls();
+  };
 }
 
 /** Convert normalised clip-plane state → THREE.Plane */
@@ -389,6 +424,7 @@ function GizmoCameraReset({ view, signal }: { view: GizmoViewRequest | null; sig
   useEffect(() => {
     if (!view) return;
 
+    const resetSession = prepareOrbitControlsForCameraReset(controls);
     const bounds = activeViewerBounds({
       originalMesh: store.originalMesh,
       sphereMode: store.sphereMode,
@@ -409,7 +445,7 @@ function GizmoCameraReset({ view, signal }: { view: GizmoViewRequest | null; sig
     camera.updateMatrixWorld();
     if (camera instanceof THREE.PerspectiveCamera || camera instanceof THREE.OrthographicCamera) camera.updateProjectionMatrix();
 
-    syncOrbitControlsAfterCameraReset(controls, center);
+    return finishOrbitControlsAfterCameraReset(resetSession, center);
   }, [
     view,
     signal,
@@ -887,6 +923,7 @@ function AutoFit() {
   const store = useStore();
 
   useEffect(() => {
+    const resetSession = prepareOrbitControlsForCameraReset(controls);
     const mesh = store.originalMesh;
     let bounds = new THREE.Box3().setFromCenterAndSize(
       new THREE.Vector3(0, 0, 0),
@@ -909,7 +946,7 @@ function AutoFit() {
     camera.lookAt(center);
     camera.updateProjectionMatrix();
 
-    syncOrbitControlsAfterCameraReset(controls, center);
+    return finishOrbitControlsAfterCameraReset(resetSession, center);
   }, [
     store.originalMesh,
     store.sphereMode,
