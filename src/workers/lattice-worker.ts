@@ -10,7 +10,7 @@ import type { LatticeParams, ValidationResult, SampleShape } from '../types/proj
 import type { Vec3 } from '../geometry/vec3';
 import { add, sub, dot, cross, length, scale, normalize } from '../geometry/vec3';
 import type { SurfaceHexSample } from '../geometry/lattice';
-import type { LatticeTileJob, LatticeTileResponse, LatticeTileResult, TileBackend } from './tile-types';
+import type { LatticeTileJob, LatticeTileResponse, LatticeTileResult, TileBackend, TileSkipStats } from './tile-types';
 
 type SdfFunction = ((x: number, y: number, z: number) => number) & Partial<GridSdfSampler>;
 type WorkerPostMessage = (message: unknown, transfer: Transferable[]) => void;
@@ -18,6 +18,7 @@ type WorkerPostMessage = (message: unknown, transfer: Transferable[]) => void;
 const postWorkerMessage = self.postMessage.bind(self) as WorkerPostMessage;
 const TILE_SIZE = 32;
 const MAX_TILE_WORKERS = 8;
+const ENABLE_SPARSE_TILE_SKIPPING = true;
 
 let activeTileWorkers: Worker[] = [];
 
@@ -706,18 +707,124 @@ function tileWorkerCount(): number {
   return Math.max(1, Math.min(MAX_TILE_WORKERS, (self.navigator?.hardwareConcurrency || 4) - 1));
 }
 
+function objectSdfForShape(shape: SampleShape, sphereRadius: number): (x: number, y: number, z: number) => number {
+  switch (shape) {
+    case 'sphere': {
+      const radius = sphereRadius || 25;
+      return (x, y, z) => Math.sqrt(x * x + y * y + z * z) - radius;
+    }
+    case 'cube': {
+      const h = 15;
+      return (x, y, z) => {
+        const dx = Math.abs(x) - h;
+        const dy = Math.abs(y) - h;
+        const dz = Math.abs(z) - h;
+        const outside = Math.sqrt(Math.max(dx, 0) ** 2 + Math.max(dy, 0) ** 2 + Math.max(dz, 0) ** 2);
+        const inside = Math.min(Math.max(dx, dy, dz), 0);
+        return outside + inside;
+      };
+    }
+    case 'cylinder': {
+      const cr = 15;
+      const ch = 20;
+      return (x, y, z) => {
+        const dRadial = Math.sqrt(x * x + y * y) - cr;
+        const dAxial = Math.abs(z) - ch;
+        const outside = Math.sqrt(Math.max(dRadial, 0) ** 2 + Math.max(dAxial, 0) ** 2);
+        const inside = Math.min(Math.max(dRadial, dAxial), 0);
+        return outside + inside;
+      };
+    }
+    case 'torus': {
+      const major = 20;
+      const tube = 8;
+      return (x, y, z) => {
+        const qx = Math.sqrt(x * x + y * y) - major;
+        return Math.sqrt(qx * qx + z * z) - tube;
+      };
+    }
+    case 'capsule': {
+      const capR = 12;
+      const capHH = 15;
+      return (x, y, z) => {
+        const cz = Math.max(-capHH, Math.min(capHH, z));
+        return Math.sqrt(x * x + y * y + (z - cz) * (z - cz)) - capR;
+      };
+    }
+  }
+}
+
+function sparseSkipMargin(params: LatticeParams, tileBounds: { min: Vec3; max: Vec3 }): number {
+  const sx = tileBounds.max[0] - tileBounds.min[0];
+  const sy = tileBounds.max[1] - tileBounds.min[1];
+  const sz = tileBounds.max[2] - tileBounds.min[2];
+  const tileRadius = 0.5 * Math.sqrt(sx * sx + sy * sy + sz * sz);
+  const featureMargin = Math.max(
+    params.cellSize * 0.25,
+    params.wallThickness,
+    params.strutDiameter,
+    params.shellThickness,
+    params.surfaceDepth,
+    params.thinSectionFilter,
+    0
+  );
+  return tileRadius + featureMargin;
+}
+
+function classifySparseTile(
+  params: LatticeParams,
+  objectSdf: (x: number, y: number, z: number) => number,
+  tileBounds: { min: Vec3; max: Vec3 }
+): 'process' | 'skip' {
+  if (!ENABLE_SPARSE_TILE_SKIPPING) return 'process';
+
+  const min = tileBounds.min;
+  const max = tileBounds.max;
+  const cx = (min[0] + max[0]) * 0.5;
+  const cy = (min[1] + max[1]) * 0.5;
+  const cz = (min[2] + max[2]) * 0.5;
+  const margin = sparseSkipMargin(params, tileBounds);
+  let minD = Infinity;
+  let maxD = -Infinity;
+
+  const record = (d: number) => {
+    if (d < minD) minD = d;
+    if (d > maxD) maxD = d;
+  };
+  record(objectSdf(min[0], min[1], min[2]));
+  record(objectSdf(max[0], min[1], min[2]));
+  record(objectSdf(min[0], max[1], min[2]));
+  record(objectSdf(max[0], max[1], min[2]));
+  record(objectSdf(min[0], min[1], max[2]));
+  record(objectSdf(max[0], min[1], max[2]));
+  record(objectSdf(min[0], max[1], max[2]));
+  record(objectSdf(max[0], max[1], max[2]));
+  record(objectSdf(cx, cy, cz));
+
+  // All modes are empty far enough outside the source object.
+  if (minD > margin) return 'skip';
+
+  // Surface-only lattices are also empty deep enough inside the surface band.
+  if (params.surfaceOnly && maxD < -params.surfaceDepth - margin) return 'skip';
+
+  return 'process';
+}
+
 function buildTileJobs(
   params: LatticeParams,
   shape: SampleShape,
   sphereRadius: number,
   bounds: { min: Vec3; max: Vec3 },
   resolution: number
-): LatticeTileJob[] {
+): { jobs: LatticeTileJob[]; stats: TileSkipStats } {
   const jobs: LatticeTileJob[] = [];
   const dx = (bounds.max[0] - bounds.min[0]) / resolution;
   const dy = (bounds.max[1] - bounds.min[1]) / resolution;
   const dz = (bounds.max[2] - bounds.min[2]) / resolution;
   let tileId = 0;
+  let tilesTotal = 0;
+  let tilesSkipped = 0;
+  const objectSdf = objectSdfForShape(shape, sphereRadius);
 
   for (let z = 0; z < resolution; z += TILE_SIZE) {
     const cz = Math.min(TILE_SIZE, resolution - z);
@@ -725,6 +832,15 @@ function buildTileJobs(
       const cy = Math.min(TILE_SIZE, resolution - y);
       for (let x = 0; x < resolution; x += TILE_SIZE) {
         const cx = Math.min(TILE_SIZE, resolution - x);
+        tilesTotal++;
+        const tileBounds = {
+          min: [bounds.min[0] + x * dx, bounds.min[1] + y * dy, bounds.min[2] + z * dz] as Vec3,
+          max: [bounds.min[0] + (x + cx) * dx, bounds.min[1] + (y + cy) * dy, bounds.min[2] + (z + cz) * dz] as Vec3,
+        };
+        if (classifySparseTile(params, objectSdf, tileBounds) === 'skip') {
+          tilesSkipped++;
+          continue;
+        }
         jobs.push({
           type: 'tile',
           tileId: tileId++,
@@ -732,16 +848,20 @@ function buildTileJobs(
           shape,
           sphereRadius,
           cells: [cx, cy, cz],
-          bounds: {
-            min: [bounds.min[0] + x * dx, bounds.min[1] + y * dy, bounds.min[2] + z * dz],
-            max: [bounds.min[0] + (x + cx) * dx, bounds.min[1] + (y + cy) * dy, bounds.min[2] + (z + cz) * dz],
-          },
+          bounds: tileBounds,
         });
       }
     }
   }
 
-  return jobs;
+  return {
+    jobs,
+    stats: {
+      tilesTotal,
+      tilesSkipped,
+      tilesProcessed: jobs.length,
+    },
+  };
 }
 
 function mergeTileResults(results: LatticeTileResult[]): MarchingCubesResult {
@@ -775,19 +895,25 @@ function runTiledGeneration(
   sphereRadius: number,
   bounds: { min: Vec3; max: Vec3 },
   resolution: number,
-  onProgress: (completed: number, total: number, timingMs: number) => void
-): Promise<MarchingCubesResult> {
-  const jobs = buildTileJobs(params, shape, sphereRadius, bounds, resolution);
+  onProgress: (completed: number, total: number, timingMs: number, stats: TileSkipStats) => void
+): Promise<{ result: MarchingCubesResult; stats: TileSkipStats }> {
+  const { jobs, stats } = buildTileJobs(params, shape, sphereRadius, bounds, resolution);
+  if (jobs.length === 0) {
+    return Promise.resolve({
+      result: { positions: new Float32Array(0), normals: new Float32Array(0), triCount: 0 },
+      stats,
+    });
+  }
   const workerCount = Math.min(tileWorkerCount(), jobs.length);
   const results: LatticeTileResult[] = [];
   let nextJob = 0;
   let completed = 0;
   let timingMs = 0;
 
-  return new Promise<MarchingCubesResult>((resolve, reject) => {
+  return new Promise<{ result: MarchingCubesResult; stats: TileSkipStats }>((resolve, reject) => {
     const finish = () => {
       terminateTileWorkers();
-      resolve(mergeTileResults(results));
+      resolve({ result: mergeTileResults(results), stats });
     };
 
     const startWorker = () => {
@@ -816,7 +942,7 @@ function runTiledGeneration(
         results[response.tileId] = response;
         completed++;
         timingMs += response.timing.totalMs;
-        onProgress(completed, jobs.length, timingMs);
+        onProgress(completed, jobs.length, timingMs, stats);
         if (completed === jobs.length) finish();
         else postNext();
       };
@@ -1106,19 +1232,19 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
           postMessage({
             type: 'progress',
             progress: 0.12,
-            message: `Backend cpu-tiled: ${tileWorkerCount()} workers, ${TILE_SIZE}^3 tiles`
+            message: `Backend cpu-tiled: ${tileWorkerCount()} workers, ${TILE_SIZE}^3 tiles, sparse skip ${ENABLE_SPARSE_TILE_SKIPPING ? 'on' : 'off'}`
           } as WorkerResponse);
-          const rawTiledResult = await runTiledGeneration(
+          const { result: rawTiledResult, stats: tileStats } = await runTiledGeneration(
             params,
             shape,
             sphereRadius ?? msg.sphereRadius ?? 25,
             bounds,
             resolution,
-            (completed, total, timingMs) => {
+            (completed, total, timingMs, stats) => {
               postMessage({
                 type: 'progress',
-                progress: 0.12 + (completed / total) * 0.76,
-                message: `cpu-tiled: ${completed}/${total} tiles (${Math.round(timingMs)}ms worker time)`
+                progress: 0.12 + (completed / Math.max(1, total)) * 0.76,
+                message: `cpu-tiled: ${completed}/${total} tiles processed, ${stats.tilesSkipped}/${stats.tilesTotal} skipped (${Math.round(timingMs)}ms worker time)`
               } as WorkerResponse);
             }
           );
@@ -1134,7 +1260,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
           postMessage({
             type: 'progress',
             progress: 0.95,
-            message: `Geometry ready via cpu-tiled in ${Math.round(performance.now() - tiledStart)}ms`
+            message: `Geometry ready via cpu-tiled in ${Math.round(performance.now() - tiledStart)}ms (${tileStats.tilesSkipped}/${tileStats.tilesTotal} tiles skipped)`
           } as WorkerResponse);
           const response: WorkerResponse = {
             type: 'result',
