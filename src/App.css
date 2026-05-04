@@ -656,11 +656,12 @@ svg {
 }
 
 .row label {
-  flex: 0 0 122px;
+  flex: 0 0 142px;
   min-width: 0;
   color: var(--color-text-muted);
   font-size: var(--fs-sm);
   font-weight: var(--fw-medium);
+  white-space: nowrap;
 }
 
 .row input[type='number'],
@@ -1247,7 +1248,7 @@ svg {
   }
 
   .row label {
-    flex-basis: 108px;
+    flex-basis: 132px;
   }
 }
 
@@ -1322,6 +1323,7 @@ svg {
 
   .row label {
     flex-basis: 100%;
+    white-space: normal;
   }
 
   .row input[type='number'],
