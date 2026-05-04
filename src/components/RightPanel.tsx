@@ -1,16 +1,10 @@
 // Inspection controls: validation and export
 import { useStore } from '../store/useStore';
-import { downloadSTL, downloadValidationReport, downloadProjectJSON } from '../utils/export';
 
 export function RightPanel() {
   const store = useStore();
   const {
     validation,
-    resultMesh,
-    params,
-    meshFileName,
-    keepOutTris,
-    keepInTris,
   } = store;
 
   return (
@@ -72,37 +66,6 @@ export function RightPanel() {
           )}
         </section>
       )}
-
-      {/* Export */}
-      {resultMesh && (
-        <section className="panel-section">
-          <h3>Export</h3>
-          <button
-            className="btn btn-primary"
-            title="Download the generated lattice mesh as an STL file."
-            onClick={() => downloadSTL(resultMesh, `${meshFileName.replace(/\.stl$/i, '')}-lattice.stl`)}
-          >
-            Export STL ({resultMesh.triCount.toLocaleString()} tris)
-          </button>
-          {validation && (
-            <button
-              className="btn btn-small"
-              title="Download a text report of validation checks and outcomes."
-              onClick={() => downloadValidationReport(validation, params, meshFileName)}
-            >
-              Export Validation Report
-            </button>
-          )}
-          <button
-            className="btn btn-small"
-            title="Export current parameters and metadata to a project JSON file."
-            onClick={() => downloadProjectJSON(params, meshFileName, keepOutTris, keepInTris, validation)}
-          >
-            Export Project JSON
-          </button>
-        </section>
-      )}
-
     </>
   );
 }

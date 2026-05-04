@@ -360,6 +360,36 @@ svg {
   font-weight: var(--fw-medium);
 }
 
+.export-controls-panel {
+  min-width: 0;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--color-text-muted);
+}
+
+.export-controls-label {
+  color: var(--color-text-subtle);
+  font-family: var(--font-mono);
+  font-size: var(--fs-mini);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.export-controls-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.export-controls-actions .btn {
+  min-height: 24px;
+  padding: 4px 8px;
+  font-size: var(--fs-xs);
+}
+
 .viewer-controls-overlay {
   position: absolute;
   right: 132px;
@@ -1228,6 +1258,13 @@ svg {
 
   .viewer-controls-panel {
     width: min(420px, 100%);
+  }
+
+  .export-controls-panel {
+    order: 4;
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-start;
   }
 
   .demo-grid-view {
