@@ -2,6 +2,7 @@
 // This runs heavy computation off the main thread.
 
 import { marchingCubes } from '../geometry/marching-cubes';
+import type { GridSdfSampler } from '../geometry/marching-cubes';
 import { buildCombinedSDF, buildSurfaceHexLattice, buildSphereLattice, buildCubeLattice, buildCylinderLattice, buildTorusLattice, buildCapsuleLattice } from '../geometry/lattice';
 import { MeshBVH } from '../geometry/bvh';
 import { runValidation, checkSphereDeviation, checkMinThickness, checkManifold, checkDisconnected } from '../geometry/validation';
@@ -9,6 +10,20 @@ import type { LatticeParams, ValidationResult, SampleShape } from '../types/proj
 import type { Vec3 } from '../geometry/vec3';
 import { add, sub, dot, cross, length, scale, normalize } from '../geometry/vec3';
 import type { SurfaceHexSample } from '../geometry/lattice';
+
+type SdfFunction = ((x: number, y: number, z: number) => number) & Partial<GridSdfSampler>;
+
+function withThinSectionFilter(sdf: SdfFunction, filter: number): SdfFunction {
+  if (filter <= 0) return sdf;
+  const filtered: SdfFunction = (x, y, z) => sdf(x, y, z) + filter;
+  if (sdf.sampleField) {
+    filtered.sampleField = (bounds, resolution, out, onProgress) => {
+      sdf.sampleField!(bounds, resolution, out, onProgress);
+      for (let i = 0; i < out.length; i++) out[i] += filter;
+    };
+  }
+  return filtered;
+}
 
 export interface WorkerMessage {
   type: 'generate' | 'validate' | 'cancel';
@@ -645,9 +660,9 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
       const generationStart = performance.now();
       const params = msg.params!;
       const resolution = msg.resolution || 64;
-      let sdf: (x: number, y: number, z: number) => number;
+      let sdf: SdfFunction;
       let objectSdf: ((x: number, y: number, z: number) => number) | null = null;
-      let surfaceHexSdf: ((x: number, y: number, z: number) => number) | null = null;
+      let surfaceHexSdf: SdfFunction | null = null;
       let bounds: { min: Vec3; max: Vec3 };
       let sphereRadius: number | null = null;
       let bvh: MeshBVH | null = null;
@@ -909,9 +924,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
       const marchingStart = performance.now();
       const preSecondsActual = (marchingStart - generationStart) / 1000;
       const sdfToSample = surfaceHexSdf ?? sdf;
-      const sdfWithThinFilter = params.thinSectionFilter > 0
-        ? (x: number, y: number, z: number) => sdfToSample(x, y, z) + params.thinSectionFilter
-        : sdfToSample;
+      const sdfWithThinFilter = withThinSectionFilter(sdfToSample, params.thinSectionFilter);
       const rawResult = marchingCubes(sdfWithThinFilter, bounds, resolution, 0, (frac) => {
         if (cancelled) throw new Error('Cancelled');
         const overallProgress = 0.1 + frac * 0.7;
