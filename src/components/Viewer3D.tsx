@@ -183,6 +183,16 @@ function cameraViewForAxis(axis: ViewAxis): { direction: THREE.Vector3; up: THRE
   return { direction: new THREE.Vector3(0, 0, 1), up: new THREE.Vector3(-1, 0, 0) };
 }
 
+function cameraViewForDirection(viewDirection: ViewCubeCornerDirection): { direction: THREE.Vector3; up: THREE.Vector3 } {
+  const direction = new THREE.Vector3(...viewDirection).normalize();
+  const projectedWorldUp = WORLD_UP.clone().projectOnPlane(direction);
+  const up = projectedWorldUp.lengthSq() > 1e-8
+    ? projectedWorldUp.normalize()
+    : new THREE.Vector3(-1, 0, 0);
+
+  return { direction, up };
+}
+
 function isCornerGizmoViewRequest(viewRequest: GizmoViewRequest): viewRequest is { kind: 'corner'; direction: ViewCubeCornerDirection } {
   return typeof viewRequest === 'object' && viewRequest.kind === 'corner';
 }
@@ -192,8 +202,7 @@ function cameraViewForRequest(viewRequest: GizmoViewRequest): { direction: THREE
     return { direction: ISO_VIEW_DIRECTION.clone(), up: ISO_VIEW_UP.clone() };
   }
   if (isCornerGizmoViewRequest(viewRequest)) {
-    const direction = new THREE.Vector3(...viewRequest.direction).normalize();
-    return { direction, up: WORLD_UP.clone().projectOnPlane(direction).normalize() };
+    return cameraViewForDirection(viewRequest.direction);
   }
   return cameraViewForAxis(viewRequest);
 }
