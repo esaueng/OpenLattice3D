@@ -62,6 +62,17 @@ type GizmoViewRequest = ViewAxis | 'iso' | { kind: 'corner'; direction: ViewCube
 type ViewCubeFaceLabel = 'Front' | 'Back' | 'Right' | 'Left' | 'Top' | 'Bottom';
 type GizmoViewTarget = '+x' | '+y' | '+z' | 'front' | 'right' | 'top' | 'iso';
 
+type ResettableOrbitControls = {
+  target?: THREE.Vector3;
+  update?: () => void;
+  state?: number;
+  _sphericalDelta?: { set: (radius: number, phi: number, theta: number) => void };
+  _panOffset?: { set: (x: number, y: number, z: number) => void };
+  _scale?: number;
+  _performCursorZoom?: boolean;
+  _dollyDirection?: { set: (x: number, y: number, z: number) => void };
+};
+
 type DemoTileState = {
   type: LatticeType;
   label: string;
@@ -176,6 +187,20 @@ function cameraViewForRequest(viewRequest: GizmoViewRequest): { direction: THREE
     return { direction, up: WORLD_UP.clone().projectOnPlane(direction).normalize() };
   }
   return cameraViewForAxis(viewRequest);
+}
+
+function syncOrbitControlsAfterCameraReset(controls: unknown, target: THREE.Vector3) {
+  const orbitControls = controls as ResettableOrbitControls | null;
+  if (!orbitControls) return;
+
+  orbitControls.state = -1;
+  orbitControls._sphericalDelta?.set(0, 0, 0);
+  orbitControls._panOffset?.set(0, 0, 0);
+  orbitControls._scale = 1;
+  orbitControls._performCursorZoom = false;
+  orbitControls._dollyDirection?.set(0, 0, 0);
+  orbitControls.target?.copy(target);
+  orbitControls.update?.();
 }
 
 /** Convert normalised clip-plane state → THREE.Plane */
@@ -384,9 +409,7 @@ function GizmoCameraReset({ view, signal }: { view: GizmoViewRequest | null; sig
     camera.updateMatrixWorld();
     if (camera instanceof THREE.PerspectiveCamera || camera instanceof THREE.OrthographicCamera) camera.updateProjectionMatrix();
 
-    const orbitControls = controls as { target?: THREE.Vector3; update?: () => void } | null;
-    orbitControls?.target?.copy(center);
-    orbitControls?.update?.();
+    syncOrbitControlsAfterCameraReset(controls, center);
   }, [
     view,
     signal,
@@ -886,9 +909,7 @@ function AutoFit() {
     camera.lookAt(center);
     camera.updateProjectionMatrix();
 
-    const orbitControls = controls as { target?: THREE.Vector3; update?: () => void } | null;
-    orbitControls?.target?.copy(center);
-    orbitControls?.update?.();
+    syncOrbitControlsAfterCameraReset(controls, center);
   }, [
     store.originalMesh,
     store.sphereMode,
