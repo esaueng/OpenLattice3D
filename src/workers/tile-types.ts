@@ -13,6 +13,12 @@ export interface LatticeTileJob {
   cells: Vec3;
 }
 
+export interface TileSkipStats {
+  tilesTotal: number;
+  tilesSkipped: number;
+  tilesProcessed: number;
+}
+
 export interface LatticeTileTiming {
   totalMs: number;
   triCount: number;
