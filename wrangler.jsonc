@@ -2,6 +2,16 @@
   "name": "openlattice3d",
   "main": "worker/index.ts",
   "compatibility_date": "2024-12-01",
+  "routes": [
+    {
+      "pattern": "openlattice3d.com",
+      "custom_domain": true
+    },
+    {
+      "pattern": "lattice.esau.app",
+      "custom_domain": true
+    }
+  ],
   "assets": {
     "directory": "./dist"
   },
