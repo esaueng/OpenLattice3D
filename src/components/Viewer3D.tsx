@@ -1,7 +1,7 @@
 // 3D Viewer component using react-three-fiber
 import { useRef, useMemo, useCallback, useEffect, useState, type KeyboardEvent } from 'react';
 import { Canvas, useThree, useFrame, type ThreeEvent } from '@react-three/fiber';
-import { OrbitControls, GizmoHelper, GizmoViewport } from '@react-three/drei';
+import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import { useStore } from '../store/useStore';
 import type { TriangleMesh } from '../geometry/stl-parser';
@@ -37,6 +37,24 @@ type DemoTileState = {
   result: MarchingCubesResult | null;
   error?: string;
 };
+
+function OpenCaeGizmoOverlay() {
+  return (
+    <div className="opencae-gizmo" aria-hidden="true">
+      <span className="opencae-gizmo-axis opencae-gizmo-axis-x">X</span>
+      <span className="opencae-gizmo-axis opencae-gizmo-axis-y">Y</span>
+      <span className="opencae-gizmo-axis opencae-gizmo-axis-z">Z</span>
+      <span className="opencae-gizmo-dot opencae-gizmo-dot-x" />
+      <span className="opencae-gizmo-dot opencae-gizmo-dot-y" />
+      <span className="opencae-gizmo-dot opencae-gizmo-dot-z" />
+      <div className="opencae-gizmo-cube">
+        <span className="opencae-gizmo-face opencae-gizmo-face-top">top</span>
+        <span className="opencae-gizmo-face opencae-gizmo-face-front">front</span>
+        <span className="opencae-gizmo-face opencae-gizmo-face-right">right</span>
+      </div>
+    </div>
+  );
+}
 
 /** Compute world-space bounding box from a result mesh */
 function resultBounds(result: MarchingCubesResult): THREE.Box3 {
@@ -580,7 +598,7 @@ export function Viewer3D() {
   }
 
   return (
-    <div style={{ width: '100%', height: '100%', background: viewerBackground }}>
+    <div style={{ position: 'relative', width: '100%', height: '100%', background: viewerBackground }}>
       <Canvas
         camera={{ fov: 50, near: 0.1, far: 10000, up: [0, 0, 1] }}
         gl={{ localClippingEnabled: true }}
@@ -617,10 +635,8 @@ export function Viewer3D() {
         {viewMode === 'xray' && resultMesh && <XRayView result={resultMesh} />}
 
         <OrbitControls makeDefault target={[0, 0, 0]} />
-        <GizmoHelper alignment="bottom-right" margin={[60, 60]}>
-          <GizmoViewport labelColor="white" axisHeadScale={1} />
-        </GizmoHelper>
       </Canvas>
+      <OpenCaeGizmoOverlay />
     </div>
   );
 }
