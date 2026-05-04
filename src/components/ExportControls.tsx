@@ -15,7 +15,6 @@ export function ExportControls() {
 
   return (
     <section className="export-controls-panel" aria-label="Export controls">
-      <div className="export-controls-label">Export</div>
       <div className="export-controls-actions">
         <button
           className="btn btn-primary btn-small"
