@@ -116,10 +116,10 @@ svg {
   color: var(--color-accent);
 }
 
-.brand-mark svg {
-  width: 22px;
-  height: 22px;
-  fill: currentColor;
+.brand-mark img {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
 }
 
 .version-chip,
@@ -135,8 +135,16 @@ svg {
 }
 
 .version-chip {
-  color: var(--color-text-muted);
-  text-transform: lowercase;
+  display: inline-flex;
+  align-items: center;
+  min-height: 16px;
+  padding: 0 5px;
+  color: var(--color-accent);
+  background: var(--color-accent-dim);
+  border-color: var(--color-accent-border);
+  font-size: 10px;
+  line-height: 1;
+  text-transform: uppercase;
 }
 
 .topbar-divider {
