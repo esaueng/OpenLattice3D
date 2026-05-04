@@ -4,10 +4,14 @@
 // Stochastic: Voronoi Foam, Spinodal Decomposition
 import type { Vec3 } from './vec3';
 import type { MeshBVH } from './bvh';
+import type { GridSdfSampler } from './marching-cubes';
 import type { LatticeParams, LatticeType } from '../types/project';
 
 const TWO_PI = 2 * Math.PI;
 const SQRT3 = Math.sqrt(3);
+
+type SdfFunction = ((x: number, y: number, z: number) => number) & Partial<GridSdfSampler>;
+type OptimizedTpmsType = 'gyroid' | 'schwarzP' | 'schwarzD' | 'neovius' | 'iwp';
 
 type StrutCache = {
   L: number;
@@ -21,6 +25,10 @@ type StrutCache = {
 };
 
 let strutCache: StrutCache | null = null;
+
+function supportsOptimizedTpms(t: LatticeType): t is OptimizedTpmsType {
+  return t === 'gyroid' || t === 'schwarzP' || t === 'schwarzD' || t === 'neovius' || t === 'iwp';
+}
 
 function getStrutCache(L: number): StrutCache {
   if (strutCache && strutCache.L === L) return strutCache;
@@ -570,6 +578,164 @@ export function isSheetType(t: LatticeType): boolean {
     || t === 'neovius' || t === 'iwp' || t === 'spinodal';
 }
 
+function tpmsValueFromTrig(
+  latticeType: OptimizedTpmsType,
+  sx: number,
+  sy: number,
+  sz: number,
+  cx: number,
+  cy: number,
+  cz: number,
+  c2x: number,
+  c2y: number,
+  c2z: number,
+  c: number
+): number {
+  switch (latticeType) {
+    case 'gyroid': {
+      const val = sx * cy + sy * cz + sz * cx;
+      return Math.abs(val) - c;
+    }
+    case 'schwarzP': {
+      const val = cx + cy + cz;
+      return Math.abs(val) - c * 3;
+    }
+    case 'schwarzD': {
+      const val = sx * sy * sz + sx * cy * cz + cx * sy * cz + cx * cy * sz;
+      return Math.abs(val) - c * 1.4;
+    }
+    case 'neovius': {
+      const val = 3 * (cx + cy + cz) + 4 * cx * cy * cz;
+      return Math.abs(val) - c * 13;
+    }
+    case 'iwp': {
+      const val = 2 * (cx * cy + cy * cz + cz * cx) - (c2x + c2y + c2z);
+      return Math.abs(val) - c * 5;
+    }
+  }
+}
+
+function combinedLatticeSdfValue(
+  dObj: number,
+  lat: number,
+  params: LatticeParams,
+  blendK: number,
+  useShellOffsetForDefaultGradient: boolean
+): number {
+  const { shellThickness, noShell, surfaceOnly, surfaceDepth, cellSize, gradientEnabled, gradientStrength, variant } = params;
+  let adjustedLat = lat;
+  if (gradientEnabled) {
+    const gd = (noShell || surfaceOnly || (variant !== 'shell_core' && !useShellOffsetForDefaultGradient))
+      ? Math.max(0, -dObj)
+      : Math.max(0, -(dObj + shellThickness));
+    adjustedLat *= 1.0 - gradientStrength * Math.exp(-gd / (cellSize * 3));
+  }
+
+  if (surfaceOnly) return Math.max(adjustedLat, Math.max(dObj, -(dObj + surfaceDepth)));
+  if (noShell) return Math.max(adjustedLat, dObj);
+
+  const shellSdf = Math.max(dObj, -(dObj + shellThickness));
+  if (variant === 'shell_core') {
+    const coreSdf = -(dObj + shellThickness);
+    return smoothMin(shellSdf, Math.max(-coreSdf, adjustedLat), blendK);
+  }
+  return smoothMin(shellSdf, Math.max(adjustedLat, dObj), blendK);
+}
+
+function attachTpmsGridSampler(
+  target: SdfFunction,
+  objectSdf: (x: number, y: number, z: number) => number,
+  params: LatticeParams,
+  blendK: number,
+  useShellOffsetForDefaultGradient: boolean
+): SdfFunction {
+  if (!supportsOptimizedTpms(params.latticeType)) return target;
+
+  const latticeType = params.latticeType;
+  const k = TWO_PI / params.cellSize;
+  const k2 = 2 * k;
+  const c = params.wallThickness * Math.PI / params.cellSize;
+
+  target.sampleField = (bounds, resolution, out, onProgress) => {
+    const count = resolution + 1;
+    const strideY = count;
+    const strideZ = count * count;
+    const minX = bounds.min[0];
+    const minY = bounds.min[1];
+    const minZ = bounds.min[2];
+    const dx = (bounds.max[0] - minX) / resolution;
+    const dy = (bounds.max[1] - minY) / resolution;
+    const dz = (bounds.max[2] - minZ) / resolution;
+
+    const sinX = new Float64Array(count);
+    const cosX = new Float64Array(count);
+    const sinY = new Float64Array(count);
+    const cosY = new Float64Array(count);
+    const sinZ = new Float64Array(count);
+    const cosZ = new Float64Array(count);
+    const cos2X = latticeType === 'iwp' ? new Float64Array(count) : null;
+    const cos2Y = latticeType === 'iwp' ? new Float64Array(count) : null;
+    const cos2Z = latticeType === 'iwp' ? new Float64Array(count) : null;
+
+    for (let i = 0; i < count; i++) {
+      const x = minX + i * dx;
+      const y = minY + i * dy;
+      const z = minZ + i * dz;
+      sinX[i] = Math.sin(k * x);
+      cosX[i] = Math.cos(k * x);
+      sinY[i] = Math.sin(k * y);
+      cosY[i] = Math.cos(k * y);
+      sinZ[i] = Math.sin(k * z);
+      cosZ[i] = Math.cos(k * z);
+      if (cos2X && cos2Y && cos2Z) {
+        cos2X[i] = Math.cos(k2 * x);
+        cos2Y[i] = Math.cos(k2 * y);
+        cos2Z[i] = Math.cos(k2 * z);
+      }
+    }
+
+    for (let z = 0; z < count; z++) {
+      if (onProgress) onProgress(z / resolution);
+      const pz = minZ + z * dz;
+      const sz = sinZ[z];
+      const cz = cosZ[z];
+      const c2z = cos2Z ? cos2Z[z] : 0;
+      for (let y = 0; y < count; y++) {
+        const py = minY + y * dy;
+        const sy = sinY[y];
+        const cy = cosY[y];
+        const c2y = cos2Y ? cos2Y[y] : 0;
+        const rowOffset = y * strideY + z * strideZ;
+        for (let x = 0; x < count; x++) {
+          const px = minX + x * dx;
+          const lat = tpmsValueFromTrig(
+            latticeType,
+            sinX[x],
+            sy,
+            sz,
+            cosX[x],
+            cy,
+            cz,
+            cos2X ? cos2X[x] : 0,
+            c2y,
+            c2z,
+            c
+          );
+          out[rowOffset + x] = combinedLatticeSdfValue(
+            objectSdf(px, py, pz),
+            lat,
+            params,
+            blendK,
+            useShellOffsetForDefaultGradient
+          );
+        }
+      }
+    }
+  };
+
+  return target;
+}
+
 // ═══════════════════════════════════════════════════════════
 //  Combined SDF builders
 // ═══════════════════════════════════════════════════════════
@@ -699,7 +865,7 @@ export function buildSurfaceHexLattice(
   };
 }
 
-export function buildCombinedSDF(opts: LatticeSdfOptions): (x: number, y: number, z: number) => number {
+export function buildCombinedSDF(opts: LatticeSdfOptions): SdfFunction {
   const { bvh, params } = opts;
   const { shellThickness, noShell, surfaceOnly, surfaceDepth, cellSize, wallThickness, strutDiameter, variant, latticeType, gradientEnabled, gradientStrength } = params;
   const blendK = Math.min(wallThickness, strutDiameter) * 0.3;
@@ -716,7 +882,7 @@ export function buildCombinedSDF(opts: LatticeSdfOptions): (x: number, y: number
 
   // ── Surface-only mode ──
   if (surfaceOnly) {
-    return (x, y, z) => {
+    const result: SdfFunction = (x, y, z) => {
       const dObj = sdf(x, y, z);
       const bandSdf = Math.max(dObj, -(dObj + surfaceDepth));
       let lat = sampleLattice(x, y, z, dObj);
@@ -725,11 +891,12 @@ export function buildCombinedSDF(opts: LatticeSdfOptions): (x: number, y: number
       }
       return Math.max(lat, bandSdf);
     };
+    return attachTpmsGridSampler(result, sdf, params, blendK, false);
   }
 
   // ── No-shell mode ──
   if (noShell) {
-    return (x, y, z) => {
+    const result: SdfFunction = (x, y, z) => {
       const dObj = sdf(x, y, z);
       let lat = sampleLattice(x, y, z, dObj);
       if (gradientEnabled) {
@@ -737,10 +904,11 @@ export function buildCombinedSDF(opts: LatticeSdfOptions): (x: number, y: number
       }
       return Math.max(lat, dObj);
     };
+    return attachTpmsGridSampler(result, sdf, params, blendK, false);
   }
 
   if (variant === 'shell_core') {
-    return (x, y, z) => {
+    const result: SdfFunction = (x, y, z) => {
       const dObj = sdf(x, y, z);
       const shellSdf = Math.max(dObj, -(dObj + shellThickness));
       const coreSdf = -(dObj + shellThickness);
@@ -750,8 +918,9 @@ export function buildCombinedSDF(opts: LatticeSdfOptions): (x: number, y: number
       }
       return smoothMin(shellSdf, Math.max(-coreSdf, lat), blendK);
     };
+    return attachTpmsGridSampler(result, sdf, params, blendK, false);
   } else {
-    return (x, y, z) => {
+    const result: SdfFunction = (x, y, z) => {
       const dObj = sdf(x, y, z);
       let lat = sampleLattice(x, y, z, dObj);
       if (gradientEnabled) {
@@ -760,6 +929,7 @@ export function buildCombinedSDF(opts: LatticeSdfOptions): (x: number, y: number
       const shellSdf = Math.max(dObj, -(dObj + shellThickness));
       return smoothMin(shellSdf, Math.max(lat, dObj), blendK);
     };
+    return attachTpmsGridSampler(result, sdf, params, blendK, false);
   }
 }
 
@@ -771,12 +941,12 @@ export function buildCombinedSDF(opts: LatticeSdfOptions): (x: number, y: number
 export function buildAnalyticLattice(
   objectSdf: (x: number, y: number, z: number) => number,
   params: LatticeParams,
-): (x: number, y: number, z: number) => number {
+): SdfFunction {
   const { shellThickness, noShell, surfaceOnly, surfaceDepth, cellSize, wallThickness, strutDiameter, variant, latticeType, gradientEnabled, gradientStrength } = params;
   const blendK = Math.min(wallThickness, strutDiameter) * 0.3;
   const latticeFn = buildLatticeEvaluator(params);
 
-  return (x, y, z) => {
+  const result: SdfFunction = (x, y, z) => {
     const dObj = objectSdf(x, y, z);
 
     let lat = latticeFn(x, y, z);
@@ -800,6 +970,8 @@ export function buildAnalyticLattice(
       return smoothMin(shellSdf, Math.max(lat, dObj), blendK);
     }
   };
+
+  return attachTpmsGridSampler(result, objectSdf, params, blendK, true);
 }
 
 export function buildSphereLattice(
