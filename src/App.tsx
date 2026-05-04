@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type MouseEvent, type PointerEvent } from 'react';
 import { LeftPanel } from './components/LeftPanel';
 import { Viewer3D } from './components/Viewer3D';
-import { RightPanel } from './components/RightPanel';
 import { useStore, type LogEntry } from './store/useStore';
 import { registerNotificationServiceWorker } from './utils/notifications';
 import { useLatticeGeneration } from './hooks/useLatticeGeneration';
@@ -73,10 +72,6 @@ function App() {
           </div>
           <Viewer3D />
         </section>
-
-        <aside className="side-panel right-panel" aria-label="Inspection and export">
-          <RightPanel />
-        </aside>
       </main>
 
       <footer className="statusbar">

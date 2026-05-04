@@ -222,7 +222,7 @@ svg {
 .workspace {
   min-height: 0;
   display: grid;
-  grid-template-columns: 344px minmax(360px, 1fr) var(--context-w);
+  grid-template-columns: 344px minmax(360px, 1fr);
   background: var(--color-bg);
 }
 
@@ -283,6 +283,11 @@ svg {
 .panel-section {
   padding: 14px 16px;
   border-bottom: var(--border-thin);
+}
+
+.left-inspection-panel {
+  margin-top: auto;
+  border-top: var(--border-thin);
 }
 
 .panel-section h3 {
@@ -842,7 +847,7 @@ svg {
 
 .bottom-content {
   position: fixed;
-  right: var(--context-w);
+  right: 0;
   bottom: var(--statusbar-h);
   left: 0;
   z-index: 20;
@@ -1037,11 +1042,7 @@ svg {
 
 @media (max-width: 1440px) {
   .workspace {
-    grid-template-columns: 316px minmax(320px, 1fr) 316px;
-  }
-
-  .bottom-content {
-    right: 316px;
+    grid-template-columns: 316px minmax(320px, 1fr);
   }
 
   .row label {
@@ -1085,7 +1086,7 @@ svg {
   .workspace {
     display: grid;
     grid-template-columns: 1fr;
-    grid-template-rows: auto minmax(360px, 58vh) auto;
+    grid-template-rows: auto minmax(360px, 58vh);
   }
 
   .tool-panel,
