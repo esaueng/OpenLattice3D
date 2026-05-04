@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type MouseEvent, type PointerEvent } from 
 import { LeftPanel } from './components/LeftPanel';
 import { Viewer3D } from './components/Viewer3D';
 import { ViewerControls } from './components/ViewerControls';
+import { ExportControls } from './components/ExportControls';
 import { useStore, type LogEntry } from './store/useStore';
 import { registerNotificationServiceWorker } from './utils/notifications';
 import { useLatticeGeneration } from './hooks/useLatticeGeneration';
@@ -57,6 +58,7 @@ function App() {
           <span className="breadcrumb-sep">/</span>
           <span className="chrome-path-leaf">{params.latticeType}</span>
         </div>
+        <ExportControls />
       </header>
 
       <main className="workspace">
