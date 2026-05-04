@@ -143,7 +143,7 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
         />
         <div className="row" style={{ gap: '6px', flexWrap: 'wrap' }}>
           <button className="btn btn-primary" title="Upload an STL mesh to generate a lattice from." onClick={() => fileRef.current?.click()}>
-            Upload STL
+            Import STL
           </button>
           <button className="btn btn-small" title="Import saved lattice parameters from a JSON file." onClick={() => jsonRef.current?.click()}>
             Import JSON
