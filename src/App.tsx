@@ -42,9 +42,7 @@ function App() {
       <header className="topbar">
         <div className="brand" aria-label="Open Lattice 3D">
           <span className="brand-mark" aria-hidden="true">
-            <svg viewBox="0 0 24 24">
-              <path d="M12 2 3.5 6.8v10.4L12 22l8.5-4.8V6.8L12 2Zm0 2.4 5.7 3.2L12 10.8 6.3 7.6 12 4.4Zm-6.3 5.1 5.2 3v6.2l-5.2-3V9.5Zm7.4 9.2v-6.2l5.2-3v6.2l-5.2 3Z" />
-            </svg>
+            <img src="/vite.svg" alt="" />
           </span>
           <span>OpenLattice3D</span>
           <span className="version-chip">beta</span>
