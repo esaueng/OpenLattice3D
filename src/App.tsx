@@ -81,6 +81,24 @@ function App() {
         </div>
         <div className="statusbar-actions" aria-label="Project links">
           <a
+            className="footer-link footer-link-support"
+            href="https://ko-fi.com/esauengineering"
+            target="_blank"
+            rel="noreferrer"
+          >
+            <svg className="footer-link-icon footer-link-icon-coffee" viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M5 9h10v4a5 5 0 0 1-5 5 5 5 0 0 1-5-5V9Zm10 2h2.5a2 2 0 0 1 0 4H15M7 5c.6.5.6 1.1 0 1.8M11 5c.6.5.6 1.1 0 1.8"
+                fill="none"
+                stroke="currentColor"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="1.8"
+              />
+            </svg>
+            Buy me a Coffee...
+          </a>
+          <a
             className="footer-link"
             href="https://form.esauengineering.com/feedback-openlattice3d"
             target="_blank"
