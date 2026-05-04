@@ -54,9 +54,14 @@ function terminateTileWorkers(): void {
 
 function surfaceSampleWorkerTransferList(payload: ShapeSampleWorkerMessage | MeshSampleWorkerMessage): Transferable[] {
   if (payload.mode !== 'mesh') return [];
+  if (payload.bufferKind === 'shared') return [];
   // Mesh sample workers receive copies made in this worker with .slice() below.
   // Transferring those copies does not detach UI-owned imported mesh buffers.
   return [payload.positions.buffer, payload.normals.buffer];
+}
+
+function isSharedFloat32Array(value: Float32Array): boolean {
+  return typeof SharedArrayBuffer === 'function' && value.buffer instanceof SharedArrayBuffer;
 }
 
 function packSurfaceSamples(samples: SurfaceHexSample[]): {
@@ -87,6 +92,7 @@ export interface WorkerMessage {
   meshPositions?: Float32Array;
   meshNormals?: Float32Array;
   meshTriCount?: number;
+  meshBufferKind?: 'shared' | 'transfer';
   params?: LatticeParams;
   sphereMode?: boolean;
   sphereRadius?: number;
@@ -161,6 +167,7 @@ type MeshSampleWorkerMessage = {
   mode: 'mesh';
   positions: Float32Array;
   normals: Float32Array;
+  bufferKind: 'shared' | 'transfer';
   triCount: number;
   keepOutTris: number[];
   targetCount: number;
@@ -1161,6 +1168,12 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         }
       } else {
         // Build BVH from mesh
+        const meshBufferKind = msg.meshBufferKind ?? (isSharedFloat32Array(msg.meshPositions!) ? 'shared' : 'transfer');
+        postMessage({
+          type: 'progress',
+          progress: 0.01,
+          message: `Mesh buffers: ${meshBufferKind === 'shared' ? 'SharedArrayBuffer shared-memory' : 'ArrayBuffer transfer'} path active`
+        } as WorkerResponse);
         postMessage({ type: 'progress', progress: 0.02, message: 'Building BVH...' } as WorkerResponse);
         bvh = new MeshBVH(msg.meshPositions!, msg.meshNormals!, msg.meshTriCount!);
 
@@ -1189,6 +1202,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
           const positions = msg.meshPositions!;
           const normals = msg.meshNormals!;
           const triCount = msg.meshTriCount!;
+          const useSharedMeshSamples = meshBufferKind === 'shared';
           const meshSampler = buildMeshSampler(positions, normals, triCount, keepOutSet);
           const totalArea = meshSampler?.totalArea ?? 0;
           const spacingArea = params.cellSize * params.cellSize * 0.55;
@@ -1197,8 +1211,9 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
             surfaceSamples = await generatePoissonSamplesParallel(
               (count) => ({
                 mode: 'mesh',
-                positions: positions.slice(),
-                normals: normals.slice(),
+                positions: useSharedMeshSamples ? positions : positions.slice(),
+                normals: useSharedMeshSamples ? normals : normals.slice(),
+                bufferKind: useSharedMeshSamples ? 'shared' : 'transfer',
                 triCount,
                 keepOutTris: Array.from(keepOutSet),
                 targetCount: count,

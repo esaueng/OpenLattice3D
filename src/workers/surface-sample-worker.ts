@@ -26,6 +26,7 @@ type MeshMessage = {
   mode: 'mesh';
   positions: Float32Array;
   normals: Float32Array;
+  bufferKind?: 'shared' | 'transfer';
   triCount: number;
   keepOutTris: number[];
   targetCount: number;

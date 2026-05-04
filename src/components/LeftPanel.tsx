@@ -10,12 +10,14 @@ import { SAMPLE_SHAPE_INFO } from '../store/useStore';
 import type { WorkerMessage, WorkerResponse } from '../workers/lattice-worker';
 import type { ValidationWorkerMessage, ValidationWorkerResponse } from '../workers/validation-worker';
 import { requestNotificationPermission, sendNotification } from '../utils/notifications';
-import { formatBrowserFeatureFlags, getBrowserFeatureFlags } from '../utils/browser-features';
+import { createBackendGeometryBuffers, formatBrowserFeatureFlags, getBrowserFeatureFlags, isSharedFloat32Array } from '../utils/browser-features';
 
 function buildGenerationTransferList(msg: WorkerMessage): Transferable[] {
   const transfers: Transferable[] = [];
   // Imported mesh buffers are viewer-owned in the store. Only transfer backend-owned
   // copies created for this worker message, so the original mesh remains visible.
+  if (msg.meshBufferKind === 'shared') return transfers;
+  if (msg.meshPositions && isSharedFloat32Array(msg.meshPositions)) return transfers;
   if (msg.meshPositions) transfers.push(msg.meshPositions.buffer);
   if (msg.meshNormals) transfers.push(msg.meshNormals.buffer);
   return transfers;
@@ -180,11 +182,19 @@ export function LeftPanel() {
     };
 
     if (store.originalMesh) {
-      // Backend-owned copies may be transferred to the worker. Do not transfer
-      // store.originalMesh buffers directly; the viewer may still need them.
-      msg.meshPositions = new Float32Array(store.originalMesh.positions);
-      msg.meshNormals = new Float32Array(store.originalMesh.normals);
-      msg.meshTriCount = store.originalMesh.triCount;
+      const geometryBuffers = createBackendGeometryBuffers(
+        store.originalMesh.positions,
+        store.originalMesh.normals,
+        store.originalMesh.triCount,
+        browserFeatures
+      );
+      // These are backend-owned copies. The original store buffers remain
+      // viewer-owned and are never transferred or detached.
+      msg.meshPositions = geometryBuffers.positions;
+      msg.meshNormals = geometryBuffers.normals;
+      msg.meshTriCount = geometryBuffers.triCount;
+      msg.meshBufferKind = geometryBuffers.kind;
+      store.addLog(`Mesh buffers: ${geometryBuffers.kind === 'shared' ? 'SharedArrayBuffer' : 'ArrayBuffer transfer'} path active`);
     }
 
     const transferList = buildGenerationTransferList(msg);
