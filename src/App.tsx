@@ -23,6 +23,12 @@ function App() {
   }, []);
 
   const hasModel = Boolean(originalMesh || sphereMode);
+  const modelLabel = meshFileName || (sphereMode ? 'Primitive sphere' : 'Untitled lattice study');
+  const resultStats = resultMesh ? `${resultMesh.triCount.toLocaleString()} tris` : 'Mesh pending';
+  const progressLabel = `${Math.round(progress * 100)}%`;
+  const solverStatus = generating ? `Generating ${progressLabel}` : hasModel ? 'Ready' : 'Idle';
+  const workspaceMode = demoModeActive ? 'Multiview workspace' : 'Local workspace';
+  const viewportMode = demoModeActive ? 'Multiview' : hasModel ? 'Interactive' : 'Standby';
 
   return (
     <div className="app-shell">
@@ -33,21 +39,24 @@ function App() {
               <path d="M12 2 3.5 6.8v10.4L12 22l8.5-4.8V6.8L12 2Zm0 2.4 5.7 3.2L12 10.8 6.3 7.6 12 4.4Zm-6.3 5.1 5.2 3v6.2l-5.2-3V9.5Zm7.4 9.2v-6.2l5.2-3v6.2l-5.2 3Z" />
             </svg>
           </span>
-          <span>Open Lattice 3D</span>
+          <span>OpenLattice3D</span>
           <span className="version-chip">beta</span>
         </div>
 
         <div className="topbar-divider" />
-        <div className="breadcrumb" aria-label="Project status">
-          <span className="breadcrumb-chip">{meshFileName || 'Untitled lattice study'}</span>
+        <div className="chrome-path" aria-label="Project status">
+          <span className="chrome-path-root">OpenLattice3D</span>
           <span className="breadcrumb-sep">/</span>
-          <span>{params.latticeType}</span>
+          <span className="breadcrumb-chip">{modelLabel}</span>
+          <span className="breadcrumb-sep">/</span>
+          <span className="chrome-path-leaf">{params.latticeType}</span>
         </div>
 
         <div className="topbar-tools">
           <span className={`run-pill ${generating ? 'running' : ''}`}>
-            <span />
-            {generating ? `${Math.round(progress * 100)}%` : demoModeActive ? 'multiview' : 'local'}
+            <span aria-hidden="true" />
+            <strong>solver</strong>
+            {generating ? progressLabel : demoModeActive ? 'multiview' : 'local'}
           </span>
           <a
             className="icon-button"
@@ -80,8 +89,8 @@ function App() {
         <section className="viewer-shell" aria-label="3D lattice viewer">
           <div className="viewer-hud">
             <div className="viewer-readout">
-              <span>{hasModel ? meshFileName : 'No model loaded'}</span>
-              <strong>{resultMesh ? `${resultMesh.triCount.toLocaleString()} tris` : 'Viewport ready'}</strong>
+              <span>{hasModel ? modelLabel : 'No model loaded'}</span>
+              <strong>{resultMesh ? resultStats : 'Viewport ready'}</strong>
             </div>
           </div>
           <Viewer3D />
@@ -93,8 +102,21 @@ function App() {
       </main>
 
       <footer className="statusbar">
-        <a href="https://esauengineering.com/" target="_blank" rel="noreferrer">
-          Built by Esau Engineering
+        <div className="statusbar-group statusbar-group-primary" aria-label="Workspace status">
+          <span className="statusbar-segment statusbar-strong">
+            <span className={`status-dot ${generating ? 'status-dot-active' : ''}`} aria-hidden="true" />
+            {workspaceMode}
+          </span>
+          <span className="statusbar-segment">Model: {hasModel ? modelLabel : 'Not loaded'}</span>
+        </div>
+        <div className="statusbar-group" aria-label="Model and solver status">
+          <span className="statusbar-segment">Lattice: {params.latticeType}</span>
+          <span className="statusbar-segment">Result: {resultStats}</span>
+          <span className="statusbar-segment">Solver: {solverStatus}</span>
+          <span className="statusbar-segment">Viewport: {viewportMode}</span>
+        </div>
+        <a className="statusbar-link" href="https://esauengineering.com/" target="_blank" rel="noreferrer">
+          Esau Engineering
         </a>
       </footer>
     </div>
