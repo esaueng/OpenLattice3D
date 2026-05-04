@@ -5,7 +5,6 @@ import { marchingCubes } from '../geometry/marching-cubes';
 import type { GridSdfSampler } from '../geometry/marching-cubes';
 import { buildCombinedSDF, buildSurfaceHexLattice, buildSphereLattice, buildCubeLattice, buildCylinderLattice, buildTorusLattice, buildCapsuleLattice } from '../geometry/lattice';
 import { MeshBVH } from '../geometry/bvh';
-import { runValidation, checkSphereDeviation, checkMinThickness, checkManifold, checkDisconnected } from '../geometry/validation';
 import type { LatticeParams, ValidationResult, SampleShape } from '../types/project';
 import type { Vec3 } from '../geometry/vec3';
 import { add, sub, dot, cross, length, scale, normalize } from '../geometry/vec3';
@@ -35,6 +34,9 @@ function generatedResultTransferList(response: WorkerResponse): Transferable[] {
   // copying the large position/normal payloads.
   if (response.positions) transfers.push(response.positions.buffer);
   if (response.normals) transfers.push(response.normals.buffer);
+  if (response.surfaceSamplePositions) transfers.push(response.surfaceSamplePositions.buffer);
+  if (response.surfaceSampleNormals) transfers.push(response.surfaceSampleNormals.buffer);
+  if (response.surfaceSampleHoleScales) transfers.push(response.surfaceSampleHoleScales.buffer);
   return transfers;
 }
 
@@ -43,6 +45,28 @@ function surfaceSampleWorkerTransferList(payload: ShapeSampleWorkerMessage | Mes
   // Mesh sample workers receive copies made in this worker with .slice() below.
   // Transferring those copies does not detach UI-owned imported mesh buffers.
   return [payload.positions.buffer, payload.normals.buffer];
+}
+
+function packSurfaceSamples(samples: SurfaceHexSample[]): {
+  positions: Float32Array;
+  normals: Float32Array;
+  holeScales: Float32Array;
+} | null {
+  if (samples.length === 0) return null;
+  const positions = new Float32Array(samples.length * 3);
+  const normals = new Float32Array(samples.length * 3);
+  const holeScales = new Float32Array(samples.length);
+  for (let i = 0; i < samples.length; i++) {
+    const sample = samples[i];
+    positions[i * 3] = sample.pos[0];
+    positions[i * 3 + 1] = sample.pos[1];
+    positions[i * 3 + 2] = sample.pos[2];
+    normals[i * 3] = sample.normal[0];
+    normals[i * 3 + 1] = sample.normal[1];
+    normals[i * 3 + 2] = sample.normal[2];
+    holeScales[i] = sample.holeScale ?? 1;
+  }
+  return { positions, normals, holeScales };
 }
 
 export interface WorkerMessage {
@@ -68,6 +92,9 @@ export interface WorkerResponse {
   normals?: Float32Array;
   triCount?: number;
   validation?: ValidationResult;
+  surfaceSamplePositions?: Float32Array;
+  surfaceSampleNormals?: Float32Array;
+  surfaceSampleHoleScales?: Float32Array;
 }
 
 let cancelled = false;
@@ -931,7 +958,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
 
       const initialEstimate = estimateGenerationTimings(params, resolution, !shape);
       let smoothedMarchSeconds = initialEstimate.marchSeconds;
-      let estimateLabel = formatDuration(initialEstimate.totalSeconds);
+      let estimateLabel = formatDuration(initialEstimate.preSeconds + initialEstimate.marchSeconds);
       postMessage({
         type: 'progress',
         progress: 0.12,
@@ -954,7 +981,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         }
         const remainingSeconds = Math.max(
           0,
-          preSecondsActual + smoothedMarchSeconds + initialEstimate.validationSeconds - elapsedSeconds
+          preSecondsActual + smoothedMarchSeconds - elapsedSeconds
         );
         estimateLabel = formatDuration(remainingSeconds);
         postMessage({
@@ -973,51 +1000,19 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         } as WorkerResponse);
       }
 
-      const remainingValidation = Math.max(0, initialEstimate.validationSeconds);
-      postMessage({
-        type: 'progress',
-        progress: 0.85,
-        message: `Running validation... (~${formatDuration(remainingValidation)} remaining)`
-      } as WorkerResponse);
+      postMessage({ type: 'progress', progress: 0.95, message: 'Geometry ready' } as WorkerResponse);
 
-      // Run validation
-      let validation: ValidationResult;
-      if (shape) {
-        // Procedural shape: use sphere deviation only for sphere, skip for others
-        const outerDeviation = (shape === 'sphere' && sphereRadius !== null)
-          ? checkSphereDeviation(result, sphereRadius, params.toleranceMm)
-          : { passed: true, maxDeviation: 0 };
-        const minThickness = checkMinThickness(sdfWithThinFilter, result, params.minFeatureSize, 200);
-        const manifold = checkManifold(result);
-        const disconnected = checkDisconnected(result);
-        const warnings: string[] = [];
-        if (!params.escapeHoles && params.variant === 'shell_core') {
-          warnings.push('Escape holes disabled - trapped powder/resin likely');
-        }
-        if (params.processPreset === 'FDM' && params.variant === 'implicit_conformal') {
-          warnings.push('FDM with open lattice exterior can be difficult to print');
-        }
-        validation = {
-          passed: outerDeviation.passed && minThickness.passed && manifold.passed && disconnected.passed,
-          outerDeviation: { ...outerDeviation, tolerance: params.toleranceMm },
-          minThickness: { ...minThickness, required: params.minFeatureSize },
-          manifold,
-          disconnected,
-          warnings,
-        };
-      } else {
-        validation = runValidation(result, sdfWithThinFilter, params, bvh, null);
-      }
-
-      postMessage({ type: 'progress', progress: 0.95, message: 'Done!' } as WorkerResponse);
-
-      // Send generated result. positions/normals are transferred; validation is cloned.
+      // Send generated geometry immediately. positions/normals and optional
+      // surface sample buffers are transferred; validation runs separately.
+      const packedSamples = packSurfaceSamples(surfaceSamples);
       const response: WorkerResponse = {
         type: 'result',
         positions: result.positions,
         normals: result.normals,
         triCount: result.triCount,
-        validation,
+        surfaceSamplePositions: packedSamples?.positions,
+        surfaceSampleNormals: packedSamples?.normals,
+        surfaceSampleHoleScales: packedSamples?.holeScales,
       };
       postWorkerMessage(response, generatedResultTransferList(response));
     } catch (err: unknown) {
