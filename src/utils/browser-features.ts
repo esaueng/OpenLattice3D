@@ -1,6 +1,7 @@
 export interface BrowserFeatureFlags {
   crossOriginIsolated: boolean;
   sharedArrayBuffer: boolean;
+  webGPU: boolean;
   webAssembly: boolean;
   wasmSingleThreadedReady: boolean;
   threadedWasmReady: boolean;
@@ -23,13 +24,16 @@ export interface TransferGeometryBuffers {
 export type BackendGeometryBuffers = SharedGeometryBuffers | TransferGeometryBuffers;
 
 export function getBrowserFeatureFlags(): BrowserFeatureFlags {
+  const navigatorWithGpu = globalThis.navigator as (Navigator & { gpu?: unknown }) | undefined;
   const crossOriginIsolated = globalThis.crossOriginIsolated === true;
   const sharedArrayBuffer = typeof globalThis.SharedArrayBuffer === 'function';
+  const webGPU = Boolean(navigatorWithGpu?.gpu);
   const webAssembly = typeof globalThis.WebAssembly === 'object';
 
   return {
     crossOriginIsolated,
     sharedArrayBuffer,
+    webGPU,
     webAssembly,
     wasmSingleThreadedReady: webAssembly,
     threadedWasmReady: webAssembly && crossOriginIsolated && sharedArrayBuffer,
@@ -40,6 +44,7 @@ export function formatBrowserFeatureFlags(flags: BrowserFeatureFlags): string {
   return [
     `crossOriginIsolated=${flags.crossOriginIsolated ? 'yes' : 'no'}`,
     `SharedArrayBuffer=${flags.sharedArrayBuffer ? 'yes' : 'no'}`,
+    `WebGPU=${flags.webGPU ? 'yes' : 'no'}`,
     `WASM=${flags.wasmSingleThreadedReady ? 'yes' : 'no'}`,
     `threadedWasmReady=${flags.threadedWasmReady ? 'yes' : 'no'}`,
   ].join(', ');
