@@ -757,8 +757,39 @@ svg {
 .statusbar-actions {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 9px;
   margin-left: auto;
+}
+
+.footer-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-mini);
+  line-height: 1;
+  text-decoration: none;
+  text-transform: lowercase;
+}
+
+.footer-link:hover {
+  color: var(--color-text);
+}
+
+.footer-link-icon {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 auto;
+  color: currentColor;
+  fill: currentColor;
+  opacity: 0.82;
+}
+
+.footer-link-icon-box {
+  border: 1px solid currentColor;
+  border-radius: 1px;
+  opacity: 0.7;
 }
 
 .demo-grid-view {
