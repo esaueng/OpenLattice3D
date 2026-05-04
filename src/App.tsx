@@ -4,6 +4,8 @@ import { Viewer3D } from './components/Viewer3D';
 import { RightPanel } from './components/RightPanel';
 import { useStore } from './store/useStore';
 import { registerNotificationServiceWorker } from './utils/notifications';
+import { useLatticeGeneration } from './hooks/useLatticeGeneration';
+import { useWorkspaceHotkeys } from './hooks/useWorkspaceHotkeys';
 import './App.css';
 
 function App() {
@@ -17,6 +19,9 @@ function App() {
     meshFileName,
     demoModeActive,
   } = useStore();
+  const generationControls = useLatticeGeneration();
+
+  useWorkspaceHotkeys(generationControls);
 
   useEffect(() => {
     void registerNotificationServiceWorker();
@@ -54,7 +59,7 @@ function App() {
 
       <main className="workspace">
         <section className="tool-panel left-panel" aria-label="Lattice setup">
-          <LeftPanel />
+          <LeftPanel generationControls={generationControls} />
         </section>
 
         <section className="viewer-shell" aria-label="3D lattice viewer">

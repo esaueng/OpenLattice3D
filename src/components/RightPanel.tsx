@@ -10,6 +10,13 @@ const VIEW_LABELS: Record<ViewMode, string> = {
   xray: 'X-Ray',
 };
 
+const VIEW_HOTKEYS: Record<ViewMode, string> = {
+  original: '1',
+  lattice: '2',
+  cross_section: '3',
+  xray: '4',
+};
+
 export function RightPanel() {
   const store = useStore();
   const {
@@ -41,7 +48,7 @@ export function RightPanel() {
             <button
               key={mode}
               className={`btn btn-small ${viewMode === mode ? 'btn-active' : ''}`}
-              title={`Switch viewer to ${VIEW_LABELS[mode]} mode.`}
+              title={`Switch viewer to ${VIEW_LABELS[mode]} mode (${VIEW_HOTKEYS[mode]}).`}
               onClick={() => store.setViewMode(mode)}
               disabled={
                 !demoModeActive && (
@@ -59,7 +66,7 @@ export function RightPanel() {
 
         <button
           className="btn btn-small btn-full"
-          title="Reset the 3D viewport to the standard Z-up isometric view."
+          title="Reset the 3D viewport to the standard Z-up isometric view (H)."
           onClick={store.resetViewport}
           type="button"
         >
