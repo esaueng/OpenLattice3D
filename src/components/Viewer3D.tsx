@@ -28,8 +28,9 @@ const DEMO_TILE_ITEMS: Array<{ type: LatticeType; label: string }> = [
 
 const DEMO_VIEW_TARGET_RADIUS = 8;
 const VIEWPORT_PADDING = 1.2;
-const ISO_VIEW_DIRECTION = new THREE.Vector3(1, -1, 0.75).normalize();
 const WORLD_UP = new THREE.Vector3(0, 0, 1);
+const ISO_VIEW_DIRECTION = new THREE.Vector3(1, 1, 1).normalize();
+const ISO_VIEW_UP = WORLD_UP.clone().projectOnPlane(ISO_VIEW_DIRECTION).normalize();
 
 const VIEWER_GIZMO_ALIGNMENT = 'bottom-right';
 const VIEWER_GIZMO_MARGIN: [number, number] = [112, 112];
@@ -168,7 +169,7 @@ function isCornerGizmoViewRequest(viewRequest: GizmoViewRequest): viewRequest is
 
 function cameraViewForRequest(viewRequest: GizmoViewRequest): { direction: THREE.Vector3; up: THREE.Vector3 } {
   if (viewRequest === VIEWER_ISOMETRIC_GIZMO_VIEW) {
-    return { direction: ISO_VIEW_DIRECTION.clone(), up: WORLD_UP.clone() };
+    return { direction: ISO_VIEW_DIRECTION.clone(), up: ISO_VIEW_UP.clone() };
   }
   if (isCornerGizmoViewRequest(viewRequest)) {
     const direction = new THREE.Vector3(...viewRequest.direction).normalize();
@@ -880,7 +881,7 @@ function AutoFit() {
     const radius = Math.max(sphere.radius, 1);
     const distance = distanceToFitBoundingSphere(camera, radius);
 
-    camera.up.set(0, 0, 1);
+    camera.up.copy(ISO_VIEW_UP);
     camera.position.copy(center).add(ISO_VIEW_DIRECTION.clone().multiplyScalar(distance));
     camera.lookAt(center);
     camera.updateProjectionMatrix();
