@@ -39,6 +39,16 @@ type WorkerResponse = {
   normals: Float32Array;
 };
 
+type WorkerPostMessage = (message: unknown, transfer: Transferable[]) => void;
+
+const postWorkerMessage = self.postMessage.bind(self) as WorkerPostMessage;
+
+function sampleResultTransferList(response: WorkerResponse): Transferable[] {
+  // Surface sample outputs are generated inside this worker and transferred
+  // back to the lattice worker. Incoming mesh buffers are backend-owned copies.
+  return [response.positions.buffer, response.normals.buffer];
+}
+
 function triangleArea(a: Vec3, b: Vec3, c: Vec3): number {
   const ab: Vec3 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
   const ac: Vec3 = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
@@ -245,6 +255,5 @@ self.onmessage = (ev: MessageEvent<WorkerMessage>) => {
     outNrm[i * 3 + 2] = samples[i].normal[2];
   }
   const resp: WorkerResponse = { positions: outPos, normals: outNrm };
-  // @ts-expect-error transfer list
-  self.postMessage(resp, [outPos.buffer, outNrm.buffer]);
+  postWorkerMessage(resp, sampleResultTransferList(resp));
 };

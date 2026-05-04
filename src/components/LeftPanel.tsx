@@ -10,6 +10,15 @@ import { SAMPLE_SHAPE_INFO } from '../store/useStore';
 import type { WorkerMessage, WorkerResponse } from '../workers/lattice-worker';
 import { requestNotificationPermission, sendNotification } from '../utils/notifications';
 
+function buildGenerationTransferList(msg: WorkerMessage): Transferable[] {
+  const transfers: Transferable[] = [];
+  // Imported mesh buffers are viewer-owned in the store. Only transfer backend-owned
+  // copies created for this worker message, so the original mesh remains visible.
+  if (msg.meshPositions) transfers.push(msg.meshPositions.buffer);
+  if (msg.meshNormals) transfers.push(msg.meshNormals.buffer);
+  return transfers;
+}
+
 export function LeftPanel() {
   const store = useStore();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -147,10 +156,14 @@ export function LeftPanel() {
     };
 
     if (store.originalMesh) {
-      msg.meshPositions = store.originalMesh.positions;
-      msg.meshNormals = store.originalMesh.normals;
+      // Backend-owned copies may be transferred to the worker. Do not transfer
+      // store.originalMesh buffers directly; the viewer may still need them.
+      msg.meshPositions = new Float32Array(store.originalMesh.positions);
+      msg.meshNormals = new Float32Array(store.originalMesh.normals);
       msg.meshTriCount = store.originalMesh.triCount;
     }
+
+    const transferList = buildGenerationTransferList(msg);
 
     worker.onmessage = (e: MessageEvent<WorkerResponse>) => {
       const resp = e.data;
@@ -179,7 +192,7 @@ export function LeftPanel() {
       }
     };
 
-    worker.postMessage(msg);
+    worker.postMessage(msg, transferList);
   }, [notifyGenerationComplete, requestNotificationPermissionOnce, store]);
 
   const toggleDemoGrid = useCallback((enabled: boolean) => {
