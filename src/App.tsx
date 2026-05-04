@@ -91,7 +91,7 @@ function App() {
         <div className="status-links" aria-label="Project links">
           <a
             className="status-link donate-link"
-            href="https://ko-fi.com/esauengineering"
+            href="https://ko-fi.com/petergn"
             target="_blank"
             rel="noreferrer"
             title="Support OpenLattice3D on Ko-fi"
