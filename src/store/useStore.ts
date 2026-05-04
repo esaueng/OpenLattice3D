@@ -1,4 +1,4 @@
-// Global app state using Zustand with localStorage persistence
+// Global app state using Zustand with IndexedDB persistence
 import { create } from 'zustand';
 import type { LatticeParams, MeshInfo, ValidationResult, ProcessPreset, LatticeType, GenerationVariant, SelectionMode, SampleShape } from '../types/project';
 import { DEFAULT_PARAMS, PROCESS_DEFAULTS } from '../types/project';
@@ -23,6 +23,11 @@ export interface LogEntry {
 
 // ── Persistence helpers ──────────────────────────────────
 const STORAGE_KEY = 'gen-lattice-1-state';
+const DB_NAME = 'openlattice3d-state';
+const DB_VERSION = 1;
+const DB_STORE = 'snapshots';
+const DB_STATE_KEY = 'app-state-v1';
+const MAX_PERSISTED_LOGS = 250;
 
 interface PersistedState {
   params: LatticeParams;
@@ -34,9 +39,38 @@ interface PersistedState {
   viewerBackground: string;
 }
 
-function loadPersistedState(): Partial<PersistedState> | null {
+type DemoParamsByType = Partial<Record<LatticeType, LatticeParams>>;
+
+interface PersistedAppState extends PersistedState {
+  version: number;
+  savedAt: number;
+  originalMesh: TriangleMesh | null;
+  meshInfo: MeshInfo | null;
+  meshRepaired: boolean;
+  meshFileName: string;
+  selectionMode: SelectionMode;
+  keepOutTris: number[];
+  keepInTris: number[];
+  demoParamsByType: DemoParamsByType;
+  resultMesh: MarchingCubesResult | null;
+  validation: ValidationResult | null;
+  demoModeActive: boolean;
+  demoRunId: number;
+  logs: LogEntry[];
+}
+
+function canUseBrowserStorage() {
+  return typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
+}
+
+function canUseIndexedDb() {
+  return typeof indexedDB !== 'undefined';
+}
+
+function loadLegacyPersistedState(): Partial<PersistedState> | null {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!canUseBrowserStorage()) return null;
+    const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     return JSON.parse(raw) as Partial<PersistedState>;
   } catch {
@@ -44,15 +78,97 @@ function loadPersistedState(): Partial<PersistedState> | null {
   }
 }
 
-function savePersistedState(s: PersistedState) {
+function saveLegacyPersistedState(s: PersistedState) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
+    if (!canUseBrowserStorage()) return;
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
   } catch { /* quota exceeded — ignore */ }
 }
 
-const persisted = loadPersistedState();
+function clearLegacyPersistedState() {
+  try {
+    if (!canUseBrowserStorage()) return;
+    window.localStorage.removeItem(STORAGE_KEY);
+  } catch { /* ignore */ }
+}
 
-type DemoParamsByType = Partial<Record<LatticeType, LatticeParams>>;
+function openPersistenceDb(): Promise<IDBDatabase | null> {
+  if (!canUseIndexedDb()) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(DB_STORE)) db.createObjectStore(DB_STORE);
+    };
+
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => resolve(null);
+    request.onblocked = () => resolve(null);
+  });
+}
+
+async function loadPersistedAppState(): Promise<Partial<PersistedAppState> | null> {
+  const db = await openPersistenceDb();
+  if (!db) return null;
+
+  return new Promise((resolve) => {
+    const transaction = db.transaction(DB_STORE, 'readonly');
+    const request = transaction.objectStore(DB_STORE).get(DB_STATE_KEY);
+
+    request.onsuccess = () => resolve((request.result ?? null) as Partial<PersistedAppState> | null);
+    request.onerror = () => resolve(null);
+    transaction.oncomplete = () => db.close();
+    transaction.onerror = () => db.close();
+    transaction.onabort = () => db.close();
+  });
+}
+
+async function savePersistedAppState(snapshot: PersistedAppState): Promise<void> {
+  const db = await openPersistenceDb();
+  if (!db) return;
+
+  await new Promise<void>((resolve) => {
+    const transaction = db.transaction(DB_STORE, 'readwrite');
+    transaction.objectStore(DB_STORE).put(snapshot, DB_STATE_KEY);
+    transaction.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    transaction.onerror = () => {
+      db.close();
+      resolve();
+    };
+    transaction.onabort = () => {
+      db.close();
+      resolve();
+    };
+  });
+}
+
+async function clearPersistedAppState(): Promise<void> {
+  const db = await openPersistenceDb();
+  if (!db) return;
+
+  await new Promise<void>((resolve) => {
+    const transaction = db.transaction(DB_STORE, 'readwrite');
+    transaction.objectStore(DB_STORE).delete(DB_STATE_KEY);
+    transaction.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    transaction.onerror = () => {
+      db.close();
+      resolve();
+    };
+    transaction.onabort = () => {
+      db.close();
+      resolve();
+    };
+  });
+}
+
+const persisted = loadLegacyPersistedState();
 
 const ALL_LATTICE_TYPES: LatticeType[] = [
   'gyroid',
@@ -422,7 +538,8 @@ export const useStore = create<AppState>((set) => ({
   clearLogs: () => set({ logs: [] }),
 
   resetProject: () => {
-    try { localStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
+    clearLegacyPersistedState();
+    void clearPersistedAppState();
     return set({
       originalMesh: null,
       meshInfo: null,
@@ -431,6 +548,7 @@ export const useStore = create<AppState>((set) => ({
       sampleShape: null,
       sphereMode: false,
       sphereRadius: 25,
+      selectionMode: 'none',
       resultMesh: null,
       validation: null,
       keepOutTris: new Set(),
@@ -451,9 +569,8 @@ export const useStore = create<AppState>((set) => ({
   },
 }));
 
-// ── Persist to localStorage on relevant state changes ────
-useStore.subscribe((state) => {
-  savePersistedState({
+function persistedSubset(state: AppState): PersistedState {
+  return {
     params: state.params,
     sampleShape: state.sampleShape,
     sphereMode: state.sphereMode,
@@ -461,5 +578,86 @@ useStore.subscribe((state) => {
     viewMode: state.viewMode,
     clipPlane: state.clipPlane,
     viewerBackground: state.viewerBackground,
-  });
+  };
+}
+
+function buildPersistedAppState(state: AppState): PersistedAppState {
+  return {
+    version: 1,
+    savedAt: Date.now(),
+    ...persistedSubset(state),
+    originalMesh: state.originalMesh,
+    meshInfo: state.meshInfo,
+    meshRepaired: state.meshRepaired,
+    meshFileName: state.meshFileName,
+    selectionMode: state.selectionMode,
+    keepOutTris: Array.from(state.keepOutTris),
+    keepInTris: Array.from(state.keepInTris),
+    demoParamsByType: state.demoParamsByType,
+    resultMesh: state.resultMesh,
+    validation: state.validation,
+    demoModeActive: state.demoModeActive,
+    demoRunId: state.demoRunId,
+    logs: state.logs.slice(-MAX_PERSISTED_LOGS),
+  };
+}
+
+function hydrateFromSnapshot(snapshot: Partial<PersistedAppState>): Partial<AppState> {
+  return {
+    originalMesh: snapshot.originalMesh ?? null,
+    meshInfo: snapshot.meshInfo ?? null,
+    meshRepaired: snapshot.meshRepaired ?? false,
+    meshFileName: snapshot.meshFileName ?? (snapshot.sampleShape ? SAMPLE_SHAPE_INFO[snapshot.sampleShape].fileName : ''),
+    sampleShape: snapshot.sampleShape ?? null,
+    sphereMode: snapshot.sphereMode ?? false,
+    sphereRadius: snapshot.sphereRadius ?? 25,
+    selectionMode: snapshot.selectionMode ?? 'none',
+    keepOutTris: new Set(snapshot.keepOutTris ?? []),
+    keepInTris: new Set(snapshot.keepInTris ?? []),
+    params: snapshot.params ? { ...DEFAULT_PARAMS, ...snapshot.params } : { ...DEFAULT_PARAMS },
+    demoParamsByType: snapshot.demoParamsByType ?? {},
+    generating: false,
+    progress: 0,
+    progressMessage: '',
+    resultMesh: snapshot.resultMesh ?? null,
+    validation: snapshot.validation ?? null,
+    viewMode: snapshot.viewMode ?? 'original',
+    clipPlane: snapshot.clipPlane ?? { axis: 'z', position: 0.5, flipped: false },
+    viewerBackground: snapshot.viewerBackground ?? '#000000',
+    demoModeActive: snapshot.demoModeActive ?? false,
+    demoRunId: snapshot.demoRunId ?? 0,
+    logs: snapshot.logs ?? [],
+  };
+}
+
+let persistenceReady = false;
+let persistTimer: ReturnType<typeof setTimeout> | null = null;
+
+function schedulePersistence() {
+  if (!persistenceReady || typeof window === 'undefined') return;
+
+  if (persistTimer) window.clearTimeout(persistTimer);
+  persistTimer = window.setTimeout(() => {
+    persistTimer = null;
+    const state = useStore.getState();
+    saveLegacyPersistedState(persistedSubset(state));
+    void savePersistedAppState(buildPersistedAppState(state));
+  }, 250);
+}
+
+async function hydratePersistence() {
+  try {
+    const snapshot = await loadPersistedAppState();
+    if (snapshot) useStore.setState(hydrateFromSnapshot(snapshot));
+  } finally {
+    persistenceReady = true;
+    schedulePersistence();
+  }
+}
+
+void hydratePersistence();
+
+// ── Persist relevant app state on changes ────────────────
+useStore.subscribe(() => {
+  schedulePersistence();
 });
