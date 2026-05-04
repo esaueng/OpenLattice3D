@@ -8,6 +8,7 @@ import { DEFAULT_PARAMS } from '../types/project';
 import { isSheetType } from '../geometry/lattice';
 import { SAMPLE_SHAPE_INFO } from '../store/useStore';
 import type { WorkerMessage, WorkerResponse } from '../workers/lattice-worker';
+import type { ValidationWorkerMessage, ValidationWorkerResponse } from '../workers/validation-worker';
 import { requestNotificationPermission, sendNotification } from '../utils/notifications';
 
 function buildGenerationTransferList(msg: WorkerMessage): Transferable[] {
@@ -19,11 +20,25 @@ function buildGenerationTransferList(msg: WorkerMessage): Transferable[] {
   return transfers;
 }
 
+function buildValidationTransferList(msg: ValidationWorkerMessage): Transferable[] {
+  const transfers: Transferable[] = [
+    msg.positions.buffer,
+    msg.normals.buffer,
+  ];
+  if (msg.meshPositions) transfers.push(msg.meshPositions.buffer);
+  if (msg.meshNormals) transfers.push(msg.meshNormals.buffer);
+  if (msg.surfaceSamplePositions) transfers.push(msg.surfaceSamplePositions.buffer);
+  if (msg.surfaceSampleNormals) transfers.push(msg.surfaceSampleNormals.buffer);
+  if (msg.surfaceSampleHoleScales) transfers.push(msg.surfaceSampleHoleScales.buffer);
+  return transfers;
+}
+
 export function LeftPanel() {
   const store = useStore();
   const fileRef = useRef<HTMLInputElement>(null);
   const jsonRef = useRef<HTMLInputElement>(null);
   const workerRef = useRef<Worker | null>(null);
+  const validationWorkerRef = useRef<Worker | null>(null);
   const [clearAllArmed, setClearAllArmed] = useState(false);
 
   useEffect(() => {
@@ -136,6 +151,10 @@ export function LeftPanel() {
     if (workerRef.current) {
       workerRef.current.terminate();
     }
+    if (validationWorkerRef.current) {
+      validationWorkerRef.current.terminate();
+      validationWorkerRef.current = null;
+    }
     const worker = new Worker(
       new URL('../workers/lattice-worker.ts', import.meta.url),
       { type: 'module' }
@@ -165,6 +184,63 @@ export function LeftPanel() {
 
     const transferList = buildGenerationTransferList(msg);
 
+    const startValidation = (resp: WorkerResponse) => {
+      if (!resp.positions || !resp.normals || resp.triCount === undefined) return;
+      if (validationWorkerRef.current) {
+        validationWorkerRef.current.terminate();
+      }
+
+      const validationWorker = new Worker(
+        new URL('../workers/validation-worker.ts', import.meta.url),
+        { type: 'module' }
+      );
+      validationWorkerRef.current = validationWorker;
+
+      const validationMsg: ValidationWorkerMessage = {
+        type: 'validate',
+        positions: new Float32Array(resp.positions),
+        normals: new Float32Array(resp.normals),
+        triCount: resp.triCount,
+        params: store.params,
+        sphereMode: store.sphereMode,
+        sphereRadius: store.sphereRadius,
+        sampleShape: store.sampleShape,
+        keepOutTris: Array.from(store.keepOutTris),
+        surfaceSamplePositions: resp.surfaceSamplePositions,
+        surfaceSampleNormals: resp.surfaceSampleNormals,
+        surfaceSampleHoleScales: resp.surfaceSampleHoleScales,
+      };
+
+      if (store.originalMesh) {
+        validationMsg.meshPositions = new Float32Array(store.originalMesh.positions);
+        validationMsg.meshNormals = new Float32Array(store.originalMesh.normals);
+        validationMsg.meshTriCount = store.originalMesh.triCount;
+      }
+
+      validationWorker.onmessage = (event: MessageEvent<ValidationWorkerResponse>) => {
+        const validationResp = event.data;
+        if (validationResp.type === 'progress') {
+          if (validationResp.message) store.addLog(validationResp.message);
+        } else if (validationResp.type === 'result') {
+          store.setValidation(validationResp.validation || null);
+          store.addLog('Validation complete');
+          validationWorker.terminate();
+          if (validationWorkerRef.current === validationWorker) validationWorkerRef.current = null;
+        } else if (validationResp.type === 'error') {
+          store.addLog(`Validation error: ${validationResp.message}`, 'error');
+          validationWorker.terminate();
+          if (validationWorkerRef.current === validationWorker) validationWorkerRef.current = null;
+        }
+      };
+      validationWorker.onerror = () => {
+        store.addLog('Validation worker failed', 'error');
+        validationWorker.terminate();
+        if (validationWorkerRef.current === validationWorker) validationWorkerRef.current = null;
+      };
+
+      validationWorker.postMessage(validationMsg, buildValidationTransferList(validationMsg));
+    };
+
     worker.onmessage = (e: MessageEvent<WorkerResponse>) => {
       const resp = e.data;
       if (resp.type === 'progress') {
@@ -176,19 +252,21 @@ export function LeftPanel() {
           normals: resp.normals!,
           triCount: resp.triCount!,
         });
-        store.setValidation(resp.validation || null);
         store.setGenerating(false);
         store.setProgress(1, 'Complete');
         store.setDemoModeActive(false);
         store.addLog(`Generation complete: ${resp.triCount} triangles`);
+        startValidation(resp);
         const elapsedMs = performance.now() - generationStartedAt;
         void notifyGenerationComplete(resp.triCount || 0, elapsedMs);
         worker.terminate();
+        workerRef.current = null;
       } else if (resp.type === 'error') {
         store.addLog(`Error: ${resp.message}`, 'error');
         store.setGenerating(false);
         store.setDemoModeActive(false);
         worker.terminate();
+        workerRef.current = null;
       }
     };
 
