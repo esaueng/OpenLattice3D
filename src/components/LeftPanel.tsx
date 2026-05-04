@@ -7,41 +7,17 @@ import type { LatticeType, SampleShape, LatticeParams } from '../types/project';
 import { DEFAULT_PARAMS } from '../types/project';
 import { isSheetType } from '../geometry/lattice';
 import { SAMPLE_SHAPE_INFO } from '../store/useStore';
-import type { WorkerMessage, WorkerResponse } from '../workers/lattice-worker';
-import type { ValidationWorkerMessage, ValidationWorkerResponse } from '../workers/validation-worker';
-import { requestNotificationPermission, sendNotification } from '../utils/notifications';
-import { createBackendGeometryBuffers, formatBrowserFeatureFlags, getBrowserFeatureFlags, isSharedFloat32Array } from '../utils/browser-features';
+import type { LatticeGenerationControls } from '../hooks/useLatticeGeneration';
 
-function buildGenerationTransferList(msg: WorkerMessage): Transferable[] {
-  const transfers: Transferable[] = [];
-  // Imported mesh buffers are viewer-owned in the store. Only transfer backend-owned
-  // copies created for this worker message, so the original mesh remains visible.
-  if (msg.meshBufferKind === 'shared') return transfers;
-  if (msg.meshPositions && isSharedFloat32Array(msg.meshPositions)) return transfers;
-  if (msg.meshPositions) transfers.push(msg.meshPositions.buffer);
-  if (msg.meshNormals) transfers.push(msg.meshNormals.buffer);
-  return transfers;
-}
+type LeftPanelProps = {
+  generationControls: LatticeGenerationControls;
+};
 
-function buildValidationTransferList(msg: ValidationWorkerMessage): Transferable[] {
-  const transfers: Transferable[] = [
-    msg.positions.buffer,
-    msg.normals.buffer,
-  ];
-  if (msg.meshPositions) transfers.push(msg.meshPositions.buffer);
-  if (msg.meshNormals) transfers.push(msg.meshNormals.buffer);
-  if (msg.surfaceSamplePositions) transfers.push(msg.surfaceSamplePositions.buffer);
-  if (msg.surfaceSampleNormals) transfers.push(msg.surfaceSampleNormals.buffer);
-  if (msg.surfaceSampleHoleScales) transfers.push(msg.surfaceSampleHoleScales.buffer);
-  return transfers;
-}
-
-export function LeftPanel() {
+export function LeftPanel({ generationControls }: LeftPanelProps) {
+  const { startGeneration, cancelGeneration } = generationControls;
   const store = useStore();
   const fileRef = useRef<HTMLInputElement>(null);
   const jsonRef = useRef<HTMLInputElement>(null);
-  const workerRef = useRef<Worker | null>(null);
-  const validationWorkerRef = useRef<Worker | null>(null);
   const [clearAllArmed, setClearAllArmed] = useState(false);
 
   useEffect(() => {
@@ -49,20 +25,6 @@ export function LeftPanel() {
     const timeout = window.setTimeout(() => setClearAllArmed(false), 4000);
     return () => window.clearTimeout(timeout);
   }, [clearAllArmed]);
-
-  const requestNotificationPermissionOnce = useCallback(() => {
-    void requestNotificationPermission();
-  }, []);
-
-  const notifyGenerationComplete = useCallback(async (triCount: number, elapsedMs: number) => {
-    const elapsedSec = Math.max(0, elapsedMs / 1000);
-    const elapsedLabel = elapsedSec < 60
-      ? `${elapsedSec.toFixed(1)}s`
-      : `${Math.floor(elapsedSec / 60)}m ${(elapsedSec % 60).toFixed(0)}s`;
-    await sendNotification('Lattice generation complete', {
-      body: `${triCount.toLocaleString()} triangles generated in ${elapsedLabel}.`,
-    });
-  }, []);
 
   const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -138,156 +100,6 @@ export function LeftPanel() {
     store.addLog('Project reset to defaults');
   }, [clearAllArmed, store]);
 
-  const startGeneration = useCallback(() => {
-    if (store.generating) return;
-    if (store.demoModeActive) return;
-    if (!store.originalMesh && !store.sphereMode) return;
-    requestNotificationPermissionOnce();
-    store.setGenerating(true);
-    store.setProgress(0, 'Starting...');
-    store.addLog('Starting lattice generation...');
-    const browserFeatures = getBrowserFeatureFlags();
-    const browserFeatureSummary = formatBrowserFeatureFlags(browserFeatures);
-    store.addLog(`Browser features: ${browserFeatureSummary}`, browserFeatures.threadedWasmReady ? 'info' : 'warn');
-    console.info('[OpenLattice3D] Browser features at generation start', browserFeatures);
-    // Clear previous result without changing viewMode — view is preserved for regeneration
-    store.setValidation(null);
-    store.setDemoModeActive(false);
-
-    // Create worker
-    if (workerRef.current) {
-      workerRef.current.terminate();
-    }
-    if (validationWorkerRef.current) {
-      validationWorkerRef.current.terminate();
-      validationWorkerRef.current = null;
-    }
-    const worker = new Worker(
-      new URL('../workers/lattice-worker.ts', import.meta.url),
-      { type: 'module' }
-    );
-    workerRef.current = worker;
-
-    const generationStartedAt = performance.now();
-    const resolution = Math.round(24 + store.params.exportResolution * 24); // 48..264
-
-    const msg: WorkerMessage = {
-      type: 'generate',
-      params: store.params,
-      sphereMode: store.sphereMode,
-      sphereRadius: store.sphereRadius,
-      sampleShape: store.sampleShape,
-      resolution,
-      keepOutTris: Array.from(store.keepOutTris),
-    };
-
-    if (store.originalMesh) {
-      const geometryBuffers = createBackendGeometryBuffers(
-        store.originalMesh.positions,
-        store.originalMesh.normals,
-        store.originalMesh.triCount,
-        browserFeatures
-      );
-      // These are backend-owned copies. The original store buffers remain
-      // viewer-owned and are never transferred or detached.
-      msg.meshPositions = geometryBuffers.positions;
-      msg.meshNormals = geometryBuffers.normals;
-      msg.meshTriCount = geometryBuffers.triCount;
-      msg.meshBufferKind = geometryBuffers.kind;
-      store.addLog(`Mesh buffers: ${geometryBuffers.kind === 'shared' ? 'SharedArrayBuffer' : 'ArrayBuffer transfer'} path active`);
-    }
-
-    const transferList = buildGenerationTransferList(msg);
-
-    const startValidation = (resp: WorkerResponse) => {
-      if (!resp.positions || !resp.normals || resp.triCount === undefined) return;
-      if (validationWorkerRef.current) {
-        validationWorkerRef.current.terminate();
-      }
-
-      const validationWorker = new Worker(
-        new URL('../workers/validation-worker.ts', import.meta.url),
-        { type: 'module' }
-      );
-      validationWorkerRef.current = validationWorker;
-
-      const validationMsg: ValidationWorkerMessage = {
-        type: 'validate',
-        positions: new Float32Array(resp.positions),
-        normals: new Float32Array(resp.normals),
-        triCount: resp.triCount,
-        params: store.params,
-        sphereMode: store.sphereMode,
-        sphereRadius: store.sphereRadius,
-        sampleShape: store.sampleShape,
-        keepOutTris: Array.from(store.keepOutTris),
-        surfaceSamplePositions: resp.surfaceSamplePositions,
-        surfaceSampleNormals: resp.surfaceSampleNormals,
-        surfaceSampleHoleScales: resp.surfaceSampleHoleScales,
-      };
-
-      if (store.originalMesh) {
-        validationMsg.meshPositions = new Float32Array(store.originalMesh.positions);
-        validationMsg.meshNormals = new Float32Array(store.originalMesh.normals);
-        validationMsg.meshTriCount = store.originalMesh.triCount;
-      }
-
-      validationWorker.onmessage = (event: MessageEvent<ValidationWorkerResponse>) => {
-        const validationResp = event.data;
-        if (validationResp.type === 'progress') {
-          if (validationResp.message) store.addLog(validationResp.message);
-        } else if (validationResp.type === 'result') {
-          store.setValidation(validationResp.validation || null);
-          store.addLog('Validation complete');
-          validationWorker.terminate();
-          if (validationWorkerRef.current === validationWorker) validationWorkerRef.current = null;
-        } else if (validationResp.type === 'error') {
-          store.addLog(`Validation error: ${validationResp.message}`, 'error');
-          validationWorker.terminate();
-          if (validationWorkerRef.current === validationWorker) validationWorkerRef.current = null;
-        }
-      };
-      validationWorker.onerror = () => {
-        store.addLog('Validation worker failed', 'error');
-        validationWorker.terminate();
-        if (validationWorkerRef.current === validationWorker) validationWorkerRef.current = null;
-      };
-
-      validationWorker.postMessage(validationMsg, buildValidationTransferList(validationMsg));
-    };
-
-    worker.onmessage = (e: MessageEvent<WorkerResponse>) => {
-      const resp = e.data;
-      if (resp.type === 'progress') {
-        store.setProgress(resp.progress || 0, resp.message || '');
-        if (resp.message) store.addLog(resp.message);
-      } else if (resp.type === 'result') {
-        store.setResultMesh({
-          positions: resp.positions!,
-          normals: resp.normals!,
-          triCount: resp.triCount!,
-        });
-        store.setGenerating(false);
-        store.setProgress(1, 'Complete');
-        store.setDemoModeActive(false);
-        store.addLog(`Generation complete (${resp.backend || 'cpu-single'}): ${resp.triCount} triangles`);
-        startValidation(resp);
-        const elapsedMs = performance.now() - generationStartedAt;
-        void notifyGenerationComplete(resp.triCount || 0, elapsedMs);
-        worker.terminate();
-        workerRef.current = null;
-      } else if (resp.type === 'error') {
-        store.addLog(`Error: ${resp.message}`, 'error');
-        store.setGenerating(false);
-        store.setDemoModeActive(false);
-        worker.terminate();
-        workerRef.current = null;
-      }
-    };
-
-    worker.postMessage(msg, transferList);
-  }, [notifyGenerationComplete, requestNotificationPermissionOnce, store]);
-
   const toggleDemoGrid = useCallback((enabled: boolean) => {
     if (store.generating) return;
     if (enabled) {
@@ -297,19 +109,6 @@ export function LeftPanel() {
       store.setDemoModeActive(false);
       store.addLog('Multiview hidden');
     }
-  }, [store]);
-
-  const cancelGeneration = useCallback(() => {
-    if (workerRef.current) {
-      const worker = workerRef.current;
-      worker.postMessage({ type: 'cancel' } satisfies WorkerMessage);
-      window.setTimeout(() => worker.terminate(), 50);
-      workerRef.current = null;
-    }
-    store.setGenerating(false);
-    store.setDemoModeActive(false);
-    store.setProgress(0, 'Cancelled');
-    store.addLog('Generation cancelled', 'warn');
   }, [store]);
 
   const hasModel = store.originalMesh || store.sphereMode;
@@ -599,7 +398,7 @@ export function LeftPanel() {
               className={`btn btn-primary btn-large ${generateDisabledByMultiview ? 'btn-generate-muted' : ''}`}
               title={generateDisabledByMultiview
                 ? 'Disabled while 12-window multiview is enabled.'
-                : 'Start generating the lattice with the current settings.'}
+                : 'Start generating the lattice with the current settings (G).'}
               onClick={startGeneration}
               disabled={generateDisabledByMultiview}
               aria-disabled={generateDisabledByMultiview}
