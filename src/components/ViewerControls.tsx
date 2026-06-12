@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../store/useStore';
 import type { ViewMode } from '../store/useStore';
 
@@ -18,7 +19,18 @@ const VIEW_HOTKEYS: Record<ViewMode, string> = {
 
 export function ViewerControls() {
   const [crossSectionSettingsOpen, setCrossSectionSettingsOpen] = useState(false);
-  const store = useStore();
+  const store = useStore(useShallow((s) => ({
+    resultMesh: s.resultMesh,
+    viewMode: s.viewMode,
+    viewerBackground: s.viewerBackground,
+    demoModeActive: s.demoModeActive,
+    clipPlane: s.clipPlane,
+    originalMesh: s.originalMesh,
+    sphereMode: s.sphereMode,
+    setViewMode: s.setViewMode,
+    setClipPlane: s.setClipPlane,
+    setViewerBackground: s.setViewerBackground,
+  })));
   const {
     resultMesh,
     viewMode,

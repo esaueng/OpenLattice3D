@@ -3,6 +3,7 @@ import { useRef, useMemo, useCallback, useEffect, useState, type KeyboardEvent }
 import { Canvas, useThree, useFrame, type ThreeEvent } from '@react-three/fiber';
 import { Billboard, GizmoHelper, Line, OrbitControls, Text } from '@react-three/drei';
 import * as THREE from 'three';
+import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../store/useStore';
 import type { TriangleMesh } from '../geometry/stl-parser';
 import type { MarchingCubesResult } from '../geometry/marching-cubes';
@@ -94,8 +95,17 @@ type DemoTileState = {
 function resultBounds(result: MarchingCubesResult): THREE.Box3 {
   const box = new THREE.Box3();
   const p = result.positions;
-  for (let i = 0; i < p.length; i += 3) box.expandByPoint(new THREE.Vector3(p[i], p[i + 1], p[i + 2]));
+  const point = new THREE.Vector3();
+  for (let i = 0; i < p.length; i += 3) {
+    box.expandByPoint(point.set(p[i], p[i + 1], p[i + 2]));
+  }
   return box;
+}
+
+/** Dispose a memoized BufferGeometry when it is replaced or unmounted. */
+function useDisposable<T extends { dispose: () => void }>(resource: T): T {
+  useEffect(() => () => resource.dispose(), [resource]);
+  return resource;
 }
 
 function meshBounds(mesh: TriangleMesh): THREE.Box3 {
@@ -338,7 +348,7 @@ function OriginalMeshView({ mesh, keepOutTris, keepInTris, selectionMode, onFace
   selectionMode: string;
   onFaceClick: (triIdx: number) => void;
 }) {
-  const geom = useMemo(() => {
+  const geom = useDisposable(useMemo(() => {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(mesh.positions, 3));
     const colors = new Float32Array(mesh.positions.length);
@@ -355,7 +365,7 @@ function OriginalMeshView({ mesh, keepOutTris, keepInTris, selectionMode, onFace
     g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     g.computeVertexNormals();
     return g;
-  }, [mesh, keepOutTris, keepInTris]);
+  }, [mesh, keepOutTris, keepInTris]));
 
   const handleClick = useCallback((e: ThreeEvent<MouseEvent>) => {
     if (selectionMode === 'none') return;
@@ -386,7 +396,7 @@ function SampleMeshView({ shape, radius, keepOutTris, keepInTris }: {
   keepOutTris: Set<number>;
   keepInTris: Set<number>;
 }) {
-  const geom = useMemo(() => {
+  const geom = useDisposable(useMemo(() => {
     const m = generateSampleMesh(shape, radius);
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(m.positions, 3));
@@ -404,7 +414,7 @@ function SampleMeshView({ shape, radius, keepOutTris, keepInTris }: {
     g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     g.computeVertexNormals();
     return g;
-  }, [shape, radius, keepOutTris, keepInTris]);
+  }, [shape, radius, keepOutTris, keepInTris]));
 
   return (
     <mesh geometry={geom}>
@@ -414,12 +424,12 @@ function SampleMeshView({ shape, radius, keepOutTris, keepInTris }: {
 }
 
 function ResultMeshView({ result }: { result: MarchingCubesResult }) {
-  const geom = useMemo(() => {
+  const geom = useDisposable(useMemo(() => {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(result.positions, 3));
     g.computeVertexNormals();
     return g;
-  }, [result]);
+  }, [result]));
 
   return (
     <mesh geometry={geom}>
@@ -429,28 +439,18 @@ function ResultMeshView({ result }: { result: MarchingCubesResult }) {
 }
 
 function CrossSectionView({ result, clip }: { result: MarchingCubesResult; clip: ClipPlaneState }) {
-  const meshRef = useRef<THREE.Mesh>(null);
-
-  const geom = useMemo(() => {
+  const geom = useDisposable(useMemo(() => {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(result.positions, 3));
     g.computeVertexNormals();
     return g;
-  }, [result]);
+  }, [result]));
 
   const bounds = useMemo(() => resultBounds(result), [result]);
   const plane = useMemo(() => clipStateTo3(clip, bounds), [clip, bounds]);
 
-  useFrame(() => {
-    const p = clipStateTo3(clip, bounds);
-    if (meshRef.current) {
-      const mat = meshRef.current.material as THREE.MeshPhongMaterial;
-      mat.clippingPlanes = [p];
-    }
-  });
-
   return (
-    <mesh ref={meshRef} geometry={geom}>
+    <mesh geometry={geom}>
       <meshPhongMaterial color="#4a9eff" side={THREE.DoubleSide} clippingPlanes={[plane]} clipShadows />
     </mesh>
   );
@@ -481,23 +481,30 @@ function normalizeDemoResult(result: MarchingCubesResult, targetRadius = DEMO_VI
   };
 }
 function XRayView({ result }: { result: MarchingCubesResult }) {
-  const geom = useMemo(() => {
+  const geom = useDisposable(useMemo(() => {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(result.positions, 3));
     g.computeVertexNormals();
     return g;
-  }, [result]);
+  }, [result]));
 
-  const material = useMemo(() => new THREE.MeshBasicMaterial({
+  const material = useDisposable(useMemo(() => new THREE.MeshBasicMaterial({
     color: '#3388cc', side: THREE.DoubleSide, transparent: true, opacity: 0.12, depthWrite: false, blending: THREE.AdditiveBlending,
-  }), []);
+  }), []));
 
   return <mesh geometry={geom} material={material} />;
 }
 
 function GizmoCameraReset({ view, signal }: { view: GizmoViewRequest | null; signal: number }) {
   const { camera, controls } = useThree();
-  const store = useStore();
+  const store = useStore(useShallow((s) => ({
+    originalMesh: s.originalMesh,
+    sphereMode: s.sphereMode,
+    sphereRadius: s.sphereRadius,
+    sampleShape: s.sampleShape,
+    resultMesh: s.resultMesh,
+    viewMode: s.viewMode,
+  })));
 
   useEffect(() => {
     if (!view) return;
@@ -994,7 +1001,13 @@ function shouldShowViewCubeFaceLabel(
 
 function AutoFit() {
   const { camera, controls, size: canvasSize } = useThree();
-  const store = useStore();
+  const store = useStore(useShallow((s) => ({
+    originalMesh: s.originalMesh,
+    sphereMode: s.sphereMode,
+    sphereRadius: s.sphereRadius,
+    sampleShape: s.sampleShape,
+    viewportResetSignal: s.viewportResetSignal,
+  })));
 
   useEffect(() => {
     const resetSession = prepareOrbitControlsForCameraReset(controls);
@@ -1048,7 +1061,17 @@ function ViewerCameraSession() {
     resultMesh,
     viewMode,
     viewportResetSignal,
-  } = useStore();
+  } = useStore(useShallow((s) => ({
+    viewerCameraState: s.viewerCameraState,
+    setViewerCameraState: s.setViewerCameraState,
+    originalMesh: s.originalMesh,
+    sphereMode: s.sphereMode,
+    sphereRadius: s.sphereRadius,
+    sampleShape: s.sampleShape,
+    resultMesh: s.resultMesh,
+    viewMode: s.viewMode,
+    viewportResetSignal: s.viewportResetSignal,
+  })));
   const restoredSignatureRef = useRef<string>('');
   const applyingPersistedCameraRef = useRef(false);
   const saveTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
@@ -1141,12 +1164,12 @@ function DemoTileViewerWithMode({ tile, viewMode, clipPlane, selectedLatticeType
   onSelectLatticeType: (type: LatticeType) => void;
 }) {
   const placeholder = useMemo(() => generateSphereMesh(DEMO_VIEW_TARGET_RADIUS, 20), []);
-  const placeholderGeom = useMemo(() => {
+  const placeholderGeom = useDisposable(useMemo(() => {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(placeholder.positions, 3));
     g.computeVertexNormals();
     return g;
-  }, [placeholder.positions]);
+  }, [placeholder.positions]));
 
   const showPlaceholder = viewMode === 'original' || !tile.result;
   const tileResult = tile.result;
@@ -1392,7 +1415,27 @@ export function Viewer3D() {
     keepOutTris, keepInTris, selectionMode, resultMesh,
     toggleKeepOut, toggleKeepIn, viewerBackground, demoModeActive,
     demoRunId, params, demoParamsByType, setLatticeType, viewportResetSignal,
-  } = useStore();
+  } = useStore(useShallow((s) => ({
+    originalMesh: s.originalMesh,
+    sphereMode: s.sphereMode,
+    sphereRadius: s.sphereRadius,
+    sampleShape: s.sampleShape,
+    viewMode: s.viewMode,
+    clipPlane: s.clipPlane,
+    keepOutTris: s.keepOutTris,
+    keepInTris: s.keepInTris,
+    selectionMode: s.selectionMode,
+    resultMesh: s.resultMesh,
+    toggleKeepOut: s.toggleKeepOut,
+    toggleKeepIn: s.toggleKeepIn,
+    viewerBackground: s.viewerBackground,
+    demoModeActive: s.demoModeActive,
+    demoRunId: s.demoRunId,
+    params: s.params,
+    demoParamsByType: s.demoParamsByType,
+    setLatticeType: s.setLatticeType,
+    viewportResetSignal: s.viewportResetSignal,
+  })));
   const [gizmoViewRequest, setGizmoViewRequest] = useState<{ view: GizmoViewRequest | null; signal: number }>({ view: null, signal: 0 });
 
   const handleFaceClick = useCallback((triIdx: number) => {
