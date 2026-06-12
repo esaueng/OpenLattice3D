@@ -3,8 +3,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useStore } from '../store/useStore';
 import { parseSTL } from '../geometry/stl-parser';
 import { analyzeMesh, repairMesh } from '../geometry/mesh-analysis';
-import type { LatticeType, SampleShape, LatticeParams } from '../types/project';
-import { DEFAULT_PARAMS } from '../types/project';
+import type { LatticeType, SampleShape } from '../types/project';
+import { sanitizeLatticeParams } from '../types/project';
 import { isSheetType } from '../geometry/lattice';
 import { SAMPLE_SHAPE_INFO } from '../store/useStore';
 import type { LatticeGenerationControls } from '../hooks/useLatticeGeneration';
@@ -64,25 +64,21 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
     if (!file) return;
     try {
       const text = await file.text();
-      const data = JSON.parse(text);
+      const data: unknown = JSON.parse(text);
       // Support both { parameters: {...} } (project JSON) and plain { latticeType: ... } formats
-      const params: Partial<LatticeParams> = data.parameters || data;
-      // Validate: only apply known keys from LatticeParams
-      const validKeys = Object.keys(DEFAULT_PARAMS) as (keyof LatticeParams)[];
-      const filtered: Partial<LatticeParams> = {};
-      let count = 0;
-      for (const key of validKeys) {
-        if (key in params) {
-          (filtered as Record<string, unknown>)[key] = params[key];
-          count++;
-        }
+      const source = (typeof data === 'object' && data !== null && 'parameters' in data)
+        ? (data as { parameters: unknown }).parameters
+        : data;
+      const { params, accepted, rejected } = sanitizeLatticeParams(source);
+      if (rejected.length > 0) {
+        store.addLog(`JSON import: ignored invalid value(s) for ${rejected.join(', ')}`, 'warn');
       }
-      if (count === 0) {
+      if (accepted.length === 0) {
         store.addLog('JSON import: no valid parameters found', 'error');
         return;
       }
-      store.importParams(filtered);
-      store.addLog(`Imported ${count} parameter(s) from ${file.name}`);
+      store.importParams(params);
+      store.addLog(`Imported ${accepted.length} parameter(s) from ${file.name}`);
     } catch (err) {
       store.addLog(`JSON import failed: ${err}`, 'error');
     }

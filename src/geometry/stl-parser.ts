@@ -7,37 +7,53 @@ export interface TriangleMesh {
   triCount: number;
 }
 
-/** Parse binary or ASCII STL from ArrayBuffer */
+const BINARY_HEADER_BYTES = 84;
+const BINARY_TRIANGLE_BYTES = 50;
+
+/** Parse binary or ASCII STL from ArrayBuffer.
+ *  Throws on truncated, empty, or unrecognizable input. */
 export function parseSTL(buffer: ArrayBuffer): TriangleMesh {
-  const view = new DataView(buffer);
-  // Check if ASCII: starts with "solid" and doesn't look binary
   const header = new Uint8Array(buffer, 0, Math.min(80, buffer.byteLength));
   const headerStr = String.fromCharCode(...header);
-  if (headerStr.startsWith('solid') && buffer.byteLength > 84) {
-    // Could be ASCII or binary with "solid" header - check expected binary size
-    const triCount = view.getUint32(80, true);
-    const expectedBinarySize = 84 + triCount * 50;
-    if (Math.abs(expectedBinarySize - buffer.byteLength) <= 1) {
-      return parseBinarySTL(buffer);
+
+  if (headerStr.startsWith('solid')) {
+    // Could be ASCII, or binary with a "solid" header - check expected binary size
+    if (buffer.byteLength >= BINARY_HEADER_BYTES) {
+      const view = new DataView(buffer);
+      const triCount = view.getUint32(80, true);
+      const expectedBinarySize = BINARY_HEADER_BYTES + triCount * BINARY_TRIANGLE_BYTES;
+      if (Math.abs(expectedBinarySize - buffer.byteLength) <= 1) {
+        return parseBinarySTL(buffer);
+      }
     }
-    // Try ASCII
-    try {
-      return parseASCIISTL(buffer);
-    } catch {
-      return parseBinarySTL(buffer);
-    }
+    const ascii = parseASCIISTL(buffer);
+    if (ascii.triCount > 0) return ascii;
+    if (buffer.byteLength >= BINARY_HEADER_BYTES) return parseBinarySTL(buffer);
+    throw new Error('STL parse failed: no facets found in ASCII STL');
   }
   return parseBinarySTL(buffer);
 }
 
 function parseBinarySTL(buffer: ArrayBuffer): TriangleMesh {
+  if (buffer.byteLength < BINARY_HEADER_BYTES) {
+    throw new Error(`STL parse failed: file too small for binary STL (${buffer.byteLength} bytes)`);
+  }
   const view = new DataView(buffer);
   const triCount = view.getUint32(80, true);
+  if (triCount === 0) {
+    throw new Error('STL parse failed: file contains no triangles');
+  }
+  const requiredBytes = BINARY_HEADER_BYTES + triCount * BINARY_TRIANGLE_BYTES;
+  if (requiredBytes > buffer.byteLength) {
+    throw new Error(
+      `STL parse failed: header declares ${triCount} triangles (${requiredBytes} bytes) but file is ${buffer.byteLength} bytes`
+    );
+  }
   const positions = new Float32Array(triCount * 9);
   const normals = new Float32Array(triCount * 3);
 
   for (let i = 0; i < triCount; i++) {
-    const offset = 84 + i * 50;
+    const offset = BINARY_HEADER_BYTES + i * BINARY_TRIANGLE_BYTES;
     normals[i * 3]     = view.getFloat32(offset, true);
     normals[i * 3 + 1] = view.getFloat32(offset + 4, true);
     normals[i * 3 + 2] = view.getFloat32(offset + 8, true);
@@ -84,7 +100,7 @@ function parseASCIISTL(buffer: ArrayBuffer): TriangleMesh {
 
 /** Export binary STL from flat position + normal arrays */
 export function exportBinarySTL(positions: Float32Array, normals: Float32Array, triCount: number): ArrayBuffer {
-  const bufSize = 84 + triCount * 50;
+  const bufSize = BINARY_HEADER_BYTES + triCount * BINARY_TRIANGLE_BYTES;
   const buffer = new ArrayBuffer(bufSize);
   const view = new DataView(buffer);
   // header - 80 bytes
@@ -93,7 +109,7 @@ export function exportBinarySTL(positions: Float32Array, normals: Float32Array, 
   view.setUint32(80, triCount, true);
 
   for (let i = 0; i < triCount; i++) {
-    const offset = 84 + i * 50;
+    const offset = BINARY_HEADER_BYTES + i * BINARY_TRIANGLE_BYTES;
     view.setFloat32(offset, normals[i * 3], true);
     view.setFloat32(offset + 4, normals[i * 3 + 1], true);
     view.setFloat32(offset + 8, normals[i * 3 + 2], true);

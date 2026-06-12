@@ -14,7 +14,6 @@ export interface ClosestResult {
 }
 
 const LEAF_SIZE = 4;
-const EPS = 1e-10;
 
 function expandBounds(
   positions: Float32Array,
@@ -180,49 +179,6 @@ function closestPointOnTriangleSq(
   return dx * dx + dy * dy + dz * dz;
 }
 
-function rayTriangleIntersectX(
-  px: number,
-  py: number,
-  pz: number,
-  triIndex: number,
-  triA: Float32Array,
-  triAB: Float32Array,
-  triAC: Float32Array
-): boolean {
-  const o = triIndex * 3;
-  const ax = triA[o];
-  const ay = triA[o + 1];
-  const az = triA[o + 2];
-  const edge1x = triAB[o];
-  const edge1y = triAB[o + 1];
-  const edge1z = triAB[o + 2];
-  const edge2x = triAC[o];
-  const edge2y = triAC[o + 1];
-  const edge2z = triAC[o + 2];
-
-  // Moller-Trumbore with ray direction fixed at +X.
-  const hx = 0;
-  const hy = -edge2z;
-  const hz = edge2y;
-  const det = edge1x * hx + edge1y * hy + edge1z * hz;
-  if (Math.abs(det) < EPS) return false;
-  const invDet = 1 / det;
-  const sx = px - ax;
-  const sy = py - ay;
-  const sz = pz - az;
-  const u = invDet * (sx * hx + sy * hy + sz * hz);
-  if (u < 0 || u > 1) return false;
-
-  const qx = sy * edge1z - sz * edge1y;
-  const qy = sz * edge1x - sx * edge1z;
-  const qz = sx * edge1y - sy * edge1x;
-  const v = invDet * qx;
-  if (v < 0 || u + v > 1) return false;
-
-  const t = invDet * (edge2x * qx + edge2y * qy + edge2z * qz);
-  return t > 1e-6;
-}
-
 export class MeshBVH {
   private positions: Float32Array;
   private normals: Float32Array;
@@ -241,6 +197,12 @@ export class MeshBVH {
   private closestScratch = new Float64Array(3);
 
   constructor(positions: Float32Array, normals: Float32Array, triCount: number) {
+    if (!Number.isInteger(triCount) || triCount <= 0) {
+      throw new Error(`MeshBVH requires at least one triangle (got ${triCount})`);
+    }
+    if (positions.length < triCount * 9 || normals.length < triCount * 3) {
+      throw new Error('MeshBVH: position/normal buffers are smaller than triCount requires');
+    }
     this.positions = positions;
     this.normals = normals;
     this.triCount = triCount;
@@ -458,17 +420,5 @@ export class MeshBVH {
     const dz = p[2] - res.point[2];
     const sign = dx * nx + dy * ny + dz * nz >= 0 ? 1 : -1;
     return sign * res.distance;
-  }
-
-  /** Ray cast for sign determination (backup) - casts +X ray. */
-  isInsideRayCast(p: Vec3): boolean {
-    const px = p[0];
-    const py = p[1];
-    const pz = p[2];
-    let intersections = 0;
-    for (let i = 0; i < this.triCount; i++) {
-      if (rayTriangleIntersectX(px, py, pz, i, this.triA, this.triAB, this.triAC)) intersections++;
-    }
-    return intersections % 2 === 1;
   }
 }

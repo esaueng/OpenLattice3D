@@ -105,3 +105,80 @@ export const PROCESS_DEFAULTS: Record<ProcessPreset, Partial<LatticeParams>> = {
   SLA_DLP: { minFeatureSize: 0.5, escapeHoleDiameter: 3.5, escapeHoleCount: 2 },
   FDM: { minFeatureSize: 0.8, escapeHoleDiameter: 5.0, escapeHoleCount: 2 },
 };
+
+// ── Parameter sanitization (untrusted JSON import) ───────────
+
+const LATTICE_TYPES: readonly LatticeType[] = [
+  'gyroid', 'schwarzP', 'schwarzD', 'neovius', 'iwp', 'bcc',
+  'octet', 'diamond', 'hexagon', 'triangle', 'voronoi', 'spinodal',
+];
+const VARIANTS: readonly GenerationVariant[] = ['shell_core', 'implicit_conformal'];
+const PROCESS_PRESETS: readonly ProcessPreset[] = ['SLS_MJF', 'SLA_DLP', 'FDM'];
+
+type ParamValidator = (value: unknown) => boolean;
+
+function isFiniteNumberIn(min: number, max: number): ParamValidator {
+  return (value) => typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max;
+}
+
+const isBoolean: ParamValidator = (value) => typeof value === 'boolean';
+
+function isOneOf<T>(allowed: readonly T[]): ParamValidator {
+  return (value) => allowed.includes(value as T);
+}
+
+// Bounds are deliberately generous: wide enough for expert use, tight enough
+// to reject garbage that would stall generation (NaN, negatives, km-scale).
+const PARAM_VALIDATORS: Record<keyof LatticeParams, ParamValidator> = {
+  latticeType: isOneOf(LATTICE_TYPES),
+  variant: isOneOf(VARIANTS),
+  processPreset: isOneOf(PROCESS_PRESETS),
+  minFeatureSize: isFiniteNumberIn(0.05, 50),
+  cellSize: isFiniteNumberIn(0.1, 500),
+  strutDiameter: isFiniteNumberIn(0.05, 100),
+  wallThickness: isFiniteNumberIn(0.05, 100),
+  shellThickness: isFiniteNumberIn(0, 100),
+  noShell: isBoolean,
+  surfaceOnly: isBoolean,
+  surfaceDepth: isFiniteNumberIn(0.1, 500),
+  gradientEnabled: isBoolean,
+  gradientStrength: isFiniteNumberIn(0, 1),
+  thinSectionFilter: isFiniteNumberIn(0, 10),
+  exportResolution: isFiniteNumberIn(1, 10),
+  escapeHoles: isBoolean,
+  escapeHoleDiameter: isFiniteNumberIn(0.1, 100),
+  escapeHoleCount: isFiniteNumberIn(0, 100),
+  toleranceMm: isFiniteNumberIn(0.001, 50),
+};
+
+export interface SanitizedParams {
+  params: Partial<LatticeParams>;
+  accepted: (keyof LatticeParams)[];
+  rejected: string[];
+}
+
+/** Filter an untrusted object down to valid LatticeParams entries.
+ *  Unknown keys are ignored; known keys with invalid values are reported. */
+export function sanitizeLatticeParams(input: unknown): SanitizedParams {
+  const accepted: (keyof LatticeParams)[] = [];
+  const rejected: string[] = [];
+  const params: Partial<LatticeParams> = {};
+
+  if (typeof input !== 'object' || input === null) {
+    return { params, accepted, rejected: ['(not an object)'] };
+  }
+
+  const source = input as Record<string, unknown>;
+  for (const key of Object.keys(PARAM_VALIDATORS) as (keyof LatticeParams)[]) {
+    if (!(key in source)) continue;
+    const value = source[key];
+    if (PARAM_VALIDATORS[key](value)) {
+      (params as Record<string, unknown>)[key] = value;
+      accepted.push(key);
+    } else {
+      rejected.push(key);
+    }
+  }
+
+  return { params, accepted, rejected };
+}
