@@ -185,7 +185,7 @@ self.onmessage = (event: MessageEvent<ValidationWorkerMessage>) => {
       const objectSdf = (x: number, y: number, z: number) => bvh.signedDistance([x, y, z] as Vec3);
       const baseSdf = isSurfacePolygon && surfaceSamples.length > 0
         ? buildSurfaceHexLattice(objectSdf, msg.params, surfaceSamples)
-        : buildCombinedSDF({ bvh, params: msg.params, keepOutTris: new Set(msg.keepOutTris || []) });
+        : buildCombinedSDF({ bvh, params: msg.params });
       validation = runValidation(
         result,
         withThinSectionFilter(baseSdf, msg.params.thinSectionFilter),

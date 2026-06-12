@@ -2,10 +2,7 @@
 import { useStore } from '../store/useStore';
 
 export function RightPanel() {
-  const store = useStore();
-  const {
-    validation,
-  } = store;
+  const validation = useStore((s) => s.validation);
 
   return (
     <>
