@@ -214,11 +214,37 @@ function emitCubeTriangles(
   writeOffset: number
 ): number {
   let offset = writeOffset;
-  for (let i = 0; i < triList.length; i++) {
-    const edgeOffset = triList[i] * 3;
-    positions[offset++] = edgeVerts[edgeOffset];
-    positions[offset++] = edgeVerts[edgeOffset + 1];
-    positions[offset++] = edgeVerts[edgeOffset + 2];
+  for (let i = 0; i < triList.length; i += 3) {
+    // Emit with reversed winding so face normals (cross product of edges)
+    // point toward positive field values — outward for SDFs that are
+    // negative inside. STL consumers expect outward orientation.
+    const e0 = triList[i + 2] * 3;
+    const e1 = triList[i + 1] * 3;
+    const e2 = triList[i] * 3;
+    const ax = edgeVerts[e0], ay = edgeVerts[e0 + 1], az = edgeVerts[e0 + 2];
+    const bx = edgeVerts[e1], by = edgeVerts[e1 + 1], bz = edgeVerts[e1 + 2];
+    const cx = edgeVerts[e2], cy = edgeVerts[e2 + 1], cz = edgeVerts[e2 + 2];
+
+    // Skip exactly-degenerate triangles, produced when the iso-surface passes
+    // exactly through a grid corner (interpolation clamps two edge vertices to
+    // the same point). They have zero area and break manifoldness checks.
+    if (
+      (ax === bx && ay === by && az === bz) ||
+      (ax === cx && ay === cy && az === cz) ||
+      (bx === cx && by === cy && bz === cz)
+    ) {
+      continue;
+    }
+
+    positions[offset++] = ax;
+    positions[offset++] = ay;
+    positions[offset++] = az;
+    positions[offset++] = bx;
+    positions[offset++] = by;
+    positions[offset++] = bz;
+    positions[offset++] = cx;
+    positions[offset++] = cy;
+    positions[offset++] = cz;
   }
   return offset;
 }
@@ -299,20 +325,22 @@ export function marchingCubesFromField(
   const strideZ = strideY * (ny + 1);
   const vals = new Float32Array(8);
   const edgeVerts = new Float32Array(12 * 3);
-  let triCount = 0;
 
+  // First pass: upper bound on triangle count, for a single allocation.
+  // Degenerate triangles are dropped during emission, so the final count
+  // can be slightly lower.
+  let maxTriCount = 0;
   for (let z = 0; z < nz; z++) {
     if (onProgress) onProgress((z / nz) * 0.36);
     for (let y = 0; y < ny; y++) {
       const base = fieldIndex(0, y, z, strideY, strideZ);
       for (let x = 0; x < nx; x++) {
-        triCount += TRI_COUNTS[loadCubeValues(field, base + x, strideY, strideZ, isoValue, vals)];
+        maxTriCount += TRI_COUNTS[loadCubeValues(field, base + x, strideY, strideZ, isoValue, vals)];
       }
     }
   }
 
-  const positions = new Float32Array(triCount * 9);
-  const normals = new Float32Array(triCount * 3);
+  const allPositions = new Float32Array(maxTriCount * 9);
   let writeOffset = 0;
 
   for (let z = 0; z < nz; z++) {
@@ -340,10 +368,14 @@ export function marchingCubesFromField(
           z0,
           z1
         );
-        writeOffset = emitCubeTriangles(TRI_TABLE[cubeIndex], edgeVerts, positions, writeOffset);
+        writeOffset = emitCubeTriangles(TRI_TABLE[cubeIndex], edgeVerts, allPositions, writeOffset);
       }
     }
   }
+
+  const triCount = writeOffset / 9;
+  const positions = allPositions.subarray(0, writeOffset);
+  const normals = new Float32Array(triCount * 3);
 
   // Compute face normals
   for (let i = 0; i < triCount; i++) {

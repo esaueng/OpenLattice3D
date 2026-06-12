@@ -657,11 +657,16 @@ let persistTimer: ReturnType<typeof setTimeout> | null = null;
 
 function schedulePersistence() {
   if (!persistenceReady || typeof window === 'undefined') return;
+  // Skip while generating: progress updates fire rapidly and each snapshot
+  // structured-clones the full mesh buffers into IndexedDB. The final state
+  // is persisted by the store update that clears `generating`.
+  if (useStore.getState().generating) return;
 
   if (persistTimer) window.clearTimeout(persistTimer);
   persistTimer = window.setTimeout(() => {
     persistTimer = null;
     const state = useStore.getState();
+    if (state.generating) return;
     saveLegacyPersistedState(persistedSubset(state));
     void savePersistedAppState(buildPersistedAppState(state));
   }, 250);

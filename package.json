@@ -1,5 +1,5 @@
 {
-  "name": "gen-lattice-1",
+  "name": "openlattice3d",
   "private": true,
   "version": "0.0.0",
   "license": "Apache-2.0",
@@ -8,6 +8,8 @@
     "dev": "vite --host 127.0.0.1 --port 5176",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "test": "vitest run",
+    "typecheck": "tsc -b",
     "preview": "vite preview",
     "deploy": "npx wrangler deploy"
   },
@@ -33,6 +35,7 @@
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.59.1",
     "vite": "^8.0.10",
+    "vitest": "^4.1.8",
     "wrangler": "^4.87.0"
   }
 }
