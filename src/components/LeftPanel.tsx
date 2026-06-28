@@ -156,8 +156,9 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
           </button>
         </div>
         <div className="row" style={{ marginTop: '8px' }}>
-          <label>Sample Part:</label>
+          <label htmlFor="sample-part">Sample Part:</label>
           <select
+            id="sample-part"
             title="Load a built-in sample shape for quick testing."
             value={store.sampleShape || ''}
             onChange={(e) => { if (e.target.value) handleSampleShape(e.target.value as SampleShape); }}
@@ -212,8 +213,9 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
           <h3>Lattice</h3>
 
           <div className="row">
-            <label>Lattice Type:</label>
+            <label htmlFor="lattice-type">Lattice Type:</label>
             <select
+              id="lattice-type"
               title="Choose the lattice algorithm used to generate internal geometry."
               value={store.params.latticeType}
               onChange={(e) => store.setLatticeType(e.target.value as LatticeType)}
@@ -240,8 +242,9 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
           </div>
 
           <div className="row">
-            <label>Cell Size (mm):</label>
+            <label htmlFor="cell-size">Cell Size (mm):</label>
             <input
+              id="cell-size"
               type="number"
               title="Controls overall lattice spacing. Larger values create bigger cells."
               value={store.params.cellSize}
@@ -276,8 +279,9 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
 
           {store.params.surfaceOnly && (
             <div className="row">
-              <label>Lattice Depth (mm):</label>
+              <label htmlFor="lattice-depth">Lattice Depth (mm):</label>
               <input
+                id="lattice-depth"
                 type="number"
                 title="Depth of the generated lattice band from the outer surface."
                 value={store.params.surfaceDepth}
@@ -289,8 +293,9 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
 
           {!store.params.noShell && !store.params.surfaceOnly && (
             <div className="row">
-              <label>Shell Thickness (mm):</label>
+              <label htmlFor="shell-thickness">Shell Thickness (mm):</label>
               <input
+                id="shell-thickness"
                 type="number"
                 title="Thickness of the outer shell retained around the lattice."
                 value={store.params.shellThickness}
@@ -302,8 +307,9 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
 
           {isSheetType(store.params.latticeType) ? (
             <div className="row">
-              <label>Wall Thickness (mm):</label>
+              <label htmlFor="wall-thickness">Wall Thickness (mm):</label>
               <input
+                id="wall-thickness"
                 type="number"
                 title="Thickness of sheet-style TPMS surfaces."
                 value={store.params.wallThickness}
@@ -313,8 +319,9 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
             </div>
           ) : (
             <div className="row">
-              <label>Strut Diameter (mm):</label>
+              <label htmlFor="strut-diameter">Strut Diameter (mm):</label>
               <input
+                id="strut-diameter"
                 type="number"
                 title="Diameter of strut members for strut-based lattices."
                 value={store.params.strutDiameter}
@@ -325,8 +332,9 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
           )}
 
           <div className="row">
-            <label>Min Feature Size (mm):</label>
+            <label htmlFor="min-feature-size">Min Feature Size (mm):</label>
             <input
+              id="min-feature-size"
               type="number"
               title="Minimum manufacturable feature size target used in validation."
               value={store.params.minFeatureSize}
@@ -336,8 +344,9 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
           </div>
 
           <div className="row">
-            <label>Tolerance (mm):</label>
+            <label htmlFor="tolerance">Tolerance (mm):</label>
             <input
+              id="tolerance"
               type="number"
               title="Maximum allowed outer-surface deviation versus the source mesh."
               value={store.params.toleranceMm}
@@ -347,8 +356,9 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
           </div>
 
           <div className="row">
-            <label>Export Resolution:</label>
+            <label htmlFor="export-resolution">Export Resolution:</label>
             <select
+              id="export-resolution"
               title="Sampling resolution for marching cubes. Higher values increase detail and compute time."
               value={store.params.exportResolution}
               onChange={(e) => store.updateParams({ exportResolution: parseInt(e.target.value) || 3 })}
@@ -368,8 +378,9 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
 
 
           <div className="row">
-            <label>Thin Artifact Filter:</label>
+            <label htmlFor="thin-filter">Thin Artifact Filter:</label>
             <select
+              id="thin-filter"
               title="Removes very thin/jagged sections. Higher levels remove more material."
               value={store.params.thinSectionFilter}
               onChange={(e) => store.updateParams({ thinSectionFilter: parseFloat(e.target.value) || 0 })}
