@@ -1,6 +1,6 @@
 // 3D Viewer component using react-three-fiber
 import { useRef, useMemo, useCallback, useEffect, useState, type KeyboardEvent } from 'react';
-import { Canvas, useThree, useFrame, type ThreeEvent } from '@react-three/fiber';
+import { Canvas, useThree, useFrame, type ThreeEvent, type RootState } from '@react-three/fiber';
 import { Billboard, GizmoHelper, Line, OrbitControls, Text } from '@react-three/drei';
 import * as THREE from 'three';
 import { useShallow } from 'zustand/react/shallow';
@@ -999,6 +999,88 @@ function shouldShowViewCubeFaceLabel(
   return faceNormalWorld.clone().normalize().dot(toCameraWorld.clone().normalize()) > threshold;
 }
 
+type ViewportApi = { camera: THREE.Camera; controls: ResettableOrbitControls | null };
+
+/**
+ * Lets keyboard users orbit, zoom, and pan the camera — the pointer-only
+ * OrbitControls otherwise excludes them (WCAG 2.1.1). Orbit math respects the
+ * scene's Z-up convention. Returns true when the key was handled.
+ */
+function applyViewportKeyboardAction(key: string, shiftKey: boolean, api: ViewportApi | null): boolean {
+  if (!api) return false;
+  const { camera, controls } = api;
+  const target = controls?.target;
+  if (!target) return false;
+
+  const ROTATE_STEP = 0.15;
+  const ZOOM_FACTOR = 1.1;
+  const MIN_DISTANCE = 0.5;
+  const MAX_DISTANCE = 100000;
+
+  const up = camera.up.clone().normalize();
+  const offset = camera.position.clone().sub(target);
+  const right = new THREE.Vector3().crossVectors(offset, up);
+  if (right.lengthSq() < 1e-8) right.set(1, 0, 0);
+  right.normalize();
+  const panStep = Math.max(offset.length() * 0.05, MIN_DISTANCE);
+
+  const applyPan = (delta: THREE.Vector3) => {
+    target.add(delta);
+    camera.position.add(delta);
+  };
+
+  const applyPitch = (angle: number) => {
+    const rotated = offset.clone().applyAxisAngle(right, angle);
+    // Avoid flipping past the poles where orbit becomes unstable.
+    if (Math.abs(rotated.clone().normalize().dot(up)) < 0.985) offset.copy(rotated);
+  };
+
+  let handled = true;
+  let panned = false;
+
+  switch (key) {
+    case 'ArrowLeft':
+      if (shiftKey) { panned = true; applyPan(right.clone().multiplyScalar(-panStep)); }
+      else offset.applyAxisAngle(up, ROTATE_STEP);
+      break;
+    case 'ArrowRight':
+      if (shiftKey) { panned = true; applyPan(right.clone().multiplyScalar(panStep)); }
+      else offset.applyAxisAngle(up, -ROTATE_STEP);
+      break;
+    case 'ArrowUp':
+      if (shiftKey) { panned = true; applyPan(up.clone().multiplyScalar(panStep)); }
+      else applyPitch(ROTATE_STEP);
+      break;
+    case 'ArrowDown':
+      if (shiftKey) { panned = true; applyPan(up.clone().multiplyScalar(-panStep)); }
+      else applyPitch(-ROTATE_STEP);
+      break;
+    case '+':
+    case '=':
+      offset.multiplyScalar(1 / ZOOM_FACTOR);
+      break;
+    case '-':
+    case '_':
+      offset.multiplyScalar(ZOOM_FACTOR);
+      break;
+    default:
+      handled = false;
+  }
+
+  if (!handled) return false;
+
+  if (!panned) {
+    const distance = THREE.MathUtils.clamp(offset.length(), MIN_DISTANCE, MAX_DISTANCE);
+    offset.setLength(distance);
+    camera.position.copy(target).add(offset);
+  }
+  camera.lookAt(target);
+  camera.updateMatrixWorld();
+  controls?.update?.();
+  return true;
+}
+
+
 function AutoFit() {
   const { camera, controls, size: canvasSize } = useThree();
   const store = useStore(useShallow((s) => ({
@@ -1437,11 +1519,26 @@ export function Viewer3D() {
     viewportResetSignal: s.viewportResetSignal,
   })));
   const [gizmoViewRequest, setGizmoViewRequest] = useState<{ view: GizmoViewRequest | null; signal: number }>({ view: null, signal: 0 });
+  const r3fStateRef = useRef<RootState | null>(null);
 
   const handleFaceClick = useCallback((triIdx: number) => {
     if (selectionMode === 'keep_out') toggleKeepOut(triIdx);
     else if (selectionMode === 'keep_in') toggleKeepIn(triIdx);
   }, [selectionMode, toggleKeepOut, toggleKeepIn]);
+
+  const requestView = useCallback((view: GizmoViewRequest) => {
+    setGizmoViewRequest((request) => ({ view, signal: request.signal + 1 }));
+  }, []);
+
+  const handleViewportKeyDown = useCallback((event: KeyboardEvent<HTMLDivElement>) => {
+    const state = r3fStateRef.current;
+    if (!state) return;
+    // Read controls lazily: OrbitControls (makeDefault) registers after onCreated.
+    const controls = state.get().controls as ResettableOrbitControls | null;
+    if (applyViewportKeyboardAction(event.key, event.shiftKey, { camera: state.camera, controls: controls ?? null })) {
+      event.preventDefault();
+    }
+  }, []);
 
   if (demoModeActive) {
     return (
@@ -1467,11 +1564,25 @@ export function Viewer3D() {
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%', background: viewerBackground }}>
+      <div className="viewer-view-presets" role="group" aria-label="Camera view presets">
+        <button type="button" className="btn btn-small" title="Front view" onClick={() => requestView('y')}>Front</button>
+        <button type="button" className="btn btn-small" title="Top view" onClick={() => requestView('z')}>Top</button>
+        <button type="button" className="btn btn-small" title="Right view" onClick={() => requestView('x')}>Right</button>
+        <button type="button" className="btn btn-small" title="Isometric view" onClick={() => requestView('iso')}>Iso</button>
+      </div>
+      <div
+        className="viewer-canvas-surface"
+        role="application"
+        aria-label="3D model viewport. Use arrow keys to orbit, plus and minus to zoom, and hold Shift with arrow keys to pan."
+        tabIndex={0}
+        onKeyDown={handleViewportKeyDown}
+      >
       <Canvas
         camera={{ fov: 50, near: 0.1, far: 10000, up: [0, 0, 1] }}
         gl={{ localClippingEnabled: true }}
-        onCreated={({ camera }) => {
-          camera.up.set(0, 0, 1);
+        onCreated={(state) => {
+          state.camera.up.set(0, 0, 1);
+          r3fStateRef.current = state;
         }}
       >
         <ambientLight intensity={0.4} />
@@ -1506,11 +1617,10 @@ export function Viewer3D() {
         <OrbitControls makeDefault target={[0, 0, 0]} />
         <ViewerCameraSession />
         <GizmoHelper alignment={VIEWER_GIZMO_ALIGNMENT} margin={VIEWER_GIZMO_MARGIN}>
-          <CleanAxisGizmo
-            onSelectView={(view) => setGizmoViewRequest((request) => ({ view, signal: request.signal + 1 }))}
-          />
+          <CleanAxisGizmo onSelectView={requestView} />
         </GizmoHelper>
       </Canvas>
+      </div>
     </div>
   );
 }
