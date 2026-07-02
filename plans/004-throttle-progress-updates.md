@@ -1,6 +1,6 @@
 # Plan 004 — Throttle generation progress messages and stop logging every one of them
 
-- **Status:** TODO
+- **Status:** TODO — scope reduced 2026-07-02: PR #14 (`903b1c6`) fixed the re-render half (selector-based zustand subscriptions), so this plan's "Why" overstates the render cost at HEAD. Still real: the worker posts unthrottled per-slice progress and `useLatticeGeneration.ts:186` still logs every message (~300 log entries per generation). The worker-side reporter + `transient` flag remain the deliverable. **Line numbers below are stale — follow the drift protocol.**
 - **Written against commit:** `2af138a` (branch `main`). Run `git rev-parse --short HEAD`; if different, `git diff 2af138a -- src/workers/lattice-worker.ts src/hooks/useLatticeGeneration.ts` and re-read the cited regions.
 - **Depends on:** Plan 001 (vitest). Independent of plans 002/003/005.
 

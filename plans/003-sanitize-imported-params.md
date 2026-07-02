@@ -1,6 +1,6 @@
 # Plan 003 — Sanitize lattice parameters from JSON import and persisted state
 
-- **Status:** TODO
+- **Status:** DONE — superseded by PR #14 (`903b1c6`, merged to `main` 2026-07-02): `sanitizeLatticeParams` with per-key type/enum/range validation landed in `src/types/project.ts` with tests (`src/types/project.test.ts`). **Do not execute.** Residual check worth a glance: confirm the sanitizer is applied at the localStorage-persistence boundary (`useStore.ts` params hydration), not only at JSON import.
 - **Written against commit:** `2af138a` (branch `main`). Run `git rev-parse --short HEAD`; if different, `git diff 2af138a -- src/types/project.ts src/components/LeftPanel.tsx src/store/useStore.ts` and re-read changed regions before editing.
 - **Depends on:** Plan 001 (vitest). Can run in parallel with plans 002/004/005 — it touches `src/types/project.ts`, `src/components/LeftPanel.tsx` (a different function than plan 002 touches), and `src/store/useStore.ts`. If executed concurrently with plan 002 in the same worktree, expect a trivial merge in `LeftPanel.tsx` imports.
 
