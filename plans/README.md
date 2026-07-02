@@ -9,13 +9,24 @@ Effort level: `standard` (hotspot-weighted; all nine audit categories). Each pla
 
 | # | Plan | Depends on | Effort | Status |
 |---|------|-----------|--------|--------|
-| 001 | [Test + CI baseline](001-test-ci-baseline.md) — vitest, characterization tests for `src/geometry`, GitHub Actions | — | M | TODO |
-| 002 | [STL import robustness](002-stl-import-robustness.md) — bounds-check binary headers, fix `solid`-prefixed binary fallback, BVH empty-mesh guards | **001 (hard)** | S–M | TODO |
-| 003 | [Sanitize imported params](003-sanitize-imported-params.md) — clamp/whitelist JSON-imported and localStorage-persisted `LatticeParams` | 001 (soft) | S | TODO |
-| 004 | [Throttle progress updates](004-throttle-progress-updates.md) — rate-limit worker progress messages, stop logging every one | 001 (soft) | S | TODO |
-| 005 | [Dispose viewer geometries](005-dispose-viewer-geometries.md) — `BufferGeometry.dispose()` on swap in `Viewer3D.tsx` | — | S | TODO |
+| 001 | [Test + CI baseline](001-test-ci-baseline.md) — vitest, characterization tests for `src/geometry`, GitHub Actions | — | M | **DONE** — superseded by PR #14 |
+| 002 | [STL import robustness](002-stl-import-robustness.md) — bounds-check binary headers, fix `solid`-prefixed binary fallback, BVH empty-mesh guards | **001 (hard)** | S–M | **DONE** — superseded by PR #14 |
+| 003 | [Sanitize imported params](003-sanitize-imported-params.md) — clamp/whitelist JSON-imported and localStorage-persisted `LatticeParams` | 001 (soft) | S | **DONE** — superseded by PR #14 |
+| 004 | [Throttle progress updates](004-throttle-progress-updates.md) — rate-limit worker progress messages, stop logging every one | 001 (soft) | S | TODO — scope reduced, see reconciliation |
+| 005 | [Dispose viewer geometries](005-dispose-viewer-geometries.md) — `BufferGeometry.dispose()` on swap in `Viewer3D.tsx` | — | S | TODO — scope reduced, see reconciliation |
 
 Recommended order: **001 first** (it is the verification gate every other plan uses), then 002–005 in any order (they touch disjoint code except a trivial import-line overlap between 002 and 003 in `LeftPanel.tsx`).
+
+## Reconciliation — 2026-07-02
+
+PR #14 (`903b1c6`, "Fix geometry-engine bugs, harden inputs, add tests and CI") landed on `main` independently of these plans and implemented the substance of **001** (vitest.config.ts, 46 tests across 6 test files, `.github/workflows/ci.yml`), **002** (STL parser size validation + ASCII/binary fallback fix, `MeshBVH` rejects empty meshes), and **003** (`sanitizeLatticeParams` with per-key type/enum/range validation + `src/types/project.test.ts`). It also fixed bugs this audit missed (inverted marching-cubes winding, degenerate-triangle emission, diamond-strut periodic images, edge-key precision) and addressed several unplanned findings below (npm audit clean via wrangler bump, README lattice-type documentation, selector-based zustand subscriptions, dead vec3 helpers removed).
+
+Still open after PR #14 (verified against `origin/main` on 2026-07-02):
+
+- **004** — the re-render half is fixed (selector subscriptions), but the worker still posts unthrottled per-slice progress and `useLatticeGeneration.ts:186` still `addLog`s every progress message. The worker-side reporter + `transient` flag from plan 004 remain worth doing.
+- **005** — `Viewer3D.tsx` on main has 6 `new THREE.BufferGeometry()` sites and disposal on only ~2 of them; re-run the plan's enumeration grep and fix the remainder.
+
+All plan line numbers are stamped against `2af138a` and are now stale for 004/005 — executors must follow each plan's drift protocol (re-read cited files at HEAD) before editing.
 
 Executors: update the Status column (TODO → IN PROGRESS → DONE / BLOCKED, with a short note) when you work a plan.
 
