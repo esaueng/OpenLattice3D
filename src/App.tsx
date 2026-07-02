@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type MouseEvent, type PointerEvent } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent } from 'react';
 import { LeftPanel } from './components/LeftPanel';
 import { Viewer3D } from './components/Viewer3D';
 import { ViewerControls } from './components/ViewerControls';
@@ -21,6 +21,9 @@ function App() {
     demoModeActive,
     logs,
     clearLogs,
+    keepOutTris,
+    keepInTris,
+    selectionMode,
   } = useStore();
   const generationControls = useLatticeGeneration();
 
@@ -36,9 +39,12 @@ function App() {
   const progressLabel = `${Math.round(progress * 100)}%`;
   const solverStatus = generating ? `Generating ${progressLabel}` : hasModel ? 'Ready' : 'Idle';
   const viewportMode = demoModeActive ? 'Multiview' : hasModel ? 'Interactive' : 'Standby';
+  const showFaceLegend = keepOutTris.size > 0 || keepInTris.size > 0 || selectionMode !== 'none';
 
   return (
     <div className="app-shell">
+      <a className="skip-link" href="#main-content">Skip to main content</a>
+      <h1 className="visually-hidden">OpenLattice3D — 3D lattice generator</h1>
       <header className="topbar">
         <div className="brand" aria-label="Open Lattice 3D">
           <span className="brand-mark" aria-hidden="true">
@@ -59,7 +65,7 @@ function App() {
         <ExportControls />
       </header>
 
-      <main className="workspace">
+      <main className="workspace" id="main-content" tabIndex={-1}>
         <section className="tool-panel left-panel" aria-label="Lattice setup">
           <LeftPanel generationControls={generationControls} />
         </section>
@@ -72,6 +78,18 @@ function App() {
             </div>
           </div>
           <Viewer3D />
+          {showFaceLegend && (
+            <div className="viewer-legend" role="group" aria-label="Face marking legend">
+              <span className="viewer-legend-item">
+                <span className="viewer-legend-swatch" style={{ background: '#3399ff' }} aria-hidden="true" />
+                Keep-out (preserved surface)
+              </span>
+              <span className="viewer-legend-item">
+                <span className="viewer-legend-swatch" style={{ background: '#ff6633' }} aria-hidden="true" />
+                Keep-in (stays solid)
+              </span>
+            </div>
+          )}
           <div className="viewer-controls-overlay">
             <ViewerControls />
           </div>
@@ -133,11 +151,22 @@ function App() {
   );
 }
 
+const MIN_DRAWER_HEIGHT = 260;
+const DRAWER_RESIZE_STEP = 40;
+
+function maxDrawerHeight() {
+  const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 800;
+  return Math.max(MIN_DRAWER_HEIGHT, viewportHeight - 120);
+}
+
 function BottomLogDrawer({ logs, onClearLogs }: { logs: LogEntry[]; onClearLogs: () => void }) {
   const [expanded, setExpanded] = useState(false);
   const [drawerHeight, setDrawerHeight] = useState(320);
   const [clearPromptVisible, setClearPromptVisible] = useState(false);
   const dragStart = useRef<{ y: number; height: number } | null>(null);
+  const toggleButtonRef = useRef<HTMLButtonElement>(null);
+  const drawerRef = useRef<HTMLDivElement>(null);
+  const hasToggledRef = useRef(false);
   const formattedLogs = logs.map(formatLogEntry);
 
   useEffect(() => {
@@ -146,9 +175,32 @@ function BottomLogDrawer({ logs, onClearLogs }: { logs: LogEntry[]; onClearLogs:
     return () => window.clearTimeout(timeoutId);
   }, [clearPromptVisible]);
 
-  function toggleLogs(event: MouseEvent<HTMLButtonElement>) {
+  // Move focus into the drawer when it opens, and back to its toggle when it closes.
+  useEffect(() => {
+    if (!hasToggledRef.current) return;
+    if (expanded) drawerRef.current?.focus();
+    else toggleButtonRef.current?.focus();
+  }, [expanded]);
+
+  function toggleLogs() {
+    hasToggledRef.current = true;
     setExpanded((current) => !current);
-    event.currentTarget.blur();
+  }
+
+  function closeLogs() {
+    hasToggledRef.current = true;
+    setExpanded(false);
+  }
+
+  function handleDrawerKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key === 'Escape') {
+      event.stopPropagation();
+      closeLogs();
+    }
+  }
+
+  function clampDrawerHeight(value: number) {
+    return Math.min(maxDrawerHeight(), Math.max(MIN_DRAWER_HEIGHT, value));
   }
 
   function startDrawerResize(event: PointerEvent<HTMLButtonElement>) {
@@ -159,15 +211,30 @@ function BottomLogDrawer({ logs, onClearLogs }: { logs: LogEntry[]; onClearLogs:
 
   function resizeDrawer(event: PointerEvent<HTMLButtonElement>) {
     if (!dragStart.current) return;
-    const maxHeight = Math.max(260, window.innerHeight - 120);
     const nextHeight = dragStart.current.height + dragStart.current.y - event.clientY;
-    setDrawerHeight(Math.min(maxHeight, Math.max(260, nextHeight)));
+    setDrawerHeight(clampDrawerHeight(nextHeight));
   }
 
   function stopDrawerResize(event: PointerEvent<HTMLButtonElement>) {
     dragStart.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }
+
+  function handleResizeKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setDrawerHeight((height) => clampDrawerHeight(height + DRAWER_RESIZE_STEP));
+    } else if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setDrawerHeight((height) => clampDrawerHeight(height - DRAWER_RESIZE_STEP));
+    } else if (event.key === 'Home') {
+      event.preventDefault();
+      setDrawerHeight(maxDrawerHeight());
+    } else if (event.key === 'End') {
+      event.preventDefault();
+      setDrawerHeight(MIN_DRAWER_HEIGHT);
     }
   }
 
@@ -181,7 +248,6 @@ function BottomLogDrawer({ logs, onClearLogs }: { logs: LogEntry[]; onClearLogs:
     if (clearPromptVisible || event.detail >= 2) {
       setClearPromptVisible(false);
       onClearLogs();
-      event.currentTarget.blur();
       return;
     }
     setClearPromptVisible(true);
@@ -189,17 +255,43 @@ function BottomLogDrawer({ logs, onClearLogs }: { logs: LogEntry[]; onClearLogs:
 
   return (
     <>
+      <div className="status-tabs">
+        <button
+          ref={toggleButtonRef}
+          type="button"
+          className={expanded ? 'active' : ''}
+          aria-expanded={expanded}
+          onClick={toggleLogs}
+        >
+          Logs
+          <span className="count-pill">{logs.length}</span>
+        </button>
+      </div>
       {expanded && (
-        <div className="bottom-content logs-content" style={{ height: drawerHeight }}>
+        <div
+          ref={drawerRef}
+          className="bottom-content logs-content"
+          style={{ height: drawerHeight }}
+          role="group"
+          aria-label="Run logs"
+          tabIndex={-1}
+          onKeyDown={handleDrawerKeyDown}
+        >
           <button
             type="button"
             className="bottom-resize-handle"
-            aria-label="Resize drawer"
-            title="Drag up to resize"
+            role="separator"
+            aria-orientation="horizontal"
+            aria-label="Resize logs drawer. Use up and down arrow keys to resize."
+            aria-valuenow={Math.round(drawerHeight)}
+            aria-valuemin={MIN_DRAWER_HEIGHT}
+            aria-valuemax={Math.round(maxDrawerHeight())}
+            title="Drag, or use arrow keys, to resize"
             onPointerDown={startDrawerResize}
             onPointerMove={resizeDrawer}
             onPointerUp={stopDrawerResize}
             onPointerCancel={stopDrawerResize}
+            onKeyDown={handleResizeKeyDown}
           />
           <div className="logs-drawer-header">
             <span>Run logs</span>
@@ -209,23 +301,17 @@ function BottomLogDrawer({ logs, onClearLogs }: { logs: LogEntry[]; onClearLogs:
                 type="button"
                 className="log-clear-button"
                 disabled={!logs.length}
-                title="Double-click to clear run logs"
-                aria-label="Clear logs. Double-click to clear."
+                aria-live="polite"
+                title={clearPromptVisible ? 'Activate again to clear run logs' : 'Clear run logs'}
                 onClick={clearLogEntries}
               >
-                {clearPromptVisible ? 'Double-click to clear' : 'Clear logs'}
+                {clearPromptVisible ? 'Click again to clear' : 'Clear logs'}
               </button>
             </div>
           </div>
           <pre>{formattedLogs.length ? formattedLogs.join('\n') : 'No log entries.'}</pre>
         </div>
       )}
-      <div className="status-tabs">
-        <button type="button" className={expanded ? 'active' : ''} onClick={toggleLogs}>
-          Logs
-          <span className="count-pill">{logs.length}</span>
-        </button>
-      </div>
     </>
   );
 }
