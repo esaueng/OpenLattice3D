@@ -10,21 +10,82 @@ import type { LatticeParams, LatticeType } from '../types/project';
 const TWO_PI = 2 * Math.PI;
 const SQRT3 = Math.sqrt(3);
 
-type SdfFunction = ((x: number, y: number, z: number) => number) & Partial<GridSdfSampler>;
+export type SdfFunction = ((x: number, y: number, z: number) => number) & Partial<GridSdfSampler>;
 type OptimizedTpmsType = 'gyroid' | 'schwarzP' | 'schwarzD' | 'neovius' | 'iwp';
 
 type StrutCache = {
   L: number;
   h: number;
-  q: number;
   corners: Vec3[];
   edges: [Vec3, Vec3][];
   faceCenters: Vec3[];
-  fcc: Vec3[];
-  offsets: Vec3[];
+  diamondBins: [Vec3, Vec3][][];
 };
 
 let strutCache: StrutCache | null = null;
+
+// Diamond bond segments are culled per spatial bin; distances below this margin
+// (relative to cell size) are exact, so the SDF zero crossing is exact for any
+// strut radius below DIAMOND_CULL_MARGIN * cellSize.
+const DIAMOND_CULL_MARGIN = 0.3;
+const DIAMOND_BINS_PER_AXIS = 4;
+
+/** All diamond bond segments (including periodic images from neighbouring
+ *  cells) that can come within the cull margin of the unit cell, grouped
+ *  into a coarse spatial grid over [0,L]^3 for fast lookup. */
+function buildDiamondBins(L: number): [Vec3, Vec3][][] {
+  const q = L / 4;
+  const fcc: Vec3[] = [
+    [0, 0, 0], [L / 2, L / 2, 0], [L / 2, 0, L / 2], [0, L / 2, L / 2],
+  ];
+  // Tetrahedral bond directions: an even number of negative components.
+  const offsets: Vec3[] = [
+    [q, q, q], [-q, -q, q], [-q, q, -q], [q, -q, -q],
+  ];
+
+  const segments: [Vec3, Vec3][] = [];
+  const margin = DIAMOND_CULL_MARGIN * L;
+  for (let sx = -1; sx <= 1; sx++) {
+    for (let sy = -1; sy <= 1; sy++) {
+      for (let sz = -1; sz <= 1; sz++) {
+        for (const f of fcc) {
+          for (const o of offsets) {
+            const a: Vec3 = [f[0] + sx * L, f[1] + sy * L, f[2] + sz * L];
+            const b: Vec3 = [a[0] + o[0], a[1] + o[1], a[2] + o[2]];
+            if (Math.max(a[0], b[0]) < -margin || Math.min(a[0], b[0]) > L + margin) continue;
+            if (Math.max(a[1], b[1]) < -margin || Math.min(a[1], b[1]) > L + margin) continue;
+            if (Math.max(a[2], b[2]) < -margin || Math.min(a[2], b[2]) > L + margin) continue;
+            segments.push([a, b]);
+          }
+        }
+      }
+    }
+  }
+
+  const n = DIAMOND_BINS_PER_AXIS;
+  const binSize = L / n;
+  const bins: [Vec3, Vec3][][] = Array.from({ length: n * n * n }, () => []);
+  const axisDist = (lo: number, hi: number, segLo: number, segHi: number) => {
+    if (segHi < lo) return lo - segHi;
+    if (segLo > hi) return segLo - hi;
+    return 0;
+  };
+  for (let bz = 0; bz < n; bz++) {
+    for (let by = 0; by < n; by++) {
+      for (let bx = 0; bx < n; bx++) {
+        const bin = bins[bx + by * n + bz * n * n];
+        for (const seg of segments) {
+          const [a, b] = seg;
+          const dx = axisDist(bx * binSize, (bx + 1) * binSize, Math.min(a[0], b[0]), Math.max(a[0], b[0]));
+          const dy = axisDist(by * binSize, (by + 1) * binSize, Math.min(a[1], b[1]), Math.max(a[1], b[1]));
+          const dz = axisDist(bz * binSize, (bz + 1) * binSize, Math.min(a[2], b[2]), Math.max(a[2], b[2]));
+          if (dx * dx + dy * dy + dz * dz <= margin * margin) bin.push(seg);
+        }
+      }
+    }
+  }
+  return bins;
+}
 
 function supportsOptimizedTpms(t: LatticeType): t is OptimizedTpmsType {
   return t === 'gyroid' || t === 'schwarzP' || t === 'schwarzD' || t === 'neovius' || t === 'iwp';
@@ -33,7 +94,6 @@ function supportsOptimizedTpms(t: LatticeType): t is OptimizedTpmsType {
 function getStrutCache(L: number): StrutCache {
   if (strutCache && strutCache.L === L) return strutCache;
   const h = L / 2;
-  const q = L / 4;
   const corners: Vec3[] = [
     [0, 0, 0], [L, 0, 0], [0, L, 0], [L, L, 0],
     [0, 0, L], [L, 0, L], [0, L, L], [L, L, L],
@@ -46,74 +106,9 @@ function getStrutCache(L: number): StrutCache {
   const faceCenters: Vec3[] = [
     [h, h, 0], [h, 0, h], [0, h, h], [h, h, L], [h, L, h], [L, h, h],
   ];
-  const fcc: Vec3[] = [
-    [0, 0, 0], [L / 2, L / 2, 0], [L / 2, 0, L / 2], [0, L / 2, L / 2],
-  ];
-  const offsets: Vec3[] = [
-    [q, q, q], [-q, -q, q], [-q, q, -q], [q, -q, -q],
-  ];
 
-  strutCache = { L, h, q, corners, edges, faceCenters, fcc, offsets };
+  strutCache = { L, h, corners, edges, faceCenters, diamondBins: buildDiamondBins(L) };
   return strutCache;
-}
-
-// ═══════════════════════════════════════════════════════════
-//  TPMS Lattice Functions
-//  All return a sheet-type SDF: |f(p)| - c  where c sets thickness
-// ═══════════════════════════════════════════════════════════
-
-/** Gyroid: sin(kx)cos(ky) + sin(ky)cos(kz) + sin(kz)cos(kx) */
-export function gyroidSDF(x: number, y: number, z: number, cellSize: number, wallThickness: number): number {
-  const k = TWO_PI / cellSize;
-  const val = Math.sin(k*x)*Math.cos(k*y) + Math.sin(k*y)*Math.cos(k*z) + Math.sin(k*z)*Math.cos(k*x);
-  const c = wallThickness * Math.PI / cellSize;
-  return Math.abs(val) - c;
-}
-
-/** Schwarz P (Primitive): cos(kx) + cos(ky) + cos(kz)
- *  Cubic channels along axes. Highest axial stiffness among TPMS. */
-export function schwarzPSDF(x: number, y: number, z: number, cellSize: number, wallThickness: number): number {
-  const k = TWO_PI / cellSize;
-  const val = Math.cos(k*x) + Math.cos(k*y) + Math.cos(k*z);
-  // Range [-3, 3], Lipschitz ≈ k√3. Normalize thickness: c ~ wallThickness * k / 2
-  const c = wallThickness * Math.PI / cellSize;
-  return Math.abs(val) - c * 3;  // scale c to match the wider range
-}
-
-/** Schwarz D (Diamond): sin(kx)sin(ky)sin(kz) + sin(kx)cos(ky)cos(kz)
- *                       + cos(kx)sin(ky)cos(kz) + cos(kx)cos(ky)sin(kz)
- *  Two interleaved labyrinths with diamond symmetry. Near-isotropic. */
-export function schwarzDSDF(x: number, y: number, z: number, cellSize: number, wallThickness: number): number {
-  const k = TWO_PI / cellSize;
-  const sx = Math.sin(k*x), sy = Math.sin(k*y), sz = Math.sin(k*z);
-  const cx = Math.cos(k*x), cy = Math.cos(k*y), cz = Math.cos(k*z);
-  const val = sx*sy*sz + sx*cy*cz + cx*sy*cz + cx*cy*sz;
-  // Range ~ [-1.4, 1.4]
-  const c = wallThickness * Math.PI / cellSize;
-  return Math.abs(val) - c * 1.4;
-}
-
-/** Neovius: 3(cos(kx) + cos(ky) + cos(kz)) + 4·cos(kx)cos(ky)cos(kz)
- *  Higher genus (9 per cell). More junctions → better load distribution. */
-export function neoviusSDF(x: number, y: number, z: number, cellSize: number, wallThickness: number): number {
-  const k = TWO_PI / cellSize;
-  const cx = Math.cos(k*x), cy = Math.cos(k*y), cz = Math.cos(k*z);
-  const val = 3*(cx + cy + cz) + 4*cx*cy*cz;
-  // Range ~ [-13, 13]
-  const c = wallThickness * Math.PI / cellSize;
-  return Math.abs(val) - c * 13;
-}
-
-/** IWP (Schoen I-WP): 2(cos(kx)cos(ky) + cos(ky)cos(kz) + cos(kz)cos(kx))
- *                     - (cos(2kx) + cos(2ky) + cos(2kz))
- *  Body-centred cubic symmetry. Very high specific stiffness. */
-export function iwpSDF(x: number, y: number, z: number, cellSize: number, wallThickness: number): number {
-  const k = TWO_PI / cellSize;
-  const cx = Math.cos(k*x), cy = Math.cos(k*y), cz = Math.cos(k*z);
-  const val = 2*(cx*cy + cy*cz + cz*cx) - (Math.cos(2*k*x) + Math.cos(2*k*y) + Math.cos(2*k*z));
-  // Range ~ [-5, 5]
-  const c = wallThickness * Math.PI / cellSize;
-  return Math.abs(val) - c * 5;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -178,31 +173,26 @@ export function octetSDF(x: number, y: number, z: number, cellSize: number, stru
 }
 
 /** Diamond strut lattice: two interpenetrating FCC lattices offset by (L/4,L/4,L/4).
- *  Each node has 4 tetrahedral neighbours. Isotropic, self-supporting for 3D printing. */
+ *  Each node has 4 tetrahedral neighbours. Isotropic, self-supporting for 3D printing.
+ *  Bonds reaching across cell boundaries are handled via precomputed periodic
+ *  images, so the field is seamless under tiling. */
 export function diamondStrutSDF(x: number, y: number, z: number, cellSize: number, strutDiameter: number): number {
   const r = strutDiameter / 2;
   const L = cellSize;
-  const { fcc, offsets } = getStrutCache(L);
+  const { diamondBins } = getStrutCache(L);
   const lx = ((x % L) + L) % L;
   const ly = ((y % L) + L) % L;
   const lz = ((z % L) + L) % L;
 
-  // Each FCC node connects to 4 nearest offset nodes (tetrahedral).
-  // Connection pattern: FCC node at (a,b,c) connects to offset nodes at
-  // (a±q, b±q, c±q) where an even number of signs are negative.
+  const n = DIAMOND_BINS_PER_AXIS;
+  const binOf = (v: number) => Math.min(n - 1, Math.floor((v / L) * n));
+  const bin = diamondBins[binOf(lx) + binOf(ly) * n + binOf(lz) * n * n];
 
   let minDist = Infinity;
   const p: Vec3 = [lx, ly, lz];
-
-  for (const f of fcc) {
-    for (const o of offsets) {
-      // Target (wrapping)
-      const tx = ((f[0] + o[0]) % L + L) % L;
-      const ty = ((f[1] + o[1]) % L + L) % L;
-      const tz = ((f[2] + o[2]) % L + L) % L;
-      const d = distToSegment(p, f, [tx, ty, tz]);
-      if (d < minDist) minDist = d;
-    }
+  for (const [a, b] of bin) {
+    const d = distToSegment(p, a, b);
+    if (d < minDist) minDist = d;
   }
   return minDist - r;
 }
@@ -242,30 +232,9 @@ export function voronoiSDF(x: number, y: number, z: number, cellSize: number, st
   return (f2 - f1) * 0.5 - r;
 }
 
-/** Spinodal decomposition: sum of cosines with deterministic random wave vectors.
- *  Mimics biological bone / phase-separated materials. Near-optimal isotropic stiffness.
- *  N_WAVES controls quality (more = smoother). Evaluated entirely from hashed indices. */
+// Spinodal wave count: controls quality (more = smoother). The wave set is
+// deterministic, derived from hashed indices in buildLatticeEvaluator.
 const N_WAVES = 64;
-
-export function spinodalSDF(x: number, y: number, z: number, cellSize: number, wallThickness: number): number {
-  const k0 = TWO_PI / cellSize;
-  let sum = 0;
-  for (let i = 0; i < N_WAVES; i++) {
-    // Deterministic random direction on the unit sphere (Fibonacci lattice)
-    const phi = TWO_PI * hashF(i, 0);
-    const cosTheta = 1 - 2 * hashF(i, 1);
-    const sinTheta = Math.sqrt(1 - cosTheta * cosTheta);
-    const kx = k0 * sinTheta * Math.cos(phi);
-    const ky = k0 * sinTheta * Math.sin(phi);
-    const kz = k0 * cosTheta;
-    const phase = TWO_PI * hashF(i, 2);
-    sum += Math.cos(kx * x + ky * y + kz * z + phase);
-  }
-  sum /= Math.sqrt(N_WAVES);
-  // Threshold to control wall thickness: larger c → more material
-  const c = wallThickness * 0.6 / cellSize;
-  return Math.abs(sum) - c * 2;
-}
 
 // ═══════════════════════════════════════════════════════════
 //  2D Lattice Helpers (extruded to 3D)
@@ -350,25 +319,45 @@ function conformalCoords(
   return [projectedU, projectedV, dObj];
 }
 
-function sdHexagon2D(px: number, py: number, radius: number): number {
-  const verts = Array.from({ length: 6 }, (_, i) => {
-    const angle = (Math.PI / 3) * i;
-    return [radius * Math.cos(angle), radius * Math.sin(angle)] as const;
-  });
+// Unit-circle vertices for regular polygons, cached per side count. Polygon
+// SDFs are evaluated per sample point, so vertex tables must not be rebuilt
+// inside the distance functions.
+const unitPolygonVertexCache = new Map<number, ReadonlyArray<readonly [number, number]>>();
 
+function unitPolygonVertices(sides: number): ReadonlyArray<readonly [number, number]> {
+  let verts = unitPolygonVertexCache.get(sides);
+  if (!verts) {
+    verts = Array.from({ length: sides }, (_, i) => {
+      const angle = (TWO_PI / sides) * i;
+      return [Math.cos(angle), Math.sin(angle)] as const;
+    });
+    unitPolygonVertexCache.set(sides, verts);
+  }
+  return verts;
+}
+
+function sdRegularPolygon2D(px: number, py: number, radius: number, sides: number): number {
+  const verts = unitPolygonVertices(sides);
   let minDist = Infinity;
   let inside = true;
 
   for (let i = 0; i < verts.length; i++) {
-    const [ax, ay] = verts[i];
-    const [bx, by] = verts[(i + 1) % verts.length];
-    const cross = (bx - ax) * (py - ay) - (by - ay) * (px - ax);
-    if (cross < 0) inside = false;
+    const ax = verts[i][0] * radius;
+    const ay = verts[i][1] * radius;
+    const next = verts[(i + 1) % verts.length];
+    const bx = next[0] * radius;
+    const by = next[1] * radius;
+    const edgeCross = (bx - ax) * (py - ay) - (by - ay) * (px - ax);
+    if (edgeCross < 0) inside = false;
     const d = distToSegment2D(px, py, ax, ay, bx, by);
     if (d < minDist) minDist = d;
   }
 
   return inside ? -minDist : minDist;
+}
+
+function sdHexagon2D(px: number, py: number, radius: number): number {
+  return sdRegularPolygon2D(px, py, radius, 6);
 }
 
 function hexCellCenter(x: number, y: number, side: number): [number, number] {
@@ -470,18 +459,17 @@ export function smoothMin(a: number, b: number, k: number): number {
   return Math.min(a, b) - h*h*h*k*(1/6);
 }
 
-/** Smooth maximum */
-export function smoothMax(a: number, b: number, k: number): number {
-  return -smoothMin(-a, -b, k);
-}
-
 // ═══════════════════════════════════════════════════════════
 //  Unified lattice evaluator
 // ═══════════════════════════════════════════════════════════
 
+// TPMS sheet lattices return |f(p)| - c where c sets wall thickness, scaled to
+// each field's value range (gyroid ±1.5, schwarz P ±3, schwarz D ±1.4,
+// neovius ±13, IWP ±5). Strut lattices return distance-to-nearest-strut - r.
 function buildLatticeEvaluator(params: LatticeParams): (x: number, y: number, z: number) => number {
   const { latticeType, cellSize, wallThickness, strutDiameter } = params;
   switch (latticeType) {
+    // Gyroid: sin(kx)cos(ky) + sin(ky)cos(kz) + sin(kz)cos(kx)
     case 'gyroid': {
       const k = TWO_PI / cellSize;
       const c = wallThickness * Math.PI / cellSize;
@@ -740,10 +728,12 @@ function attachTpmsGridSampler(
 //  Combined SDF builders
 // ═══════════════════════════════════════════════════════════
 
+// Note: keep-out triangle selection does not alter the combined SDF; it only
+// affects surface hex/triangle hole placement, which callers handle by
+// filtering the surface samples they pass to buildSurfaceHexLattice.
 export interface LatticeSdfOptions {
   bvh: MeshBVH;
   params: LatticeParams;
-  keepOutTris: Set<number>;
 }
 
 export interface SurfaceHexSample {
@@ -777,30 +767,9 @@ function basisFromNormal(n: Vec3): { t: Vec3; b: Vec3; n: Vec3 } {
   return { t, b, n: normal };
 }
 
-function sdRegularPolygon2D(px: number, py: number, radius: number, sides: number): number {
-  const verts = Array.from({ length: sides }, (_, i) => {
-    const angle = (TWO_PI / sides) * i;
-    return [radius * Math.cos(angle), radius * Math.sin(angle)] as const;
-  });
-
-  let minDist = Infinity;
-  let inside = true;
-  for (let i = 0; i < verts.length; i++) {
-    const [ax, ay] = verts[i];
-    const [bx, by] = verts[(i + 1) % verts.length];
-    const edgeCross = (bx - ax) * (py - ay) - (by - ay) * (px - ax);
-    if (edgeCross < 0) inside = false;
-    const d = distToSegment2D(px, py, ax, ay, bx, by);
-    if (d < minDist) minDist = d;
-  }
-  return inside ? -minDist : minDist;
-}
-
 function polygonPrismSdf(local: Vec3, inRadius: number, depth: number, sides: number): number {
   const circumRadius = inRadius / Math.cos(Math.PI / sides);
-  const d2 = sides === 6
-    ? sdHexagon2D(local[0], local[1], circumRadius)
-    : sdRegularPolygon2D(local[0], local[1], circumRadius, sides);
+  const d2 = sdRegularPolygon2D(local[0], local[1], circumRadius, sides);
   const dz = Math.abs(local[2]) - depth * 0.5;
   return Math.max(d2, dz);
 }
@@ -977,14 +946,14 @@ export function buildAnalyticLattice(
 export function buildSphereLattice(
   radius: number,
   params: LatticeParams
-): (x: number, y: number, z: number) => number {
+): SdfFunction {
   return buildAnalyticLattice((x, y, z) => Math.sqrt(x*x + y*y + z*z) - radius, params);
 }
 
 export function buildCubeLattice(
   halfSize: number,
   params: LatticeParams,
-): (x: number, y: number, z: number) => number {
+): SdfFunction {
   return buildAnalyticLattice((x, y, z) => {
     const dx = Math.abs(x) - halfSize;
     const dy = Math.abs(y) - halfSize;
@@ -999,7 +968,7 @@ export function buildCylinderLattice(
   radius: number,
   halfHeight: number,
   params: LatticeParams,
-): (x: number, y: number, z: number) => number {
+): SdfFunction {
   return buildAnalyticLattice((x, y, z) => {
     const dRadial = Math.sqrt(x*x + y*y) - radius;
     const dAxial = Math.abs(z) - halfHeight;
@@ -1013,7 +982,7 @@ export function buildTorusLattice(
   majorRadius: number,
   tubeRadius: number,
   params: LatticeParams,
-): (x: number, y: number, z: number) => number {
+): SdfFunction {
   return buildAnalyticLattice((x, y, z) => {
     const qx = Math.sqrt(x*x + y*y) - majorRadius;
     return Math.sqrt(qx*qx + z*z) - tubeRadius;
@@ -1024,7 +993,7 @@ export function buildCapsuleLattice(
   radius: number,
   halfHeight: number,
   params: LatticeParams,
-): (x: number, y: number, z: number) => number {
+): SdfFunction {
   return buildAnalyticLattice((x, y, z) => {
     // Clamp z to the cylinder body, then measure distance to that clamped point.
     const cz = Math.max(-halfHeight, Math.min(halfHeight, z));

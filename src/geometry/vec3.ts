@@ -36,27 +36,3 @@ export function normalize(a: Vec3): Vec3 {
   return [a[0] / len, a[1] / len, a[2] / len];
 }
 
-export function lerp(a: Vec3, b: Vec3, t: number): Vec3 {
-  return [
-    a[0] + (b[0] - a[0]) * t,
-    a[1] + (b[1] - a[1]) * t,
-    a[2] + (b[2] - a[2]) * t,
-  ];
-}
-
-export function distSq(a: Vec3, b: Vec3): number {
-  const dx = a[0] - b[0], dy = a[1] - b[1], dz = a[2] - b[2];
-  return dx * dx + dy * dy + dz * dz;
-}
-
-export function dist(a: Vec3, b: Vec3): number {
-  return Math.sqrt(distSq(a, b));
-}
-
-export function min3(a: Vec3, b: Vec3): Vec3 {
-  return [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.min(a[2], b[2])];
-}
-
-export function max3(a: Vec3, b: Vec3): Vec3 {
-  return [Math.max(a[0], b[0]), Math.max(a[1], b[1]), Math.max(a[2], b[2])];
-}
