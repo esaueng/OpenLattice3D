@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../store/useStore';
 import { downloadProjectJSON, downloadSTL } from '../utils/export';
 
@@ -9,7 +10,14 @@ export function ExportControls() {
     meshFileName,
     keepOutTris,
     keepInTris,
-  } = useStore();
+  } = useStore(useShallow((s) => ({
+    validation: s.validation,
+    resultMesh: s.resultMesh,
+    params: s.params,
+    meshFileName: s.meshFileName,
+    keepOutTris: s.keepOutTris,
+    keepInTris: s.keepInTris,
+  })));
 
   if (!resultMesh) return null;
 
