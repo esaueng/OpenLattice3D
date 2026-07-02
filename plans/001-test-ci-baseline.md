@@ -1,6 +1,6 @@
 # Plan 001 — Establish a test + CI verification baseline
 
-- **Status:** TODO
+- **Status:** DONE — superseded by PR #14 (`903b1c6`, merged to `main` 2026-07-02): vitest.config.ts, 46 tests across 6 test files, and `.github/workflows/ci.yml` landed independently. **Do not execute.** Kept for reference; test-coverage gaps vs. this plan's target list (e.g. `mesh-analysis`, `validation` module coverage) can be split into a follow-up if desired.
 - **Written against commit:** `2af138a` (branch `main`). Before starting, run `git rev-parse --short HEAD`. If it differs, run `git diff 2af138a --stat -- src/geometry package.json` first; if any `src/geometry/*` file changed, re-read the changed files before writing tests for them (the line numbers and behaviors cited below may have drifted). If the drift is large or confusing, STOP and report back.
 - **Priority:** 1 of 5 — do this plan first. Plan 002 depends on it; plans 003–005 are safer with it.
 

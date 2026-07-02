@@ -1,6 +1,6 @@
 # Plan 002 — Make STL import robust: bounds-check binary headers, fix the "solid"-prefixed binary fallback, guard empty meshes
 
-- **Status:** TODO
+- **Status:** DONE — superseded by PR #14 (`903b1c6`, merged to `main` 2026-07-02): parser size validation, ASCII/binary fallback fix, and `MeshBVH` empty-mesh rejection landed independently with tests (`src/geometry/stl-parser.test.ts`). **Do not execute.** Before closing permanently, someone should verify main has a regression test for the `solid`-prefixed *binary* STL case specifically (target-semantics row 3 below).
 - **Written against commit:** `2af138a` (branch `main`). Run `git rev-parse --short HEAD` first; if it differs, `git diff 2af138a -- src/geometry/stl-parser.ts src/geometry/bvh.ts src/components/LeftPanel.tsx` and re-read any changed file before editing. If `src/geometry/stl-parser.ts` changed materially, STOP and report.
 - **Depends on:** Plan 001 (vitest must be installed and `npm test` green before you start). If `npx vitest --version` fails, STOP and report "blocked on plan 001".
 

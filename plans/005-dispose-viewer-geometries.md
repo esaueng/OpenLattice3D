@@ -1,6 +1,6 @@
 # Plan 005 — Dispose three.js BufferGeometries when the viewer swaps them
 
-- **Status:** TODO
+- **Status:** TODO — scope reduced 2026-07-02: PR #14 (`903b1c6`) reworked `Viewer3D.tsx` (+225 lines) and added disposal to ~2 of what are now 6 `new THREE.BufferGeometry()` sites. The enumeration step below is the source of truth — run it at HEAD and fix the sites without paired disposal. **Line numbers below are stale — follow the drift protocol.**
 - **Written against commit:** `2af138a` (branch `main`). Run `git rev-parse --short HEAD`; if different, `git diff 2af138a -- src/components/Viewer3D.tsx` and re-read the component before editing.
 - **Depends on:** nothing (plan 001 recommended first for CI safety, not required). Independent of plans 002–004.
 
