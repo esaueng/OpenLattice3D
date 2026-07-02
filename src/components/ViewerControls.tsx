@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../store/useStore';
 import type { ViewMode } from '../store/useStore';
 
@@ -18,7 +19,20 @@ const VIEW_HOTKEYS: Record<ViewMode, string> = {
 
 export function ViewerControls() {
   const [crossSectionSettingsOpen, setCrossSectionSettingsOpen] = useState(false);
-  const store = useStore();
+  const settingsButtonRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const store = useStore(useShallow((s) => ({
+    resultMesh: s.resultMesh,
+    viewMode: s.viewMode,
+    viewerBackground: s.viewerBackground,
+    demoModeActive: s.demoModeActive,
+    clipPlane: s.clipPlane,
+    originalMesh: s.originalMesh,
+    sphereMode: s.sphereMode,
+    setViewMode: s.setViewMode,
+    setClipPlane: s.setClipPlane,
+    setViewerBackground: s.setViewerBackground,
+  })));
   const {
     resultMesh,
     viewMode,
@@ -27,6 +41,32 @@ export function ViewerControls() {
     clipPlane,
   } = store;
   const crossSectionDisabled = !demoModeActive && !resultMesh;
+
+  // Dismiss the cross-section popover on Escape (returning focus to its trigger)
+  // or on an outside click (WCAG 2.1.2 / 2.4.3).
+  useEffect(() => {
+    if (!crossSectionSettingsOpen) return;
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setCrossSectionSettingsOpen(false);
+        settingsButtonRef.current?.focus();
+      }
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target as Node;
+      if (popoverRef.current?.contains(target) || settingsButtonRef.current?.contains(target)) return;
+      setCrossSectionSettingsOpen(false);
+    }
+
+    document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('pointerdown', handlePointerDown);
+    };
+  }, [crossSectionSettingsOpen]);
 
   return (
     <div className="viewer-controls-panel" aria-label="Viewer controls">
@@ -64,6 +104,7 @@ export function ViewerControls() {
                 {VIEW_LABELS[mode]}
               </button>
               <button
+                ref={settingsButtonRef}
                 className={`btn btn-small view-settings-button ${viewMode === mode || crossSectionSettingsOpen ? 'btn-active' : ''}`}
                 type="button"
                 title="Cross-section settings"
@@ -82,7 +123,7 @@ export function ViewerControls() {
                 </svg>
               </button>
               {crossSectionSettingsOpen && !crossSectionDisabled && (
-                <div className="cross-section-popover" role="menu" aria-label="Cross-section settings">
+                <div ref={popoverRef} className="cross-section-popover" role="group" aria-label="Cross-section settings">
                   <div className="popover-row">
                     <span>Cut axis</span>
                     <div className="axis-buttons">
