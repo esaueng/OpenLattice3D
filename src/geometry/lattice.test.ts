@@ -145,6 +145,36 @@ describe('buildSphereLattice', () => {
   });
 });
 
+describe('escape holes', () => {
+  it('subtracts a through-hole along the selected build axis', () => {
+    const enabled: LatticeParams = {
+      ...DEFAULT_PARAMS,
+      escapeHoles: true,
+      escapeHoleCount: 1,
+      escapeHoleDiameter: 5,
+      escapeHoleAxis: 'z',
+    };
+    const disabled: LatticeParams = { ...enabled, escapeHoles: false };
+    const withHole = buildSphereLattice(20, enabled);
+    const withoutHole = buildSphereLattice(20, disabled);
+    expect(withHole(0, 0, 19)).toBeGreaterThan(0);
+    expect(withoutHole(0, 0, 19)).toBeLessThan(0);
+    expect(withHole(4, 0, 19)).toBeLessThan(0);
+  });
+
+  it('does not apply escape holes to no-shell lattices', () => {
+    const params: LatticeParams = {
+      ...DEFAULT_PARAMS,
+      noShell: true,
+      escapeHoles: true,
+      escapeHoleCount: 1,
+      escapeHoleAxis: 'z',
+    };
+    const sdf = buildSphereLattice(20, params);
+    expect(Number.isFinite(sdf(0, 0, 0))).toBe(true);
+  });
+});
+
 describe('buildAnalyticLattice modes', () => {
   const cube = (x: number, y: number, z: number) => {
     const dx = Math.abs(x) - 15;

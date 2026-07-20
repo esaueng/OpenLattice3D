@@ -22,6 +22,8 @@ export type SelectionMode = 'keep_out' | 'keep_in' | 'none';
 
 export type GenerationVariant = 'shell_core' | 'implicit_conformal';
 
+export type EscapeHoleAxis = 'x' | 'y' | 'z';
+
 export interface BoundingBox {
   min: [number, number, number];
   max: [number, number, number];
@@ -55,6 +57,7 @@ export interface LatticeParams {
   escapeHoles: boolean;
   escapeHoleDiameter: number;  // mm
   escapeHoleCount: number;
+  escapeHoleAxis: EscapeHoleAxis;
   toleranceMm: number;         // outer deviation tolerance
 }
 
@@ -97,6 +100,7 @@ export const DEFAULT_PARAMS: LatticeParams = {
   escapeHoles: true,
   escapeHoleDiameter: 5.0,
   escapeHoleCount: 2,
+  escapeHoleAxis: 'z',
   toleranceMm: 0.2,
 };
 
@@ -114,6 +118,7 @@ const LATTICE_TYPES: readonly LatticeType[] = [
 ];
 const VARIANTS: readonly GenerationVariant[] = ['shell_core', 'implicit_conformal'];
 const PROCESS_PRESETS: readonly ProcessPreset[] = ['SLS_MJF', 'SLA_DLP', 'FDM'];
+const ESCAPE_HOLE_AXES: readonly EscapeHoleAxis[] = ['x', 'y', 'z'];
 
 type ParamValidator = (value: unknown) => boolean;
 
@@ -148,6 +153,7 @@ const PARAM_VALIDATORS: Record<keyof LatticeParams, ParamValidator> = {
   escapeHoles: isBoolean,
   escapeHoleDiameter: isFiniteNumberIn(0.1, 100),
   escapeHoleCount: isFiniteNumberIn(0, 100),
+  escapeHoleAxis: isOneOf(ESCAPE_HOLE_AXES),
   toleranceMm: isFiniteNumberIn(0.001, 50),
 };
 

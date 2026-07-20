@@ -46,4 +46,14 @@ describe('mesh topology', () => {
     expect(findConnectedComponents(topology)).toHaveLength(0);
     expect(countEdgeDefects(topology)).toEqual({ boundaryEdges: 0, nonManifoldEdges: 0 });
   });
+
+  it('keeps distinct high-magnitude quantized vertices separate despite hash collisions', () => {
+    const positions = new Float32Array([
+      1_000_000, 0, 0, 1_000_001, 0, 0, 1_000_000, 1, 0,
+      -1_000_000, 0, 0, -1_000_001, 0, 0, -1_000_000, -1, 0,
+    ]);
+    const topology = buildEdgeTopology(positions, 2);
+    expect(topology.edgeTriangleLists).toHaveLength(6);
+    expect(findConnectedComponents(topology)).toHaveLength(2);
+  });
 });
