@@ -9,6 +9,19 @@ import {
   getBrowserFeatureFlags,
   isSharedFloat32Array,
 } from '../utils/browser-features';
+import { isSheetType } from '../geometry/lattice';
+import type { SampleShape } from '../types/project';
+
+function proceduralMaxSpan(shape: SampleShape | null, sphereRadius: number): number {
+  switch (shape) {
+    case 'sphere': return (sphereRadius || 25) * 2;
+    case 'cube': return 30;
+    case 'cylinder': return 40;
+    case 'torus': return 56;
+    case 'capsule': return 54;
+    default: return (sphereRadius || 25) * 2;
+  }
+}
 
 function buildGenerationTransferList(msg: WorkerMessage): Transferable[] {
   const transfers: Transferable[] = [];
@@ -91,6 +104,20 @@ export function useLatticeGeneration(): LatticeGenerationControls {
 
     const generationStartedAt = performance.now();
     const resolution = Math.round(24 + store.params.exportResolution * 24);
+    const maxSpan = store.meshInfo
+      ? Math.max(
+        store.meshInfo.boundingBox.max[0] - store.meshInfo.boundingBox.min[0],
+        store.meshInfo.boundingBox.max[1] - store.meshInfo.boundingBox.min[1],
+        store.meshInfo.boundingBox.max[2] - store.meshInfo.boundingBox.min[2],
+      )
+      : proceduralMaxSpan(store.sampleShape, store.sphereRadius);
+    const voxelSize = maxSpan / resolution;
+    if (isSheetType(store.params.latticeType) && store.params.wallThickness < voxelSize * 2) {
+      store.addLog(
+        `Requested ${store.params.wallThickness.toFixed(2)}mm wall is under two ${(voxelSize).toFixed(2)}mm sampling voxels; increase export resolution for reliable thickness.`,
+        'warn',
+      );
+    }
 
     const msg: WorkerMessage = {
       type: 'generate',
