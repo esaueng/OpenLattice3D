@@ -51,6 +51,40 @@ interface PersistedState {
 
 type DemoParamsByType = Partial<Record<LatticeType, LatticeParams>>;
 
+type SelectionSnapshot = {
+  keepOut: number[];
+  keepIn: number[];
+};
+
+const MAX_SELECTION_HISTORY = 100;
+
+export interface ProjectRestoreState {
+  params: LatticeParams;
+  originalMesh: TriangleMesh | null;
+  meshInfo: MeshInfo | null;
+  meshFileName: string;
+  sampleShape: SampleShape | null;
+  sphereRadius: number;
+  keepOutTris: number[];
+  keepInTris: number[];
+  clipPlane?: ClipPlaneState;
+  viewerBackground?: string;
+}
+
+function currentSelection(state: Pick<AppState, 'keepOutTris' | 'keepInTris'>): SelectionSnapshot {
+  return {
+    keepOut: Array.from(state.keepOutTris),
+    keepIn: Array.from(state.keepInTris),
+  };
+}
+
+function pushSelectionHistory(state: AppState): Pick<AppState, 'selectionUndo' | 'selectionRedo'> {
+  return {
+    selectionUndo: [...state.selectionUndo.slice(-(MAX_SELECTION_HISTORY - 1)), currentSelection(state)],
+    selectionRedo: [],
+  };
+}
+
 interface PersistedAppState extends PersistedState {
   version: number;
   savedAt: number;
@@ -244,6 +278,8 @@ interface AppState {
   selectionMode: SelectionMode;
   keepOutTris: Set<number>;
   keepInTris: Set<number>;
+  selectionUndo: SelectionSnapshot[];
+  selectionRedo: SelectionSnapshot[];
 
   // Params
   params: LatticeParams;
@@ -280,6 +316,8 @@ interface AppState {
   toggleKeepIn: (triIdx: number) => void;
   selectAllKeepOut: () => void;
   clearSelection: () => void;
+  undoSelection: () => void;
+  redoSelection: () => void;
   updateParams: (partial: Partial<LatticeParams>) => void;
   setProcessPreset: (preset: ProcessPreset) => void;
   setLatticeType: (type: LatticeType) => void;
@@ -296,6 +334,7 @@ interface AppState {
   setDemoModeActive: (active: boolean) => void;
   startDemoRun: () => void;
   importParams: (imported: Partial<LatticeParams>) => void;
+  restoreProject: (project: ProjectRestoreState) => void;
   addLog: (message: string, level?: 'info' | 'warn' | 'error') => void;
   clearLogs: () => void;
   resetProject: () => void;
@@ -321,6 +360,8 @@ export const useStore = create<AppState>((set) => ({
   selectionMode: 'none',
   keepOutTris: new Set<number>(),
   keepInTris: new Set<number>(),
+  selectionUndo: [],
+  selectionRedo: [],
   params: persisted?.params ? { ...DEFAULT_PARAMS, ...persisted.params } : { ...DEFAULT_PARAMS },
   demoParamsByType: {},
   generating: false,
@@ -347,6 +388,8 @@ export const useStore = create<AppState>((set) => ({
     validation: null,
     keepOutTris: new Set(),
     keepInTris: new Set(),
+    selectionUndo: [],
+    selectionRedo: [],
     demoParamsByType: {},
     viewerCameraState: null,
   }),
@@ -367,6 +410,8 @@ export const useStore = create<AppState>((set) => ({
     validation: null,
     keepOutTris: new Set(),
     keepInTris: new Set(),
+    selectionUndo: [],
+    selectionRedo: [],
     demoParamsByType: {},
     viewerCameraState: null,
     params: {
@@ -391,6 +436,8 @@ export const useStore = create<AppState>((set) => ({
     validation: null,
     keepOutTris: new Set(),
     keepInTris: new Set(),
+    selectionUndo: [],
+    selectionRedo: [],
     demoParamsByType: {},
     viewerCameraState: null,
     params: {
@@ -409,23 +456,49 @@ export const useStore = create<AppState>((set) => ({
   toggleKeepOut: (triIdx) => set((s) => {
     const next = new Set(s.keepOutTris);
     if (next.has(triIdx)) next.delete(triIdx); else next.add(triIdx);
-    return { keepOutTris: next };
+    return { keepOutTris: next, ...pushSelectionHistory(s) };
   }),
 
   toggleKeepIn: (triIdx) => set((s) => {
     const next = new Set(s.keepInTris);
     if (next.has(triIdx)) next.delete(triIdx); else next.add(triIdx);
-    return { keepInTris: next };
+    return { keepInTris: next, ...pushSelectionHistory(s) };
   }),
 
   selectAllKeepOut: () => set((s) => {
     if (!s.originalMesh) return {};
     const all = new Set<number>();
     for (let i = 0; i < s.originalMesh.triCount; i++) all.add(i);
-    return { keepOutTris: all };
+    return { keepOutTris: all, ...pushSelectionHistory(s) };
   }),
 
-  clearSelection: () => set({ keepOutTris: new Set(), keepInTris: new Set() }),
+  clearSelection: () => set((s) => ({
+    keepOutTris: new Set(),
+    keepInTris: new Set(),
+    ...pushSelectionHistory(s),
+  })),
+
+  undoSelection: () => set((s) => {
+    const previous = s.selectionUndo[s.selectionUndo.length - 1];
+    if (!previous) return {};
+    return {
+      keepOutTris: new Set(previous.keepOut),
+      keepInTris: new Set(previous.keepIn),
+      selectionUndo: s.selectionUndo.slice(0, -1),
+      selectionRedo: [...s.selectionRedo, currentSelection(s)].slice(-MAX_SELECTION_HISTORY),
+    };
+  }),
+
+  redoSelection: () => set((s) => {
+    const next = s.selectionRedo[s.selectionRedo.length - 1];
+    if (!next) return {};
+    return {
+      keepOutTris: new Set(next.keepOut),
+      keepInTris: new Set(next.keepIn),
+      selectionUndo: [...s.selectionUndo, currentSelection(s)].slice(-MAX_SELECTION_HISTORY),
+      selectionRedo: s.selectionRedo.slice(0, -1),
+    };
+  }),
 
   updateParams: (partial) => set((s) => {
     const nextParams = { ...s.params, ...partial };
@@ -554,6 +627,34 @@ export const useStore = create<AppState>((set) => ({
     };
   }),
 
+  restoreProject: (project) => set({
+    originalMesh: project.originalMesh,
+    meshInfo: project.meshInfo,
+    meshRepaired: project.meshInfo?.repaired ?? false,
+    meshFileName: project.meshFileName,
+    sampleShape: project.sampleShape,
+    sphereMode: Boolean(project.sampleShape),
+    sphereRadius: project.sphereRadius,
+    selectionMode: 'none',
+    keepOutTris: new Set(project.keepOutTris),
+    keepInTris: new Set(project.keepInTris),
+    selectionUndo: [],
+    selectionRedo: [],
+    params: { ...project.params },
+    demoParamsByType: {},
+    generating: false,
+    progress: 0,
+    progressMessage: '',
+    resultMesh: null,
+    validation: null,
+    viewMode: 'original',
+    clipPlane: project.clipPlane ?? { axis: 'z', position: 0.5, flipped: false },
+    viewerBackground: project.viewerBackground ?? '#000000',
+    viewerCameraState: null,
+    demoModeActive: false,
+    demoRunId: 0,
+  }),
+
   clearLogs: () => set({ logs: [] }),
 
   resetProject: () => {
@@ -572,6 +673,8 @@ export const useStore = create<AppState>((set) => ({
       validation: null,
       keepOutTris: new Set(),
       keepInTris: new Set(),
+      selectionUndo: [],
+      selectionRedo: [],
       params: { ...DEFAULT_PARAMS },
       demoParamsByType: {},
       generating: false,
@@ -635,6 +738,8 @@ function hydrateFromSnapshot(snapshot: Partial<PersistedAppState>): Partial<AppS
     selectionMode: snapshot.selectionMode ?? 'none',
     keepOutTris: new Set(snapshot.keepOutTris ?? []),
     keepInTris: new Set(snapshot.keepInTris ?? []),
+    selectionUndo: [],
+    selectionRedo: [],
     params: snapshot.params ? { ...DEFAULT_PARAMS, ...snapshot.params } : { ...DEFAULT_PARAMS },
     demoParamsByType: snapshot.demoParamsByType ?? {},
     generating: false,
