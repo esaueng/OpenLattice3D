@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   bccStrutSDF,
   buildAnalyticLattice,
+  buildLatticeEvaluator,
   buildSphereLattice,
   diamondStrutSDF,
   isSheetType,
@@ -10,6 +11,7 @@ import {
 } from './lattice';
 import { DEFAULT_PARAMS } from '../types/project';
 import type { LatticeParams } from '../types/project';
+import type { Vec3 } from './vec3';
 
 const L = 10;
 const R = 0.4; // strut radius for strutDiameter 0.8
@@ -103,6 +105,85 @@ describe('isSheetType', () => {
     for (const t of ['bcc', 'octet', 'diamond', 'hexagon', 'triangle', 'voronoi'] as const) {
       expect(isSheetType(t)).toBe(false);
     }
+  });
+});
+
+describe('lattice field invariants', () => {
+  const allTypes: LatticeParams['latticeType'][] = [
+    'gyroid', 'schwarzP', 'schwarzD', 'neovius', 'iwp', 'bcc',
+    'octet', 'diamond', 'hexagon', 'triangle', 'voronoi', 'spinodal',
+  ];
+
+  it.each(allTypes)('%s returns finite millimetre-valued samples', (latticeType) => {
+    const evaluate = buildLatticeEvaluator({ ...DEFAULT_PARAMS, latticeType });
+    for (const point of [[0, 0, 0], [1.3, -2.1, 4.7], [12.2, 8.4, -3.3]]) {
+      expect(Number.isFinite(evaluate(point[0], point[1], point[2]))).toBe(true);
+    }
+  });
+
+  it.each(['gyroid', 'schwarzP', 'schwarzD', 'neovius', 'iwp'] as const)('%s is periodic by one cell', (latticeType) => {
+    const params = { ...DEFAULT_PARAMS, latticeType, cellSize: L };
+    const evaluate = buildLatticeEvaluator(params);
+    const point: Vec3 = [1.37, 2.41, -0.83];
+    const base = evaluate(...point);
+    expect(evaluate(point[0] + L, point[1], point[2])).toBeCloseTo(base, 9);
+    expect(evaluate(point[0], point[1] - L, point[2] + L)).toBeCloseTo(base, 9);
+  });
+});
+
+describe('TPMS wall-thickness calibration', () => {
+  const normalize3 = (value: Vec3): Vec3 => {
+    const magnitude = Math.hypot(...value);
+    return [value[0] / magnitude, value[1] / magnitude, value[2] / magnitude];
+  };
+  const addScaled = (point: Vec3, direction: Vec3, distance: number): Vec3 => [
+    point[0] + direction[0] * distance,
+    point[1] + direction[1] * distance,
+    point[2] + direction[2] * distance,
+  ];
+  const distanceToBoundary = (
+    evaluate: (x: number, y: number, z: number) => number,
+    point: Vec3,
+    direction: Vec3,
+  ) => {
+    let low = 0;
+    let high = 2;
+    while (evaluate(...addScaled(point, direction, high)) <= 0 && high < 8) high *= 2;
+    for (let i = 0; i < 50; i++) {
+      const mid = (low + high) * 0.5;
+      if (evaluate(...addScaled(point, direction, mid)) <= 0) low = mid;
+      else high = mid;
+    }
+    return (low + high) * 0.5;
+  };
+
+  const iwpCos = 1 - Math.sqrt(6) / 2;
+  const iwpPhase = Math.acos(iwpCos);
+  const cases: Array<{ type: LatticeParams['latticeType']; point: Vec3; gradient: Vec3 }> = [
+    { type: 'gyroid', point: [0, 0, 0], gradient: [1, 1, 1] },
+    { type: 'schwarzP', point: [L / 4, L / 4, L / 4], gradient: [-1, -1, -1] },
+    { type: 'schwarzD', point: [0, 0, 0], gradient: [1, 1, 1] },
+    { type: 'neovius', point: [L / 4, L / 4, L / 4], gradient: [-3, -3, -3] },
+    {
+      type: 'iwp',
+      point: [iwpPhase * L / (2 * Math.PI), iwpPhase * L / (2 * Math.PI), 0],
+      gradient: [2 * Math.sin(iwpPhase) * (iwpCos - 1), 2 * Math.sin(iwpPhase) * (iwpCos - 1), 0],
+    },
+  ];
+
+  it.each(cases)('$type produces the requested local sheet thickness', ({ type, point, gradient }) => {
+    const wallThickness = 0.4;
+    const evaluate = buildLatticeEvaluator({
+      ...DEFAULT_PARAMS,
+      latticeType: type,
+      cellSize: L,
+      wallThickness,
+    });
+    const normal = normalize3(gradient);
+    expect(evaluate(...point)).toBeCloseTo(-wallThickness / 2, 9);
+    const measured = distanceToBoundary(evaluate, point, normal)
+      + distanceToBoundary(evaluate, point, [-normal[0], -normal[1], -normal[2]]);
+    expect(measured).toBeCloseTo(wallThickness, 1);
   });
 });
 

@@ -279,7 +279,8 @@ fn object_sdf(pos: vec3<f32>) -> f32 {
 
 fn lattice_sdf(pos: vec3<f32>) -> f32 {
   let k = 6.283185307179586 / p[9];
-  let c = p[10] * 3.141592653589793 / p[9];
+  let half_thickness = p[10] * 0.5;
+  let gradient_epsilon = k * 0.0001;
   let lattice = u32(p[8]);
   if (lattice == 0u) {
     let sx = sin(k * pos.x);
@@ -289,10 +290,18 @@ fn lattice_sdf(pos: vec3<f32>) -> f32 {
     let cy = cos(k * pos.y);
     let cz = cos(k * pos.z);
     let v = sx * cy + sy * cz + sz * cx;
-    return abs(v) - c;
+    let grad_phase = vec3<f32>(
+      cx * cy - sz * sx,
+      cy * cz - sx * sy,
+      cz * cx - sy * sz,
+    );
+    return abs(v) / max(k * length(grad_phase), gradient_epsilon) - half_thickness;
   }
+  let sx = sin(k * pos.x);
+  let sy = sin(k * pos.y);
+  let sz = sin(k * pos.z);
   let v = cos(k * pos.x) + cos(k * pos.y) + cos(k * pos.z);
-  return abs(v) - c * 3.0;
+  return abs(v) / max(k * length(vec3<f32>(sx, sy, sz)), gradient_epsilon) - half_thickness;
 }
 
 fn combined_sdf(d_obj: f32, lat_in: f32) -> f32 {

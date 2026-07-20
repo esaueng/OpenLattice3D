@@ -465,62 +465,80 @@ export function smoothMin(a: number, b: number, k: number): number {
 //  Unified lattice evaluator
 // ═══════════════════════════════════════════════════════════
 
-// TPMS sheet lattices return |f(p)| - c where c sets wall thickness, scaled to
-// each field's value range (gyroid ±1.5, schwarz P ±3, schwarz D ±1.4,
-// neovius ±13, IWP ±5). Strut lattices return distance-to-nearest-strut - r.
-function buildLatticeEvaluator(params: LatticeParams): (x: number, y: number, z: number) => number {
+const TPMS_GRADIENT_EPSILON_FACTOR = 1e-4;
+
+function sheetDistance(fieldValue: number, gx: number, gy: number, gz: number, k: number, thickness: number): number {
+  const gradientMagnitude = k * Math.hypot(gx, gy, gz);
+  const safeGradient = Math.max(gradientMagnitude, k * TPMS_GRADIENT_EPSILON_FACTOR);
+  return Math.abs(fieldValue) / safeGradient - thickness * 0.5;
+}
+
+// Sheet fields are converted from dimensionless implicit values to a local
+// distance in millimetres using the analytic gradient. Strut fields already
+// return a geometric distance in millimetres.
+export function buildLatticeEvaluator(params: LatticeParams): (x: number, y: number, z: number) => number {
   const { latticeType, cellSize, wallThickness, strutDiameter } = params;
   switch (latticeType) {
     // Gyroid: sin(kx)cos(ky) + sin(ky)cos(kz) + sin(kz)cos(kx)
     case 'gyroid': {
       const k = TWO_PI / cellSize;
-      const c = wallThickness * Math.PI / cellSize;
       return (x, y, z) => {
         const kx = k * x;
         const ky = k * y;
         const kz = k * z;
-        const val = Math.sin(kx) * Math.cos(ky)
-          + Math.sin(ky) * Math.cos(kz)
-          + Math.sin(kz) * Math.cos(kx);
-        return Math.abs(val) - c;
+        const sx = Math.sin(kx), sy = Math.sin(ky), sz = Math.sin(kz);
+        const cx = Math.cos(kx), cy = Math.cos(ky), cz = Math.cos(kz);
+        const val = sx * cy + sy * cz + sz * cx;
+        const gx = cx * cy - sz * sx;
+        const gy = cy * cz - sx * sy;
+        const gz = cz * cx - sy * sz;
+        return sheetDistance(val, gx, gy, gz, k, wallThickness);
       };
     }
     case 'schwarzP': {
       const k = TWO_PI / cellSize;
-      const c = wallThickness * Math.PI / cellSize;
       return (x, y, z) => {
-        const val = Math.cos(k * x) + Math.cos(k * y) + Math.cos(k * z);
-        return Math.abs(val) - c * 3;
+        const sx = Math.sin(k * x), sy = Math.sin(k * y), sz = Math.sin(k * z);
+        const cx = Math.cos(k * x), cy = Math.cos(k * y), cz = Math.cos(k * z);
+        return sheetDistance(cx + cy + cz, -sx, -sy, -sz, k, wallThickness);
       };
     }
     case 'schwarzD': {
       const k = TWO_PI / cellSize;
-      const c = wallThickness * Math.PI / cellSize;
       return (x, y, z) => {
         const sx = Math.sin(k * x), sy = Math.sin(k * y), sz = Math.sin(k * z);
         const cx = Math.cos(k * x), cy = Math.cos(k * y), cz = Math.cos(k * z);
         const val = sx * sy * sz + sx * cy * cz + cx * sy * cz + cx * cy * sz;
-        return Math.abs(val) - c * 1.4;
+        const gx = cx * sy * sz + cx * cy * cz - sx * sy * cz - sx * cy * sz;
+        const gy = sx * cy * sz - sx * sy * cz + cx * cy * cz - cx * sy * sz;
+        const gz = sx * sy * cz - sx * cy * sz - cx * sy * sz + cx * cy * cz;
+        return sheetDistance(val, gx, gy, gz, k, wallThickness);
       };
     }
     case 'neovius': {
       const k = TWO_PI / cellSize;
-      const c = wallThickness * Math.PI / cellSize;
       return (x, y, z) => {
+        const sx = Math.sin(k * x), sy = Math.sin(k * y), sz = Math.sin(k * z);
         const cx = Math.cos(k * x), cy = Math.cos(k * y), cz = Math.cos(k * z);
         const val = 3 * (cx + cy + cz) + 4 * cx * cy * cz;
-        return Math.abs(val) - c * 13;
+        const gx = -sx * (3 + 4 * cy * cz);
+        const gy = -sy * (3 + 4 * cx * cz);
+        const gz = -sz * (3 + 4 * cx * cy);
+        return sheetDistance(val, gx, gy, gz, k, wallThickness);
       };
     }
     case 'iwp': {
       const k = TWO_PI / cellSize;
       const k2 = 2 * k;
-      const c = wallThickness * Math.PI / cellSize;
       return (x, y, z) => {
+        const sx = Math.sin(k * x), sy = Math.sin(k * y), sz = Math.sin(k * z);
         const cx = Math.cos(k * x), cy = Math.cos(k * y), cz = Math.cos(k * z);
         const val = 2 * (cx * cy + cy * cz + cz * cx)
           - (Math.cos(k2 * x) + Math.cos(k2 * y) + Math.cos(k2 * z));
-        return Math.abs(val) - c * 5;
+        const gx = 2 * sx * (2 * cx - cy - cz);
+        const gy = 2 * sy * (2 * cy - cx - cz);
+        const gz = 2 * sz * (2 * cz - cx - cy);
+        return sheetDistance(val, gx, gy, gz, k, wallThickness);
       };
     }
     case 'spinodal': {
@@ -536,15 +554,27 @@ function buildLatticeEvaluator(params: LatticeParams): (x: number, y: number, z:
           phase: TWO_PI * hashF(i, 2),
         };
       });
-      const c = wallThickness * 0.6 / cellSize;
       return (x, y, z) => {
         let sum = 0;
+        let gx = 0;
+        let gy = 0;
+        let gz = 0;
         for (let i = 0; i < waves.length; i++) {
           const w = waves[i];
-          sum += Math.cos(w.kx * x + w.ky * y + w.kz * z + w.phase);
+          const phase = w.kx * x + w.ky * y + w.kz * z + w.phase;
+          sum += Math.cos(phase);
+          const derivative = -Math.sin(phase);
+          gx += derivative * w.kx;
+          gy += derivative * w.ky;
+          gz += derivative * w.kz;
         }
-        sum /= Math.sqrt(N_WAVES);
-        return Math.abs(sum) - c * 2;
+        const scale = 1 / Math.sqrt(N_WAVES);
+        sum *= scale;
+        gx *= scale;
+        gy *= scale;
+        gz *= scale;
+        const safeGradient = Math.max(Math.hypot(gx, gy, gz), k0 * TPMS_GRADIENT_EPSILON_FACTOR);
+        return Math.abs(sum) / safeGradient - wallThickness * 0.5;
       };
     }
     case 'bcc':
@@ -579,28 +609,57 @@ function tpmsValueFromTrig(
   c2x: number,
   c2y: number,
   c2z: number,
-  c: number
+  k: number,
+  wallThickness: number,
 ): number {
   switch (latticeType) {
     case 'gyroid': {
       const val = sx * cy + sy * cz + sz * cx;
-      return Math.abs(val) - c;
+      return sheetDistance(
+        val,
+        cx * cy - sz * sx,
+        cy * cz - sx * sy,
+        cz * cx - sy * sz,
+        k,
+        wallThickness,
+      );
     }
     case 'schwarzP': {
       const val = cx + cy + cz;
-      return Math.abs(val) - c * 3;
+      return sheetDistance(val, -sx, -sy, -sz, k, wallThickness);
     }
     case 'schwarzD': {
       const val = sx * sy * sz + sx * cy * cz + cx * sy * cz + cx * cy * sz;
-      return Math.abs(val) - c * 1.4;
+      return sheetDistance(
+        val,
+        cx * sy * sz + cx * cy * cz - sx * sy * cz - sx * cy * sz,
+        sx * cy * sz - sx * sy * cz + cx * cy * cz - cx * sy * sz,
+        sx * sy * cz - sx * cy * sz - cx * sy * sz + cx * cy * cz,
+        k,
+        wallThickness,
+      );
     }
     case 'neovius': {
       const val = 3 * (cx + cy + cz) + 4 * cx * cy * cz;
-      return Math.abs(val) - c * 13;
+      return sheetDistance(
+        val,
+        -sx * (3 + 4 * cy * cz),
+        -sy * (3 + 4 * cx * cz),
+        -sz * (3 + 4 * cx * cy),
+        k,
+        wallThickness,
+      );
     }
     case 'iwp': {
       const val = 2 * (cx * cy + cy * cz + cz * cx) - (c2x + c2y + c2z);
-      return Math.abs(val) - c * 5;
+      return sheetDistance(
+        val,
+        2 * sx * (2 * cx - cy - cz),
+        2 * sy * (2 * cy - cx - cz),
+        2 * sz * (2 * cz - cx - cy),
+        k,
+        wallThickness,
+      );
     }
   }
 }
@@ -644,7 +703,6 @@ function attachTpmsGridSampler(
   const latticeType = params.latticeType;
   const k = TWO_PI / params.cellSize;
   const k2 = 2 * k;
-  const c = params.wallThickness * Math.PI / params.cellSize;
 
   target.sampleField = (bounds, resolution, out, onProgress) => {
     const count = resolution + 1;
@@ -709,7 +767,8 @@ function attachTpmsGridSampler(
             cos2X ? cos2X[x] : 0,
             c2y,
             c2z,
-            c
+            k,
+            params.wallThickness,
           );
           out[rowOffset + x] = combinedLatticeSdfValue(
             objectSdf(px, py, pz),
