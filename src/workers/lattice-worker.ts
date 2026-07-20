@@ -2,36 +2,39 @@
 // This runs heavy computation off the main thread.
 
 import { marchingCubes, marchingCubesFromField } from '../geometry/marching-cubes';
-import type { MarchingCubesResult } from '../geometry/marching-cubes';
 import type { GridSdfSampler } from '../geometry/marching-cubes';
 import { buildCombinedSDF, buildSurfaceHexLattice, buildSphereLattice, buildCubeLattice, buildCylinderLattice, buildTorusLattice, buildCapsuleLattice } from '../geometry/lattice';
 import { MeshBVH } from '../geometry/bvh';
-import { buildEdgeTopology, findConnectedComponents } from '../geometry/mesh-topology';
 import type { LatticeParams, ValidationResult, SampleShape } from '../types/project';
 import type { Vec3 } from '../geometry/vec3';
 import { add, sub, dot, cross, length, scale, normalize } from '../geometry/vec3';
 import type { SurfaceHexSample } from '../geometry/lattice';
-import type { LatticeTileJob, LatticeTileResponse, LatticeTileResult, TileBackend, TileSkipStats } from './tile-types';
+import type { TileBackend } from './tile-types';
 import {
   detectGenerationBackendCapabilities,
   formatBackendCapabilities,
   selectBestBackend,
 } from '../backend/generation-backend';
 import { sampleFieldWebGPU } from '../backend/webgpu/webgpu-backend';
+import {
+  ENABLE_SPARSE_TILE_SKIPPING,
+  runTiledGeneration,
+  terminateTileWorkers,
+  TILE_SIZE,
+  tileWorkerCount,
+} from './tiled-generation';
+import { estimateGenerationTimings, formatDuration } from './generation-estimate';
+import { removeDisconnectedFragments } from './mesh-cleanup';
 
 type SdfFunction = ((x: number, y: number, z: number) => number) & Partial<GridSdfSampler>;
 type WorkerPostMessage = (message: unknown, transfer: Transferable[]) => void;
 
 const postWorkerMessage = self.postMessage.bind(self) as WorkerPostMessage;
-const TILE_SIZE = 32;
-const MAX_TILE_WORKERS = 8;
-const ENABLE_SPARSE_TILE_SKIPPING = true;
 const ENABLE_WASM_SINGLE_PLACEHOLDER = false;
 const ENABLE_WASM_THREADED_PLACEHOLDER = false;
 const ENABLE_WEBGPU_PLACEHOLDER = false;
 const ENABLE_WEBGPU_FIELD_CPU_MC = false;
 
-let activeTileWorkers: Worker[] = [];
 
 function withThinSectionFilter(sdf: SdfFunction, filter: number): SdfFunction {
   if (filter <= 0) return sdf;
@@ -56,11 +59,6 @@ function generatedResultTransferList(response: WorkerResponse): Transferable[] {
   if (response.surfaceSampleNormals) transfers.push(response.surfaceSampleNormals.buffer);
   if (response.surfaceSampleHoleScales) transfers.push(response.surfaceSampleHoleScales.buffer);
   return transfers;
-}
-
-function terminateTileWorkers(): void {
-  for (const worker of activeTileWorkers) worker.terminate();
-  activeTileWorkers = [];
 }
 
 function surfaceSampleWorkerTransferList(payload: ShapeSampleWorkerMessage | MeshSampleWorkerMessage): Transferable[] {
@@ -128,29 +126,6 @@ export interface WorkerResponse {
 }
 
 let cancelled = false;
-
-const LATTICE_COMPLEXITY: Record<LatticeParams['latticeType'], number> = {
-  gyroid: 1.0,
-  schwarzP: 1.0,
-  schwarzD: 1.15,
-  neovius: 1.2,
-  iwp: 1.25,
-  bcc: 1.1,
-  octet: 1.2,
-  diamond: 1.25,
-  hexagon: 1.15,
-  triangle: 1.1,
-  voronoi: 1.7,
-  spinodal: 2.0,
-};
-
-type GenerationEstimate = {
-  preSeconds: number;
-  marchSeconds: number;
-  validationSeconds: number;
-  totalSeconds: number;
-};
-
 
 type SurfaceSampleWorkerResponse = {
   positions: Float32Array;
@@ -298,51 +273,6 @@ function buildMeshSampler(
 }
 
 
-function removeDisconnectedFragments(
-  mesh: { positions: Float32Array; normals: Float32Array; triCount: number },
-  minComponentRatio = 0.003
-): { positions: Float32Array; normals: Float32Array; triCount: number; removedTriangles: number } {
-  const { positions, normals, triCount } = mesh;
-  if (triCount <= 0) return { positions, normals, triCount, removedTriangles: 0 };
-
-  const components = findConnectedComponents(buildEdgeTopology(positions, triCount));
-
-  if (components.length <= 1) {
-    return { positions, normals, triCount, removedTriangles: 0 };
-  }
-
-  components.sort((a, b) => b.length - a.length);
-  const largest = components[0].length;
-  const keep = new Uint8Array(triCount);
-  for (const comp of components) {
-    if (comp.length === largest || comp.length >= largest * minComponentRatio) {
-      for (const idx of comp) keep[idx] = 1;
-    }
-  }
-
-  let kept = 0;
-  for (let i = 0; i < triCount; i++) if (keep[i]) kept++;
-  if (kept === triCount || kept === 0) {
-    return { positions, normals, triCount, removedTriangles: 0 };
-  }
-
-  const outPos = new Float32Array(kept * 9);
-  const outNrm = new Float32Array(kept * 3);
-  let outTri = 0;
-  for (let i = 0; i < triCount; i++) {
-    if (!keep[i]) continue;
-    outPos.set(positions.subarray(i * 9, i * 9 + 9), outTri * 9);
-    outNrm.set(normals.subarray(i * 3, i * 3 + 3), outTri * 3);
-    outTri++;
-  }
-
-  return {
-    positions: outPos,
-    normals: outNrm,
-    triCount: outTri,
-    removedTriangles: triCount - outTri,
-  };
-}
 function estimateNormal(
   sdf: (x: number, y: number, z: number) => number,
   p: Vec3,
@@ -642,295 +572,6 @@ function applyAdaptiveHoleScales(samples: SurfaceHexSample[], spacing: number): 
     sample.holeScale = Math.max(0.72, Math.min(1.0, targetScale));
   }
   return samples;
-}
-
-function estimateGenerationTimings(
-  params: LatticeParams,
-  resolution: number,
-  hasCustomMesh: boolean
-): GenerationEstimate {
-  const samples = Math.pow(resolution + 1, 3);
-  const cubes = Math.pow(resolution, 3);
-  const latticeFactor = LATTICE_COMPLEXITY[params.latticeType] ?? 1.0;
-  const gradientFactor = params.gradientEnabled ? 1.1 : 1.0;
-
-  const sdfCost = 2.2e-6 * latticeFactor * gradientFactor;
-  const cubeCost = 0.9e-6;
-  const preSeconds = samples * sdfCost;
-  const marchSeconds = cubes * cubeCost;
-
-  const validationFactor = hasCustomMesh ? 0.55 : 0.35;
-  const validationSeconds = (preSeconds + marchSeconds) * validationFactor;
-  const totalSeconds = Math.max(0.5, preSeconds + marchSeconds + validationSeconds);
-  return {
-    preSeconds,
-    marchSeconds,
-    validationSeconds,
-    totalSeconds,
-  };
-}
-
-function formatDuration(seconds: number): string {
-  if (seconds < 90) return `${Math.round(seconds)}s`;
-  if (seconds < 90 * 60) return `${Math.round(seconds / 60)}m`;
-  const hours = seconds / 3600;
-  return `${hours.toFixed(1)}h`;
-}
-
-function tileWorkerCount(): number {
-  return Math.max(1, Math.min(MAX_TILE_WORKERS, (self.navigator?.hardwareConcurrency || 4) - 1));
-}
-
-function objectSdfForShape(shape: SampleShape, sphereRadius: number): (x: number, y: number, z: number) => number {
-  switch (shape) {
-    case 'sphere': {
-      const radius = sphereRadius || 25;
-      return (x, y, z) => Math.sqrt(x * x + y * y + z * z) - radius;
-    }
-    case 'cube': {
-      const h = 15;
-      return (x, y, z) => {
-        const dx = Math.abs(x) - h;
-        const dy = Math.abs(y) - h;
-        const dz = Math.abs(z) - h;
-        const outside = Math.sqrt(Math.max(dx, 0) ** 2 + Math.max(dy, 0) ** 2 + Math.max(dz, 0) ** 2);
-        const inside = Math.min(Math.max(dx, dy, dz), 0);
-        return outside + inside;
-      };
-    }
-    case 'cylinder': {
-      const cr = 15;
-      const ch = 20;
-      return (x, y, z) => {
-        const dRadial = Math.sqrt(x * x + y * y) - cr;
-        const dAxial = Math.abs(z) - ch;
-        const outside = Math.sqrt(Math.max(dRadial, 0) ** 2 + Math.max(dAxial, 0) ** 2);
-        const inside = Math.min(Math.max(dRadial, dAxial), 0);
-        return outside + inside;
-      };
-    }
-    case 'torus': {
-      const major = 20;
-      const tube = 8;
-      return (x, y, z) => {
-        const qx = Math.sqrt(x * x + y * y) - major;
-        return Math.sqrt(qx * qx + z * z) - tube;
-      };
-    }
-    case 'capsule': {
-      const capR = 12;
-      const capHH = 15;
-      return (x, y, z) => {
-        const cz = Math.max(-capHH, Math.min(capHH, z));
-        return Math.sqrt(x * x + y * y + (z - cz) * (z - cz)) - capR;
-      };
-    }
-  }
-}
-
-function sparseSkipMargin(params: LatticeParams, tileBounds: { min: Vec3; max: Vec3 }): number {
-  const sx = tileBounds.max[0] - tileBounds.min[0];
-  const sy = tileBounds.max[1] - tileBounds.min[1];
-  const sz = tileBounds.max[2] - tileBounds.min[2];
-  const tileRadius = 0.5 * Math.sqrt(sx * sx + sy * sy + sz * sz);
-  const featureMargin = Math.max(
-    params.cellSize * 0.25,
-    params.wallThickness,
-    params.strutDiameter,
-    params.shellThickness,
-    params.surfaceDepth,
-    params.thinSectionFilter,
-    0
-  );
-  return tileRadius + featureMargin;
-}
-
-function classifySparseTile(
-  params: LatticeParams,
-  objectSdf: (x: number, y: number, z: number) => number,
-  tileBounds: { min: Vec3; max: Vec3 }
-): 'process' | 'skip' {
-  if (!ENABLE_SPARSE_TILE_SKIPPING) return 'process';
-
-  const min = tileBounds.min;
-  const max = tileBounds.max;
-  const cx = (min[0] + max[0]) * 0.5;
-  const cy = (min[1] + max[1]) * 0.5;
-  const cz = (min[2] + max[2]) * 0.5;
-  const margin = sparseSkipMargin(params, tileBounds);
-  let minD = Infinity;
-  let maxD = -Infinity;
-
-  const record = (d: number) => {
-    if (d < minD) minD = d;
-    if (d > maxD) maxD = d;
-  };
-  record(objectSdf(min[0], min[1], min[2]));
-  record(objectSdf(max[0], min[1], min[2]));
-  record(objectSdf(min[0], max[1], min[2]));
-  record(objectSdf(max[0], max[1], min[2]));
-  record(objectSdf(min[0], min[1], max[2]));
-  record(objectSdf(max[0], min[1], max[2]));
-  record(objectSdf(min[0], max[1], max[2]));
-  record(objectSdf(max[0], max[1], max[2]));
-  record(objectSdf(cx, cy, cz));
-
-  // All modes are empty far enough outside the source object.
-  if (minD > margin) return 'skip';
-
-  // Surface-only lattices are also empty deep enough inside the surface band.
-  if (params.surfaceOnly && maxD < -params.surfaceDepth - margin) return 'skip';
-
-  return 'process';
-}
-
-function buildTileJobs(
-  params: LatticeParams,
-  shape: SampleShape,
-  sphereRadius: number,
-  bounds: { min: Vec3; max: Vec3 },
-  resolution: number
-): { jobs: LatticeTileJob[]; stats: TileSkipStats } {
-  const jobs: LatticeTileJob[] = [];
-  const dx = (bounds.max[0] - bounds.min[0]) / resolution;
-  const dy = (bounds.max[1] - bounds.min[1]) / resolution;
-  const dz = (bounds.max[2] - bounds.min[2]) / resolution;
-  let tileId = 0;
-  let tilesTotal = 0;
-  let tilesSkipped = 0;
-  const objectSdf = objectSdfForShape(shape, sphereRadius);
-
-  for (let z = 0; z < resolution; z += TILE_SIZE) {
-    const cz = Math.min(TILE_SIZE, resolution - z);
-    for (let y = 0; y < resolution; y += TILE_SIZE) {
-      const cy = Math.min(TILE_SIZE, resolution - y);
-      for (let x = 0; x < resolution; x += TILE_SIZE) {
-        const cx = Math.min(TILE_SIZE, resolution - x);
-        tilesTotal++;
-        const tileBounds = {
-          min: [bounds.min[0] + x * dx, bounds.min[1] + y * dy, bounds.min[2] + z * dz] as Vec3,
-          max: [bounds.min[0] + (x + cx) * dx, bounds.min[1] + (y + cy) * dy, bounds.min[2] + (z + cz) * dz] as Vec3,
-        };
-        if (classifySparseTile(params, objectSdf, tileBounds) === 'skip') {
-          tilesSkipped++;
-          continue;
-        }
-        jobs.push({
-          type: 'tile',
-          tileId: tileId++,
-          params,
-          shape,
-          sphereRadius,
-          cells: [cx, cy, cz],
-          bounds: tileBounds,
-        });
-      }
-    }
-  }
-
-  return {
-    jobs,
-    stats: {
-      tilesTotal,
-      tilesSkipped,
-      tilesProcessed: jobs.length,
-    },
-  };
-}
-
-function mergeTileResults(results: LatticeTileResult[]): MarchingCubesResult {
-  const sorted = [...results].sort((a, b) => a.tileId - b.tileId);
-  let triCount = 0;
-  let positionLength = 0;
-  let normalLength = 0;
-  for (const result of sorted) {
-    triCount += result.triCount;
-    positionLength += result.positions.length;
-    normalLength += result.normals.length;
-  }
-
-  const positions = new Float32Array(positionLength);
-  const normals = new Float32Array(normalLength);
-  let po = 0;
-  let no = 0;
-  for (const result of sorted) {
-    positions.set(result.positions, po);
-    normals.set(result.normals, no);
-    po += result.positions.length;
-    no += result.normals.length;
-  }
-
-  return { positions, normals, triCount };
-}
-
-function runTiledGeneration(
-  params: LatticeParams,
-  shape: SampleShape,
-  sphereRadius: number,
-  bounds: { min: Vec3; max: Vec3 },
-  resolution: number,
-  onProgress: (completed: number, total: number, timingMs: number, stats: TileSkipStats) => void
-): Promise<{ result: MarchingCubesResult; stats: TileSkipStats }> {
-  const { jobs, stats } = buildTileJobs(params, shape, sphereRadius, bounds, resolution);
-  if (jobs.length === 0) {
-    return Promise.resolve({
-      result: { positions: new Float32Array(0), normals: new Float32Array(0), triCount: 0 },
-      stats,
-    });
-  }
-  const workerCount = Math.min(tileWorkerCount(), jobs.length);
-  const results: LatticeTileResult[] = [];
-  let nextJob = 0;
-  let completed = 0;
-  let timingMs = 0;
-
-  return new Promise<{ result: MarchingCubesResult; stats: TileSkipStats }>((resolve, reject) => {
-    const finish = () => {
-      terminateTileWorkers();
-      resolve({ result: mergeTileResults(results), stats });
-    };
-
-    const startWorker = () => {
-      const worker = new Worker(new URL('./lattice-tile-worker.ts', import.meta.url), { type: 'module' });
-      activeTileWorkers.push(worker);
-
-      const postNext = () => {
-        if (cancelled) {
-          reject(new Error('Cancelled'));
-          return;
-        }
-        const job = jobs[nextJob++];
-        if (!job) {
-          if (completed === jobs.length) finish();
-          return;
-        }
-        worker.postMessage(job);
-      };
-
-      worker.onmessage = (event: MessageEvent<LatticeTileResponse>) => {
-        const response = event.data;
-        if (response.type === 'error') {
-          reject(new Error(response.message));
-          return;
-        }
-        results[response.tileId] = response;
-        completed++;
-        timingMs += response.timing.totalMs;
-        onProgress(completed, jobs.length, timingMs, stats);
-        if (completed === jobs.length) finish();
-        else postNext();
-      };
-      worker.onerror = () => reject(new Error('Tile worker failed'));
-      postNext();
-    };
-
-    try {
-      for (let i = 0; i < workerCount; i++) startWorker();
-    } catch (err) {
-      terminateTileWorkers();
-      reject(err instanceof Error ? err : new Error('Tile worker creation failed'));
-    }
-  }).finally(() => terminateTileWorkers());
 }
 
 self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
@@ -1308,7 +949,8 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                 progress: 0.12 + (completed / Math.max(1, total)) * 0.76,
                 message: `cpu-tiled: ${completed}/${total} tiles processed, ${stats.tilesSkipped}/${stats.tilesTotal} skipped (${Math.round(timingMs)}ms worker time)`
               } as WorkerResponse);
-            }
+            },
+            () => cancelled,
           );
           if (cancelled) throw new Error('Cancelled');
           const result = removeDisconnectedFragments(rawTiledResult, 0.004);
