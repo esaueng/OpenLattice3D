@@ -19,11 +19,11 @@ current CPU output.
 
 ## Backend boundary
 
-Add a future backend name such as `webgpu-mc` or promote the existing
-`webgpu-field-cpu-mc` once emission is also on GPU. Keep selection in
-`src/backend/generation-backend.ts`.
+Add a future backend name such as `webgpu-mc` only after the full pipeline below
+passes its correctness and performance gates. Introduce a small selector beside
+the worker orchestrator; there is intentionally no production GPU selector today.
 
-The entry point should live under `src/backend/webgpu/`, for example:
+The entry point can live in a new `src/backend/webgpu/` boundary, for example:
 
 ```ts
 generateTileWebGPU(options): Promise<WebGpuTileResult>
@@ -62,8 +62,8 @@ optimization can batch multiple small tiles into one GPU submission.
 
 ## Pass 1: field sampling
 
-This pass is mostly the existing `sampleFieldWebGPU` shader generalized to tile
-inputs.
+This pass should port the CPU lattice formulas and their millimetre-valued TPMS
+distance calibration to WGSL, then generalize them to tile inputs.
 
 Buffers:
 
@@ -82,9 +82,9 @@ The shader computes world position from tile sample bounds. For analytic sample
 shapes, it evaluates object SDF and lattice SDF directly. For imported meshes,
 this pass is deferred until the flat BVH SDF path exists.
 
-The first implementation should support the same limited scope as
-`webgpu-field-cpu-mc`: built-in sample shapes and `gyroid`/`schwarzP`, then add
-more TPMS types after correctness is stable.
+The first implementation may start with built-in sample shapes and
+`gyroid`/`schwarzP`, but it must remain development-only until unsupported
+lattice types fall back cleanly and the supported fields match CPU tests.
 
 ## Pass 2: cube classification
 
@@ -327,7 +327,7 @@ For logs, aggregate into:
 - `CPU merge`
 
 These labels should align with future performance reports so WebGPU can be
-compared against `cpu-tiled` and `webgpu-field-cpu-mc`.
+compared against `cpu-tiled` on the same end-to-end jobs.
 
 ## Implementation phases
 
@@ -362,4 +362,3 @@ Compare:
 
 Exact triangle ordering does not have to match CPU globally, but each tile
 should emit triangles deterministically for stable debugging.
-

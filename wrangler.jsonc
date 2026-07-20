@@ -1,7 +1,7 @@
 {
   "name": "openlattice3d",
   "main": "worker/index.ts",
-  "compatibility_date": "2024-12-01",
+  "compatibility_date": "2026-07-20",
   "routes": [
     {
       "pattern": "openlattice3d.com",

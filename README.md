@@ -61,8 +61,9 @@ COEP compatibility problems with third-party form resources.
 
 - **Import STL**: load any STL file (binary or ASCII). The app analyzes the mesh for
   watertightness/manifoldness and applies a basic repair (normal recalculation) if needed.
-- **Import JSON**: restore saved lattice parameters from a previously exported project JSON.
-  Imported values are validated and out-of-range or malformed entries are ignored.
+- **Import JSON**: resume a versioned project with its parameters, embedded source mesh,
+  selection masks, validation results, and viewer state. Legacy parameter-only JSON files
+  remain supported; malformed or out-of-range values are ignored.
 - **Sample Part**: pick a built-in procedural shape (sphere, cube, cylinder, torus, capsule)
   with print-ready defaults. Procedural shapes use analytic SDFs and a tiled multi-worker
   CPU backend for fast generation.
@@ -74,6 +75,8 @@ COEP compatibility problems with third-party form resources.
 - **Cell Size**: lattice unit cell dimension (default 8mm).
 - **Shell / No shell / Surface only**: keep an outer shell of given thickness, generate a pure
   lattice, or confine the lattice to a band near the surface (hollow inside).
+- **Escape Holes**: subtract one or more axis-aligned drainage cylinders from shell-bearing
+  parts, with a live translucent placement preview.
 - **Wall Thickness / Strut Diameter**: lattice feature size depending on type.
 - **Min Feature Size & Tolerance**: validation targets.
 - **Export Resolution**: marching cubes sampling density (1–10).
@@ -88,7 +91,8 @@ Click a tile to make that lattice type active.
 
 Click "Generate Lattice" (or press `G`). Computation runs in background Web Workers with
 progress, time estimates, and run logs (drawer in the status bar). Hotkeys `1`–`4` switch
-viewer modes (Original, Solid, Cross-Section, X-Ray); `H` resets the viewport.
+viewer modes (Original, Solid, Cross-Section, X-Ray); `H` resets the viewport. Selection edits
+support `Ctrl/Cmd+Z` and `Ctrl/Cmd+Shift+Z` undo/redo.
 
 ### 5. Validate
 
@@ -101,7 +105,11 @@ After generation, the validation panel shows:
 ### 6. Export
 
 - **Export STL**: binary STL of the lattice result (outward-oriented triangles)
-- **Export Project JSON**: parameters, selections, and validation results
+- **Export 3MF**: indexed triangle mesh in a standards-based, millimetre-unit 3MF package
+- **Export Project JSON**: a resumable project with its source geometry and workspace state
+
+After validation, the right panel also reports generated volume, relative density, material
+reduction, and optional mass when a material density is configured.
 
 ## Architecture
 
@@ -116,21 +124,21 @@ src/
     marching-cubes.ts       # Marching cubes iso-surface extraction
     lattice.ts              # Lattice SDFs + combined shell/core/surface builders
     validation.ts           # Deviation, thickness, manifold, connectivity checks
-  backend/
-    generation-backend.ts   # Backend capability detection and selection
-    webgpu/                 # WebGPU field sampling (flag-gated experiment)
-    wasm/                   # WASM backend scaffold (not active; see docs/performance)
   workers/
-    lattice-worker.ts       # Generation orchestrator (off-main-thread)
+    lattice-worker.ts       # Generation and validation orchestrator
     lattice-tile-worker.ts  # One marching-cubes tile per message (CPU tiled backend)
+    tiled-generation.ts     # Bounded worker fan-out, sparse skipping, deterministic merge
+    generation-estimate.ts  # Resolution and memory estimates
+    mesh-cleanup.ts         # Post-generation fragment cleanup
     surface-sample-worker.ts# Poisson surface sampling for hex/tri surface lattices
     validation-worker.ts    # Post-generation validation
   components/
-    Viewer3D.tsx            # three.js viewer (react-three-fiber), gizmo, demo grid
+    Viewer3D.tsx            # Viewer scene orchestration and interaction
+    viewer/                 # Mesh renderers and twelve-lattice demo grid
     LeftPanel.tsx           # Import, parameters, generate
-    RightPanel.tsx          # Validation results
+    RightPanel.tsx          # Validation and manufacturing statistics
     ViewerControls.tsx      # View modes, cross-section, background
-    ExportControls.tsx      # STL / project JSON export
+    ExportControls.tsx      # STL, 3MF, and project JSON export
   hooks/
     useLatticeGeneration.ts # Worker lifecycle for generation + validation
     useWorkspaceHotkeys.ts  # Keyboard shortcuts
@@ -138,8 +146,14 @@ src/
     useStore.ts             # Zustand global state + IndexedDB persistence
   types/
     project.ts              # Data model, params, presets, param sanitization
-  utils/                    # Export downloads, notifications, browser features
+  utils/
+    project-file.ts         # Versioned project serialization and restoration
+    export.ts               # Browser download helpers
 ```
+
+See [docs/architecture.md](./docs/architecture.md) for the data flow, geometry
+contracts, and module boundaries. Production generation uses the tested CPU tiled and
+single-worker paths; see [the backend decision](./docs/performance/backend-decision.md).
 
 ### SDF Pipeline (Shell + Core)
 1. Compute signed distance field from input mesh (BVH-accelerated) or analytic shape SDF
@@ -156,9 +170,10 @@ src/
 
 ## Testing
 
-Unit tests cover the geometry core: STL parsing (including malformed input), marching cubes
-(manifoldness, winding orientation, degenerate-triangle handling), BVH signed distances,
-lattice SDFs (periodicity, bond geometry), topology analysis, and parameter sanitization.
+Unit tests cover STL parsing (including malformed and shipped-asset round trips), marching
+cubes, BVH distances, all lattice SDFs and TPMS thickness calibration, topology stress cases,
+escape-hole subtraction, statistics, 3MF packaging, project restoration, state history, and
+parameter sanitization.
 
 ```bash
 npm test
