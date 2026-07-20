@@ -35,11 +35,24 @@ export function useWorkspaceHotkeys({ startGeneration, canGenerate }: LatticeGen
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.repeat) return;
-      if (event.metaKey || event.ctrlKey || event.altKey) return;
       if (isEditableTarget(event.target)) return;
 
       const key = event.key.toLowerCase();
       const store = useStore.getState();
+
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && key === 'z') {
+        event.preventDefault();
+        if (event.shiftKey) {
+          store.redoSelection();
+          store.addLog('Selection redone');
+        } else {
+          store.undoSelection();
+          store.addLog('Selection undone');
+        }
+        return;
+      }
+
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
 
       if (key === 'h') {
         event.preventDefault();

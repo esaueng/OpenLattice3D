@@ -1,8 +1,31 @@
 // Inspection controls: validation and export
 import { useStore } from '../store/useStore';
+import { useMemo } from 'react';
+import { massGrams, meshVolumeMm3, proceduralSolidVolumeMm3 } from '../geometry/mesh-stats';
 
 export function RightPanel() {
   const validation = useStore((s) => s.validation);
+  const resultMesh = useStore((s) => s.resultMesh);
+  const originalMesh = useStore((s) => s.originalMesh);
+  const meshInfo = useStore((s) => s.meshInfo);
+  const sampleShape = useStore((s) => s.sampleShape);
+  const sphereRadius = useStore((s) => s.sphereRadius);
+  const density = useStore((s) => s.params.materialDensityGPerCm3);
+  const updateParams = useStore((s) => s.updateParams);
+  const statistics = useMemo(() => {
+    if (!resultMesh || !validation?.manifold.passed) return null;
+    const resultVolume = meshVolumeMm3(resultMesh);
+    const sourceVolume = sampleShape
+      ? proceduralSolidVolumeMm3(sampleShape, sphereRadius)
+      : originalMesh && meshInfo?.isWatertight
+        ? meshVolumeMm3(originalMesh)
+        : null;
+    return {
+      resultVolume,
+      sourceVolume,
+      relativeDensity: sourceVolume && sourceVolume > 0 ? resultVolume / sourceVolume : null,
+    };
+  }, [meshInfo?.isWatertight, originalMesh, resultMesh, sampleShape, sphereRadius, validation?.manifold.passed]);
 
   return (
     <>
@@ -56,6 +79,43 @@ export function RightPanel() {
               ))}
             </div>
           )}
+        </section>
+      )}
+      {resultMesh && (
+        <section className="panel-section">
+          <h3>Part Statistics</h3>
+          {!validation && <div>Waiting for manifold validation…</div>}
+          {validation && !validation.manifold.passed && (
+            <div className="warning">Volume unavailable: result mesh is not closed and manifold.</div>
+          )}
+          {statistics && (
+            <div className="info-block">
+              <div><strong>Lattice volume:</strong> {statistics.resultVolume.toFixed(1)} mm³</div>
+              {statistics.sourceVolume !== null && statistics.relativeDensity !== null && (
+                <>
+                  <div><strong>Solid volume:</strong> {statistics.sourceVolume.toFixed(1)} mm³</div>
+                  <div><strong>Relative density:</strong> {(statistics.relativeDensity * 100).toFixed(1)}%</div>
+                  <div><strong>Volume reduction:</strong> {((1 - statistics.relativeDensity) * 100).toFixed(1)}%</div>
+                </>
+              )}
+              {density > 0 && (
+                <div><strong>Estimated mass:</strong> {massGrams(statistics.resultVolume, density).toFixed(2)} g</div>
+              )}
+            </div>
+          )}
+          <div className="row">
+            <label htmlFor="material-density">Density (g/cm³):</label>
+            <input
+              id="material-density"
+              type="number"
+              min={0}
+              max={100}
+              step={0.01}
+              value={density}
+              title="Enter a material density to enable mass estimation; zero disables it."
+              onChange={(event) => updateParams({ materialDensityGPerCm3: Math.max(0, Number(event.target.value) || 0) })}
+            />
+          </div>
         </section>
       )}
     </>

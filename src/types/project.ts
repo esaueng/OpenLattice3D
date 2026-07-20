@@ -58,6 +58,7 @@ export interface LatticeParams {
   escapeHoleDiameter: number;  // mm
   escapeHoleCount: number;
   escapeHoleAxis: EscapeHoleAxis;
+  materialDensityGPerCm3: number; // 0 disables mass estimation
   toleranceMm: number;         // outer deviation tolerance
 }
 
@@ -101,6 +102,7 @@ export const DEFAULT_PARAMS: LatticeParams = {
   escapeHoleDiameter: 5.0,
   escapeHoleCount: 2,
   escapeHoleAxis: 'z',
+  materialDensityGPerCm3: 0,
   toleranceMm: 0.2,
 };
 
@@ -154,6 +156,7 @@ const PARAM_VALIDATORS: Record<keyof LatticeParams, ParamValidator> = {
   escapeHoleDiameter: isFiniteNumberIn(0.1, 100),
   escapeHoleCount: isFiniteNumberIn(0, 100),
   escapeHoleAxis: isOneOf(ESCAPE_HOLE_AXES),
+  materialDensityGPerCm3: isFiniteNumberIn(0, 100),
   toleranceMm: isFiniteNumberIn(0.001, 50),
 };
 

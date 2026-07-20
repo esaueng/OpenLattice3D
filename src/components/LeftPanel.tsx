@@ -4,7 +4,7 @@ import { useStore } from '../store/useStore';
 import { parseSTL } from '../geometry/stl-parser';
 import { analyzeMesh, repairMesh } from '../geometry/mesh-analysis';
 import type { LatticeType, SampleShape } from '../types/project';
-import { sanitizeLatticeParams } from '../types/project';
+import { parseProjectFile } from '../utils/project-file';
 import { isSheetType } from '../geometry/lattice';
 import { SAMPLE_SHAPE_INFO } from '../store/useStore';
 import type { LatticeGenerationControls } from '../hooks/useLatticeGeneration';
@@ -65,20 +65,19 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
     try {
       const text = await file.text();
       const data: unknown = JSON.parse(text);
-      // Support both { parameters: {...} } (project JSON) and plain { latticeType: ... } formats
-      const source = (typeof data === 'object' && data !== null && 'parameters' in data)
-        ? (data as { parameters: unknown }).parameters
-        : data;
-      const { params, accepted, rejected } = sanitizeLatticeParams(source);
-      if (rejected.length > 0) {
-        store.addLog(`JSON import: ignored invalid value(s) for ${rejected.join(', ')}`, 'warn');
+      const parsed = parseProjectFile(data);
+      for (const warning of parsed.warnings) store.addLog(`JSON import: ${warning}`, 'warn');
+      if (parsed.kind === 'project') {
+        store.restoreProject(parsed);
+        store.addLog(`Restored project from ${file.name}; regenerate to refresh geometry and validation`);
+      } else {
+        if (parsed.accepted.length === 0) {
+          store.addLog('JSON import: no valid parameters found', 'error');
+          return;
+        }
+        store.importParams(parsed.params);
+        store.addLog(`Imported ${parsed.accepted.length} parameter(s) from ${file.name}`);
       }
-      if (accepted.length === 0) {
-        store.addLog('JSON import: no valid parameters found', 'error');
-        return;
-      }
-      store.importParams(params);
-      store.addLog(`Imported ${accepted.length} parameter(s) from ${file.name}`);
     } catch (err) {
       store.addLog(`JSON import failed: ${err}`, 'error');
     }
@@ -190,6 +189,37 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
           </div>
         )}
       </section>
+
+      {store.originalMesh && (
+        <section className="panel-section">
+          <h3>Constraint Painting</h3>
+          <div className="row" style={{ gap: '6px', flexWrap: 'wrap' }}>
+            <button
+              className={`btn btn-small ${store.selectionMode === 'keep_out' ? 'btn-primary' : ''}`}
+              onClick={() => store.setSelectionMode('keep_out')}
+              title="Mark source faces that must remain outside the generated lattice."
+            >
+              Keep-out
+            </button>
+            <button
+              className={`btn btn-small ${store.selectionMode === 'keep_in' ? 'btn-primary' : ''}`}
+              onClick={() => store.setSelectionMode('keep_in')}
+              title="Mark source faces that should stay solid."
+            >
+              Keep-in
+            </button>
+            <button className="btn btn-small" onClick={() => store.setSelectionMode('none')}>Stop</button>
+          </div>
+          <div className="row" style={{ gap: '6px', flexWrap: 'wrap', marginTop: '6px' }}>
+            <button className="btn btn-small" onClick={store.undoSelection} disabled={store.selectionUndo.length === 0}>Undo</button>
+            <button className="btn btn-small" onClick={store.redoSelection} disabled={store.selectionRedo.length === 0}>Redo</button>
+            <button className="btn btn-small" onClick={store.clearSelection}>Clear</button>
+          </div>
+          <div className="info-block">
+            Keep-out: {store.keepOutTris.size.toLocaleString()} faces · Keep-in: {store.keepInTris.size.toLocaleString()} faces
+          </div>
+        </section>
+      )}
 
       <section className="panel-section">
         <h3>Multiview</h3>
