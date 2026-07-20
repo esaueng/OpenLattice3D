@@ -69,33 +69,79 @@ function parseBinarySTL(buffer: ArrayBuffer): TriangleMesh {
 
 function parseASCIISTL(buffer: ArrayBuffer): TriangleMesh {
   const text = new TextDecoder().decode(buffer);
-  const facetRe = /facet\s+normal\s+([\d.eE+-]+)\s+([\d.eE+-]+)\s+([\d.eE+-]+)\s+outer\s+loop\s+vertex\s+([\d.eE+-]+)\s+([\d.eE+-]+)\s+([\d.eE+-]+)\s+vertex\s+([\d.eE+-]+)\s+([\d.eE+-]+)\s+([\d.eE+-]+)\s+vertex\s+([\d.eE+-]+)\s+([\d.eE+-]+)\s+([\d.eE+-]+)\s+endloop\s+endfacet/gi;
-  const tris: { n: Vec3; v: [Vec3, Vec3, Vec3] }[] = [];
-  let m: RegExpExecArray | null;
-  while ((m = facetRe.exec(text)) !== null) {
-    tris.push({
-      n: [parseFloat(m[1]), parseFloat(m[2]), parseFloat(m[3])],
-      v: [
-        [parseFloat(m[4]), parseFloat(m[5]), parseFloat(m[6])],
-        [parseFloat(m[7]), parseFloat(m[8]), parseFloat(m[9])],
-        [parseFloat(m[10]), parseFloat(m[11]), parseFloat(m[12])],
-      ],
-    });
-  }
-  const triCount = tris.length;
-  const positions = new Float32Array(triCount * 9);
-  const normals = new Float32Array(triCount * 3);
-  for (let i = 0; i < triCount; i++) {
-    normals[i * 3] = tris[i].n[0];
-    normals[i * 3 + 1] = tris[i].n[1];
-    normals[i * 3 + 2] = tris[i].n[2];
-    for (let v = 0; v < 3; v++) {
-      positions[i * 9 + v * 3] = tris[i].v[v][0];
-      positions[i * 9 + v * 3 + 1] = tris[i].v[v][1];
-      positions[i * 9 + v * 3 + 2] = tris[i].v[v][2];
+  let offset = 0;
+  let line = 1;
+
+  // A manual token scanner keeps parsing linear and avoids one backtracking
+  // regular expression plus a second object representation of every facet.
+  const nextToken = (): { value: string; line: number } | null => {
+    while (offset < text.length) {
+      const code = text.charCodeAt(offset);
+      if (code === 10) line++;
+      if (code > 32) break;
+      offset++;
     }
+    if (offset >= text.length) return null;
+    const tokenLine = line;
+    const start = offset;
+    while (offset < text.length && text.charCodeAt(offset) > 32) offset++;
+    return { value: text.slice(start, offset), line: tokenLine };
+  };
+
+  const requireToken = (expected: string, context: string) => {
+    const token = nextToken();
+    if (!token || token.value.toLowerCase() !== expected) {
+      const actual = token?.value ?? 'end of file';
+      throw new Error(`STL parse failed at line ${token?.line ?? line}: expected ${expected} ${context}, found ${actual}`);
+    }
+  };
+
+  const readNumber = (context: string): number => {
+    const token = nextToken();
+    const value = token ? Number(token.value) : Number.NaN;
+    if (!Number.isFinite(value)) {
+      throw new Error(`STL parse failed at line ${token?.line ?? line}: invalid ${context}`);
+    }
+    return value;
+  };
+
+  const positionValues: number[] = [];
+  const normalValues: number[] = [];
+  let token: { value: string; line: number } | null;
+  while ((token = nextToken()) !== null) {
+    const keyword = token.value.toLowerCase();
+    if (keyword === 'endsolid') break;
+    if (keyword !== 'facet') continue;
+
+    requireToken('normal', 'after facet');
+    const normal: Vec3 = [readNumber('normal x'), readNumber('normal y'), readNumber('normal z')];
+    requireToken('outer', 'after facet normal');
+    requireToken('loop', 'after outer');
+    const vertices: [Vec3, Vec3, Vec3] = [
+      [0, 0, 0],
+      [0, 0, 0],
+      [0, 0, 0],
+    ];
+    for (let vertexIndex = 0; vertexIndex < 3; vertexIndex++) {
+      requireToken('vertex', `for vertex ${vertexIndex + 1}`);
+      vertices[vertexIndex] = [
+        readNumber(`vertex ${vertexIndex + 1} x`),
+        readNumber(`vertex ${vertexIndex + 1} y`),
+        readNumber(`vertex ${vertexIndex + 1} z`),
+      ];
+    }
+    requireToken('endloop', 'after three vertices');
+    requireToken('endfacet', 'after endloop');
+    normalValues.push(normal[0], normal[1], normal[2]);
+    for (const vertex of vertices) positionValues.push(vertex[0], vertex[1], vertex[2]);
   }
-  return { positions, normals, triCount };
+
+  const triCount = normalValues.length / 3;
+  return {
+    positions: Float32Array.from(positionValues),
+    normals: Float32Array.from(normalValues),
+    triCount,
+  };
 }
 
 /** Export binary STL from flat position + normal arrays */
