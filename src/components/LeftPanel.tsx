@@ -305,6 +305,58 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
             </div>
           )}
 
+          {!store.params.noShell && !store.params.surfaceOnly && store.params.variant === 'shell_core' && (
+            <>
+              <div className="row">
+                <label htmlFor="escape-holes">Escape Holes:</label>
+                <input
+                  id="escape-holes"
+                  type="checkbox"
+                  title="Subtract through-holes along the selected build axis to release trapped powder or resin."
+                  checked={store.params.escapeHoles}
+                  onChange={(e) => store.updateParams({ escapeHoles: e.target.checked })}
+                />
+              </div>
+              {store.params.escapeHoles && (
+                <>
+                  <div className="row">
+                    <label htmlFor="escape-hole-axis">Build Axis:</label>
+                    <select
+                      id="escape-hole-axis"
+                      title="Axis followed by the escape-hole cylinders."
+                      value={store.params.escapeHoleAxis}
+                      onChange={(e) => store.updateParams({ escapeHoleAxis: e.target.value as 'x' | 'y' | 'z' })}
+                    >
+                      <option value="x">X</option>
+                      <option value="y">Y</option>
+                      <option value="z">Z</option>
+                    </select>
+                  </div>
+                  <div className="row">
+                    <label htmlFor="escape-hole-diameter">Hole Diameter (mm):</label>
+                    <input
+                      id="escape-hole-diameter"
+                      type="number"
+                      value={store.params.escapeHoleDiameter}
+                      min={0.5} max={50} step={0.5}
+                      onChange={(e) => store.updateParams({ escapeHoleDiameter: parseFloat(e.target.value) || 5 })}
+                    />
+                  </div>
+                  <div className="row">
+                    <label htmlFor="escape-hole-count">Hole Count:</label>
+                    <input
+                      id="escape-hole-count"
+                      type="number"
+                      value={store.params.escapeHoleCount}
+                      min={1} max={100} step={1}
+                      onChange={(e) => store.updateParams({ escapeHoleCount: Math.max(1, parseInt(e.target.value) || 1) })}
+                    />
+                  </div>
+                </>
+              )}
+            </>
+          )}
+
           {isSheetType(store.params.latticeType) ? (
             <div className="row">
               <label htmlFor="wall-thickness">Wall Thickness (mm):</label>

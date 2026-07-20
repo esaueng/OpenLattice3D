@@ -6,6 +6,8 @@ import type { Vec3 } from './vec3';
 import type { MeshBVH } from './bvh';
 import type { GridSdfSampler } from './marching-cubes';
 import type { LatticeParams, LatticeType } from '../types/project';
+import type { BoundingBox } from '../types/project';
+import { withEscapeHoles } from './escape-holes';
 
 const TWO_PI = 2 * Math.PI;
 const SQRT3 = Math.sqrt(3);
@@ -887,7 +889,11 @@ export function buildCombinedSDF(opts: LatticeSdfOptions): SdfFunction {
       }
       return smoothMin(shellSdf, Math.max(-coreSdf, lat), blendK);
     };
-    return attachTpmsGridSampler(result, sdf, params, blendK, false);
+    return withEscapeHoles(
+      attachTpmsGridSampler(result, sdf, params, blendK, false),
+      params,
+      bvh.getBounds(),
+    );
   } else {
     const result: SdfFunction = (x, y, z) => {
       const dObj = sdf(x, y, z);
@@ -910,6 +916,7 @@ export function buildCombinedSDF(opts: LatticeSdfOptions): SdfFunction {
 export function buildAnalyticLattice(
   objectSdf: (x: number, y: number, z: number) => number,
   params: LatticeParams,
+  bounds: BoundingBox | null = null,
 ): SdfFunction {
   const { shellThickness, noShell, surfaceOnly, surfaceDepth, cellSize, wallThickness, strutDiameter, variant, latticeType, gradientEnabled, gradientStrength } = params;
   const blendK = Math.min(wallThickness, strutDiameter) * 0.3;
@@ -940,14 +947,22 @@ export function buildAnalyticLattice(
     }
   };
 
-  return attachTpmsGridSampler(result, objectSdf, params, blendK, true);
+  return withEscapeHoles(
+    attachTpmsGridSampler(result, objectSdf, params, blendK, true),
+    params,
+    bounds,
+  );
 }
 
 export function buildSphereLattice(
   radius: number,
   params: LatticeParams
 ): SdfFunction {
-  return buildAnalyticLattice((x, y, z) => Math.sqrt(x*x + y*y + z*z) - radius, params);
+  return buildAnalyticLattice(
+    (x, y, z) => Math.sqrt(x*x + y*y + z*z) - radius,
+    params,
+    { min: [-radius, -radius, -radius], max: [radius, radius, radius] },
+  );
 }
 
 export function buildCubeLattice(
@@ -961,7 +976,7 @@ export function buildCubeLattice(
     const outside = Math.sqrt(Math.max(dx,0)**2 + Math.max(dy,0)**2 + Math.max(dz,0)**2);
     const inside = Math.min(Math.max(dx, dy, dz), 0);
     return outside + inside;
-  }, params);
+  }, params, { min: [-halfSize, -halfSize, -halfSize], max: [halfSize, halfSize, halfSize] });
 }
 
 export function buildCylinderLattice(
@@ -975,7 +990,7 @@ export function buildCylinderLattice(
     const outside = Math.sqrt(Math.max(dRadial,0)**2 + Math.max(dAxial,0)**2);
     const inside = Math.min(Math.max(dRadial, dAxial), 0);
     return outside + inside;
-  }, params);
+  }, params, { min: [-radius, -radius, -halfHeight], max: [radius, radius, halfHeight] });
 }
 
 export function buildTorusLattice(
@@ -986,7 +1001,10 @@ export function buildTorusLattice(
   return buildAnalyticLattice((x, y, z) => {
     const qx = Math.sqrt(x*x + y*y) - majorRadius;
     return Math.sqrt(qx*qx + z*z) - tubeRadius;
-  }, params);
+  }, params, {
+    min: [-(majorRadius + tubeRadius), -(majorRadius + tubeRadius), -tubeRadius],
+    max: [majorRadius + tubeRadius, majorRadius + tubeRadius, tubeRadius],
+  });
 }
 
 export function buildCapsuleLattice(
@@ -998,5 +1016,8 @@ export function buildCapsuleLattice(
     // Clamp z to the cylinder body, then measure distance to that clamped point.
     const cz = Math.max(-halfHeight, Math.min(halfHeight, z));
     return Math.sqrt(x*x + y*y + (z - cz)*(z - cz)) - radius;
-  }, params);
+  }, params, {
+    min: [-radius, -radius, -(halfHeight + radius)],
+    max: [radius, radius, halfHeight + radius],
+  });
 }

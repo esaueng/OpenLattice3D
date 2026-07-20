@@ -256,6 +256,13 @@ export class MeshBVH {
     this.stack = new Int32Array(Math.max(1, this.count.length));
   }
 
+  getBounds(): { min: Vec3; max: Vec3 } {
+    return {
+      min: [this.nodeMin[0], this.nodeMin[1], this.nodeMin[2]],
+      max: [this.nodeMax[0], this.nodeMax[1], this.nodeMax[2]],
+    };
+  }
+
   private allocateNode(nodeMin: number[], nodeMax: number[], leftFirst: number[], count: number[]): number {
     const nodeIndex = count.length;
     nodeMin.push(0, 0, 0);

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { exportBinarySTL, parseSTL } from './stl-parser';
 
 function makeBinarySTL(triangles: number[][][], declaredCount?: number): ArrayBuffer {
@@ -76,6 +77,19 @@ endsolid test`;
     const empty = new TextEncoder().encode('solid nothing here endsolid').buffer as ArrayBuffer;
     expect(() => parseSTL(empty)).toThrow(/no facets/);
   });
+
+  it('reports malformed facets with a useful location', () => {
+    const malformed = `solid broken\nfacet normal 0 nope 1\nouter loop\nendsolid broken`;
+    const buffer = new TextEncoder().encode(malformed).buffer as ArrayBuffer;
+    expect(() => parseSTL(buffer)).toThrow(/line 2: invalid normal y/);
+  });
+
+  it('accepts arbitrary whitespace without a whole-file facet expression', () => {
+    const compact = 'solid t facet normal 0 0 1 outer loop vertex 0 0 0 vertex 2 0 0 vertex 0 2 0 endloop endfacet endsolid t';
+    const mesh = parseSTL(new TextEncoder().encode(compact).buffer as ArrayBuffer);
+    expect(mesh.triCount).toBe(1);
+    expect(Array.from(mesh.positions)).toEqual([0, 0, 0, 2, 0, 0, 0, 2, 0]);
+  });
 });
 
 describe('export round trip', () => {
@@ -87,5 +101,15 @@ describe('export round trip', () => {
     expect(mesh.triCount).toBe(2);
     expect(Array.from(mesh.positions)).toEqual(Array.from(positions));
     expect(Array.from(mesh.normals)).toEqual(Array.from(normals));
+  });
+
+  it.each(['sphere-25mm.stl', 'cube-30mm.stl'])('round-trips the shipped %s asset', (assetName) => {
+    const source = readFileSync(new URL(`../../public/assets/${assetName}`, import.meta.url));
+    const sourceBuffer = source.buffer.slice(source.byteOffset, source.byteOffset + source.byteLength) as ArrayBuffer;
+    const parsed = parseSTL(sourceBuffer);
+    const reparsed = parseSTL(exportBinarySTL(parsed.positions, parsed.normals, parsed.triCount));
+    expect(reparsed.triCount).toBe(parsed.triCount);
+    expect(reparsed.positions).toEqual(parsed.positions);
+    expect(reparsed.normals).toEqual(parsed.normals);
   });
 });

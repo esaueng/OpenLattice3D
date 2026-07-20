@@ -11,6 +11,7 @@ import type { ClipPlaneState, ViewerCameraState, ViewerVector3 } from '../store/
 import { generateSphereMesh, generateCubeMesh, generateCylinderMesh, generateTorusMesh, generateCapsuleMesh } from '../geometry/mesh-analysis';
 import type { LatticeParams, LatticeType, SampleShape } from '../types/project';
 import type { WorkerMessage, WorkerResponse } from '../workers/lattice-worker';
+import { escapeHoleCenters, shouldApplyEscapeHoles } from '../geometry/escape-holes';
 
 const DEMO_TILE_ITEMS: Array<{ type: LatticeType; label: string }> = [
   { type: 'gyroid', label: 'Gyroid' },
@@ -116,6 +117,42 @@ function meshBounds(mesh: TriangleMesh): THREE.Box3 {
     box.expandByPoint(point.set(p[i], p[i + 1], p[i + 2]));
   }
   return box;
+}
+
+function EscapeHolePreview({ bounds, params }: { bounds: THREE.Box3; params: LatticeParams }) {
+  const preview = useMemo(() => {
+    if (bounds.isEmpty() || !shouldApplyEscapeHoles(params)) return null;
+    const min = bounds.min;
+    const max = bounds.max;
+    const modelBounds = {
+      min: [min.x, min.y, min.z] as [number, number, number],
+      max: [max.x, max.y, max.z] as [number, number, number],
+    };
+    const centers = escapeHoleCenters(modelBounds, params.escapeHoleAxis, params.escapeHoleCount);
+    const length = params.escapeHoleAxis === 'x'
+      ? max.x - min.x
+      : params.escapeHoleAxis === 'y'
+        ? max.y - min.y
+        : max.z - min.z;
+    const rotation: [number, number, number] = params.escapeHoleAxis === 'x'
+      ? [0, 0, -Math.PI / 2]
+      : params.escapeHoleAxis === 'z'
+        ? [Math.PI / 2, 0, 0]
+        : [0, 0, 0];
+    return { centers, length: length + params.escapeHoleDiameter, rotation };
+  }, [bounds, params]);
+
+  if (!preview) return null;
+  return (
+    <group>
+      {preview.centers.map((center, index) => (
+        <mesh key={index} position={center} rotation={preview.rotation} renderOrder={5}>
+          <cylinderGeometry args={[params.escapeHoleDiameter / 2, params.escapeHoleDiameter / 2, preview.length, 32]} />
+          <meshBasicMaterial color="#ff9f43" transparent opacity={0.42} depthWrite={false} wireframe />
+        </mesh>
+      ))}
+    </group>
+  );
 }
 
 function distanceToFitBoundingSphere(camera: THREE.Camera, radius: number): number {
@@ -1520,6 +1557,11 @@ export function Viewer3D() {
   })));
   const [gizmoViewRequest, setGizmoViewRequest] = useState<{ view: GizmoViewRequest | null; signal: number }>({ view: null, signal: 0 });
   const r3fStateRef = useRef<RootState | null>(null);
+  const escapeHolePreviewBounds = useMemo(() => {
+    if (originalMesh) return meshBounds(originalMesh);
+    if (sphereMode && sampleShape) return meshBounds(generateSampleMesh(sampleShape, sphereRadius));
+    return new THREE.Box3();
+  }, [originalMesh, sampleShape, sphereMode, sphereRadius]);
 
   const handleFaceClick = useCallback((triIdx: number) => {
     if (selectionMode === 'keep_out') toggleKeepOut(triIdx);
@@ -1609,6 +1651,7 @@ export function Viewer3D() {
             keepInTris={keepInTris}
           />
         )}
+        {viewMode === 'original' && <EscapeHolePreview bounds={escapeHolePreviewBounds} params={params} />}
 
         {viewMode === 'lattice' && resultMesh && <ResultMeshView result={resultMesh} />}
         {viewMode === 'cross_section' && resultMesh && <CrossSectionView result={resultMesh} clip={clipPlane} />}
