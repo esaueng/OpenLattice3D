@@ -100,6 +100,7 @@ export function useLatticeGeneration(): LatticeGenerationControls {
       sampleShape: store.sampleShape,
       resolution,
       keepOutTris: Array.from(store.keepOutTris),
+      keepInTris: Array.from(store.keepInTris),
     };
 
     if (store.originalMesh) {
@@ -141,6 +142,7 @@ export function useLatticeGeneration(): LatticeGenerationControls {
         sphereRadius: latest.sphereRadius,
         sampleShape: latest.sampleShape,
         keepOutTris: Array.from(latest.keepOutTris),
+        keepInTris: Array.from(latest.keepInTris),
         surfaceSamplePositions: resp.surfaceSamplePositions,
         surfaceSampleNormals: resp.surfaceSampleNormals,
         surfaceSampleHoleScales: resp.surfaceSampleHoleScales,

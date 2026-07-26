@@ -743,6 +743,57 @@ svg {
   font-weight: var(--fw-medium);
 }
 
+.constraint-mode-buttons {
+  display: flex;
+  flex: 1 1 auto;
+  gap: 4px;
+}
+
+.constraint-mode-buttons .btn {
+  flex: 1 1 0;
+  padding: 5px 4px;
+}
+
+.constraint-hint {
+  margin-top: 8px;
+  padding: 7px 8px;
+  color: var(--color-text-muted);
+  background: rgba(11, 15, 20, 0.44);
+  border: var(--border-thin);
+  border-radius: var(--radius-md);
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+}
+
+.constraint-legend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  margin-bottom: 10px;
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+}
+
+.constraint-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex: 0 0 auto;
+}
+
+.constraint-swatch-out {
+  background: #3399ff;
+}
+
+.constraint-swatch-in {
+  background: #ff6633;
+}
+
+.constraint-swatch-in:not(:first-child) {
+  margin-left: 6px;
+}
+
 .warning {
   margin-top: 8px;
   padding: 7px 8px;

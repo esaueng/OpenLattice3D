@@ -2,8 +2,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useStore } from '../store/useStore';
 import { parseSTL } from '../geometry/stl-parser';
-import { analyzeMesh, repairMesh } from '../geometry/mesh-analysis';
-import type { LatticeType, SampleShape, LatticeParams } from '../types/project';
+import {
+  analyzeMesh,
+  repairMesh,
+  computeSignedVolume,
+  flipMeshOrientation,
+  countNormalWindingAgreement,
+  alignNormalsToWinding,
+} from '../geometry/mesh-analysis';
+import type { LatticeType, SampleShape, LatticeParams, SelectionMode } from '../types/project';
 import { DEFAULT_PARAMS } from '../types/project';
 import { isSheetType } from '../geometry/lattice';
 import { SAMPLE_SHAPE_INFO } from '../store/useStore';
@@ -13,6 +20,12 @@ import { RightPanel } from './RightPanel';
 type LeftPanelProps = {
   generationControls: LatticeGenerationControls;
 };
+
+const SELECTION_MODES: Array<{ mode: SelectionMode; label: string; title: string }> = [
+  { mode: 'none', label: 'Off', title: 'Disable painting and return to normal camera control.' },
+  { mode: 'keep_out', label: 'Keep-Out', title: 'Paint faces where the original surface is preserved and the lattice cannot break through.' },
+  { mode: 'keep_in', label: 'Keep-In', title: 'Paint faces that stay solid, with no lattice under them.' },
+];
 
 export function LeftPanel({ generationControls }: LeftPanelProps) {
   const { startGeneration, cancelGeneration } = generationControls;
@@ -33,10 +46,42 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
     store.addLog(`Importing ${file.name}...`);
     try {
       const buffer = await file.arrayBuffer();
-      const mesh = parseSTL(buffer);
+      let mesh = parseSTL(buffer);
       const info = analyzeMesh(mesh);
       store.addLog(`Loaded: ${info.triangleCount} triangles, ${info.vertexCount} vertices`);
       store.addLog(`Bounding box: [${info.boundingBox.min.map(v => v.toFixed(1))}] to [${info.boundingBox.max.map(v => v.toFixed(1))}]`);
+
+      // Orientation guard. An inside-out closed mesh yields a sign-inverted SDF,
+      // which silently lattices the exterior instead of the interior — the result
+      // looks plausible and nothing downstream flags it. Signed volume is only
+      // meaningful on a closed mesh, so this is gated on watertightness.
+      if (info.isWatertight) {
+        const volume = computeSignedVolume(mesh);
+        if (volume < 0) {
+          mesh = flipMeshOrientation(mesh);
+          store.addLog(
+            `Inverted winding detected (signed volume ${volume.toFixed(1)}mm3). Flipped mesh orientation.`,
+            'warn'
+          );
+        }
+        store.addLog(`Volume: ${Math.abs(volume).toFixed(1)}mm3`);
+
+        // Winding direction is trustworthy at this point, so it wins any
+        // disagreement with the stored normals. Catches STLs that ship zero or
+        // inverted facet normals alongside correct winding — the SDF reads the
+        // stored normals, so those would otherwise invert the whole solve.
+        const agreement = countNormalWindingAgreement(mesh);
+        const compared = agreement.agree + agreement.disagree;
+        if (compared > 0 && agreement.disagree > agreement.agree) {
+          mesh = alignNormalsToWinding(mesh);
+          store.addLog(
+            `Stored normals disagree with winding on ${agreement.disagree}/${compared} faces. Recomputed normals from winding.`,
+            'warn'
+          );
+        }
+      } else {
+        store.addLog('Mesh is not closed - skipped orientation check', 'warn');
+      }
 
       if (!info.isManifold || !info.isWatertight) {
         store.addLog('Mesh is not watertight/manifold. Attempting repair...', 'warn');
@@ -100,6 +145,16 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
     store.resetProject();
     store.addLog('Project reset to defaults');
   }, [clearAllArmed, store]);
+
+  const handleSelectAllKeepOut = useCallback(() => {
+    store.selectAllKeepOut();
+    store.addLog(`Marked all ${store.originalMesh?.triCount.toLocaleString() ?? 0} faces as keep-out`);
+  }, [store]);
+
+  const handleClearSelection = useCallback(() => {
+    store.clearSelection();
+    store.addLog('Cleared painted constraints');
+  }, [store]);
 
   const toggleDemoGrid = useCallback((enabled: boolean) => {
     if (store.generating) return;
@@ -193,6 +248,97 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
           </div>
         )}
       </section>
+
+      {/* Constraints */}
+      {hasModel && (
+        <section className="panel-section">
+          <h3>Constraints</h3>
+          {!store.originalMesh ? (
+            <div className="constraint-hint">
+              Painting needs an imported STL. Sample parts are generated from an analytic
+              formula, so their display triangles do not map onto the solver geometry.
+            </div>
+          ) : (
+            <>
+              <div className="row">
+                <label>Paint Mode:</label>
+                <div className="constraint-mode-buttons">
+                  {SELECTION_MODES.map(({ mode, label, title }) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      className={`btn btn-small ${store.selectionMode === mode ? 'btn-active' : ''}`}
+                      title={title}
+                      aria-pressed={store.selectionMode === mode}
+                      onClick={() => store.setSelectionMode(mode)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {store.selectionMode !== 'none' && (
+                <>
+                  <div className="row">
+                    <label>Brush Radius (mm):</label>
+                    <input
+                      type="number"
+                      title="Radius of the paint brush. 0 paints one triangle per click. Hold Alt to erase."
+                      value={store.brushRadius}
+                      min={0} max={100} step={0.5}
+                      onChange={(e) => store.setBrushRadius(parseFloat(e.target.value) || 0)}
+                    />
+                  </div>
+                  <div className="constraint-hint">
+                    Drag on the model in Original view to paint. Hold Alt to erase.
+                  </div>
+                </>
+              )}
+
+              {store.keepInTris.size > 0 && (
+                <div className="row">
+                  <label>Keep-In Depth (mm):</label>
+                  <input
+                    type="number"
+                    title="How far solid material extends inward from painted keep-in faces."
+                    value={store.params.keepInDepth}
+                    min={0.1} max={50} step={0.1}
+                    onChange={(e) => store.updateParams({ keepInDepth: parseFloat(e.target.value) || 3.0 })}
+                  />
+                </div>
+              )}
+
+              <div className="constraint-legend">
+                <span className="constraint-swatch constraint-swatch-out" />
+                Keep-Out
+                <span className="count-pill">{store.keepOutTris.size.toLocaleString()}</span>
+                <span className="constraint-swatch constraint-swatch-in" />
+                Keep-In
+                <span className="count-pill">{store.keepInTris.size.toLocaleString()}</span>
+              </div>
+
+              <div className="row" style={{ gap: '6px', flexWrap: 'wrap' }}>
+                <button
+                  className="btn btn-small"
+                  title="Mark every exterior face as keep-out, preserving the whole original surface."
+                  onClick={handleSelectAllKeepOut}
+                >
+                  Select All Keep-Out
+                </button>
+                <button
+                  className="btn btn-small"
+                  title="Clear all painted keep-out and keep-in regions."
+                  disabled={store.keepOutTris.size === 0 && store.keepInTris.size === 0}
+                  onClick={handleClearSelection}
+                >
+                  Clear
+                </button>
+              </div>
+            </>
+          )}
+        </section>
+      )}
 
       <section className="panel-section">
         <h3>Multiview</h3>

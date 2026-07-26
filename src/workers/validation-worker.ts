@@ -34,6 +34,7 @@ export interface ValidationWorkerMessage {
   meshNormals?: Float32Array;
   meshTriCount?: number;
   keepOutTris?: number[];
+  keepInTris?: number[];
   surfaceSamplePositions?: Float32Array;
   surfaceSampleNormals?: Float32Array;
   surfaceSampleHoleScales?: Float32Array;
@@ -185,7 +186,12 @@ self.onmessage = (event: MessageEvent<ValidationWorkerMessage>) => {
       const objectSdf = (x: number, y: number, z: number) => bvh.signedDistance([x, y, z] as Vec3);
       const baseSdf = isSurfacePolygon && surfaceSamples.length > 0
         ? buildSurfaceHexLattice(objectSdf, msg.params, surfaceSamples)
-        : buildCombinedSDF({ bvh, params: msg.params, keepOutTris: new Set(msg.keepOutTris || []) });
+        : buildCombinedSDF({
+            bvh,
+            params: msg.params,
+            keepOutTris: new Set(msg.keepOutTris || []),
+            keepInTris: new Set(msg.keepInTris || []),
+          });
       validation = runValidation(
         result,
         withThinSectionFilter(baseSdf, msg.params.thinSectionFilter),

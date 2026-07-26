@@ -647,7 +647,8 @@ function attachTpmsGridSampler(
   objectSdf: (x: number, y: number, z: number) => number,
   params: LatticeParams,
   blendK: number,
-  useShellOffsetForDefaultGradient: boolean
+  useShellOffsetForDefaultGradient: boolean,
+  applyConstraints?: ConstraintApplier | null
 ): SdfFunction {
   if (!supportsOptimizedTpms(params.latticeType)) return target;
 
@@ -721,13 +722,17 @@ function attachTpmsGridSampler(
             c2z,
             c
           );
-          out[rowOffset + x] = combinedLatticeSdfValue(
-            objectSdf(px, py, pz),
+          const dObj = objectSdf(px, py, pz);
+          const value = combinedLatticeSdfValue(
+            dObj,
             lat,
             params,
             blendK,
             useShellOffsetForDefaultGradient
           );
+          // Constraints must be applied here too, not just in the scalar
+          // evaluator — this grid sampler replaces it wholesale for TPMS types.
+          out[rowOffset + x] = applyConstraints ? applyConstraints(value, px, py, pz, dObj) : value;
         }
       }
     }
@@ -744,6 +749,59 @@ export interface LatticeSdfOptions {
   bvh: MeshBVH;
   params: LatticeParams;
   keepOutTris: Set<number>;
+  keepInTris?: Set<number>;
+}
+
+type ConstraintApplier = (value: number, x: number, y: number, z: number, dObj: number) => number;
+
+/**
+ * Painted-region constraints, expressed as an SDF post-step.
+ *
+ * Both constraints are unions (smooth-min) of an extra solid region onto the
+ * lattice result, so the combined field stays continuous — a hard switch at the
+ * region border would tear the extracted surface open.
+ *
+ *  - keep-in:  solid material from the painted faces to `keepInDepth` inward.
+ *  - keep-out: an intact skin over the painted faces, so the lattice cannot
+ *              break through the original surface there.
+ *
+ * Returns null when nothing is painted, which lets every caller skip the extra
+ * BVH queries entirely on the common unconstrained path.
+ */
+function buildConstraintApplier(
+  bvh: MeshBVH,
+  params: LatticeParams,
+  keepOutTris: Set<number> | undefined,
+  keepInTris: Set<number> | undefined,
+  blendK: number
+): ConstraintApplier | null {
+  const keepInBvh = keepInTris && keepInTris.size > 0 ? bvh.subset(keepInTris) : null;
+  const keepOutBvh = keepOutTris && keepOutTris.size > 0 ? bvh.subset(keepOutTris) : null;
+  if (!keepInBvh && !keepOutBvh) return null;
+
+  const keepInDepth = Math.max(0.01, params.keepInDepth);
+  // The preserved skin is the shell if there is one, otherwise the thinnest
+  // feature the process can actually produce.
+  const keepOutSkin = Math.max(params.shellThickness, params.minFeatureSize, 0.01);
+
+  return (value, x, y, z, dObj) => {
+    let result = value;
+
+    if (keepInBvh) {
+      // Inside the object AND within keepInDepth of a painted face.
+      const solid = Math.max(dObj, keepInBvh.closestDistance(x, y, z) - keepInDepth);
+      result = smoothMin(result, solid, blendK);
+    }
+
+    if (keepOutBvh) {
+      // The original surface band, restricted to a neighbourhood of painted faces.
+      const skinBand = Math.max(dObj, -(dObj + keepOutSkin));
+      const skin = Math.max(skinBand, keepOutBvh.closestDistance(x, y, z) - keepOutSkin);
+      result = smoothMin(result, skin, blendK);
+    }
+
+    return result;
+  };
 }
 
 export interface SurfaceHexSample {
@@ -871,6 +929,7 @@ export function buildCombinedSDF(opts: LatticeSdfOptions): SdfFunction {
   const blendK = Math.min(wallThickness, strutDiameter) * 0.3;
   const latticeFn = buildLatticeEvaluator(params);
   const sdf = (x: number, y: number, z: number) => bvh.signedDistance([x, y, z]);
+  const applyConstraints = buildConstraintApplier(bvh, params, opts.keepOutTris, opts.keepInTris, blendK);
 
   const sampleLattice = (x: number, y: number, z: number, dObj: number) => {
     if (variant !== 'implicit_conformal' || (latticeType !== 'hexagon' && latticeType !== 'triangle')) {
@@ -889,9 +948,10 @@ export function buildCombinedSDF(opts: LatticeSdfOptions): SdfFunction {
       if (gradientEnabled) {
         lat *= 1.0 - gradientStrength * Math.exp(-Math.max(0, -dObj) / (cellSize * 3));
       }
-      return Math.max(lat, bandSdf);
+      const value = Math.max(lat, bandSdf);
+      return applyConstraints ? applyConstraints(value, x, y, z, dObj) : value;
     };
-    return attachTpmsGridSampler(result, sdf, params, blendK, false);
+    return attachTpmsGridSampler(result, sdf, params, blendK, false, applyConstraints);
   }
 
   // ── No-shell mode ──
@@ -902,9 +962,10 @@ export function buildCombinedSDF(opts: LatticeSdfOptions): SdfFunction {
       if (gradientEnabled) {
         lat *= 1.0 - gradientStrength * Math.exp(-Math.max(0, -dObj) / (cellSize * 3));
       }
-      return Math.max(lat, dObj);
+      const value = Math.max(lat, dObj);
+      return applyConstraints ? applyConstraints(value, x, y, z, dObj) : value;
     };
-    return attachTpmsGridSampler(result, sdf, params, blendK, false);
+    return attachTpmsGridSampler(result, sdf, params, blendK, false, applyConstraints);
   }
 
   if (variant === 'shell_core') {
@@ -916,9 +977,10 @@ export function buildCombinedSDF(opts: LatticeSdfOptions): SdfFunction {
       if (gradientEnabled) {
         lat *= 1.0 - gradientStrength * Math.exp(-Math.max(0, -(dObj + shellThickness)) / (cellSize * 3));
       }
-      return smoothMin(shellSdf, Math.max(-coreSdf, lat), blendK);
+      const value = smoothMin(shellSdf, Math.max(-coreSdf, lat), blendK);
+      return applyConstraints ? applyConstraints(value, x, y, z, dObj) : value;
     };
-    return attachTpmsGridSampler(result, sdf, params, blendK, false);
+    return attachTpmsGridSampler(result, sdf, params, blendK, false, applyConstraints);
   } else {
     const result: SdfFunction = (x, y, z) => {
       const dObj = sdf(x, y, z);
@@ -927,9 +989,10 @@ export function buildCombinedSDF(opts: LatticeSdfOptions): SdfFunction {
         lat *= 1.0 - gradientStrength * Math.exp(-Math.max(0, -dObj) / (cellSize * 3));
       }
       const shellSdf = Math.max(dObj, -(dObj + shellThickness));
-      return smoothMin(shellSdf, Math.max(lat, dObj), blendK);
+      const value = smoothMin(shellSdf, Math.max(lat, dObj), blendK);
+      return applyConstraints ? applyConstraints(value, x, y, z, dObj) : value;
     };
-    return attachTpmsGridSampler(result, sdf, params, blendK, false);
+    return attachTpmsGridSampler(result, sdf, params, blendK, false, applyConstraints);
   }
 }
 

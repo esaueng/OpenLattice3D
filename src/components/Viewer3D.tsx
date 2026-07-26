@@ -331,40 +331,118 @@ function clipStateTo3(clip: ClipPlaneState, bounds: THREE.Box3): THREE.Plane {
   return new THREE.Plane(normal, constant);
 }
 
-function OriginalMeshView({ mesh, keepOutTris, keepInTris, selectionMode, onFaceClick }: {
+const FACE_COLOR_DEFAULT: [number, number, number] = [0.7, 0.7, 0.75];
+const FACE_COLOR_KEEP_OUT: [number, number, number] = [0.2, 0.6, 1.0];
+const FACE_COLOR_KEEP_IN: [number, number, number] = [1.0, 0.4, 0.2];
+
+function OriginalMeshView({ mesh, keepOutTris, keepInTris, selectionMode, brushRadius, onPaint, onPaintingChange }: {
   mesh: TriangleMesh;
   keepOutTris: Set<number>;
   keepInTris: Set<number>;
   selectionMode: string;
-  onFaceClick: (triIdx: number) => void;
+  brushRadius: number;
+  onPaint: (triIndices: number[], additive: boolean) => void;
+  onPaintingChange: (painting: boolean) => void;
 }) {
+  const paintingRef = useRef(false);
+
+  // Geometry depends on the mesh alone. Selection changes only rewrite the
+  // color attribute below, so a brush stroke never rebuilds the BufferGeometry.
   const geom = useMemo(() => {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(mesh.positions, 3));
-    const colors = new Float32Array(mesh.positions.length);
-    for (let i = 0; i < mesh.triCount; i++) {
-      let r = 0.7, gr = 0.7, b = 0.75;
-      if (keepOutTris.has(i)) { r = 0.2; gr = 0.6; b = 1.0; }
-      if (keepInTris.has(i)) { r = 1.0; gr = 0.4; b = 0.2; }
-      for (let v = 0; v < 3; v++) {
-        colors[i * 9 + v * 3] = r;
-        colors[i * 9 + v * 3 + 1] = gr;
-        colors[i * 9 + v * 3 + 2] = b;
-      }
-    }
-    g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(mesh.positions.length), 3));
     g.computeVertexNormals();
     return g;
-  }, [mesh, keepOutTris, keepInTris]);
+  }, [mesh]);
 
-  const handleClick = useCallback((e: ThreeEvent<MouseEvent>) => {
+  const centroids = useMemo(() => {
+    const out = new Float32Array(mesh.triCount * 3);
+    for (let i = 0; i < mesh.triCount; i++) {
+      const o = i * 9;
+      out[i * 3] = (mesh.positions[o] + mesh.positions[o + 3] + mesh.positions[o + 6]) / 3;
+      out[i * 3 + 1] = (mesh.positions[o + 1] + mesh.positions[o + 4] + mesh.positions[o + 7]) / 3;
+      out[i * 3 + 2] = (mesh.positions[o + 2] + mesh.positions[o + 5] + mesh.positions[o + 8]) / 3;
+    }
+    return out;
+  }, [mesh]);
+
+  useEffect(() => {
+    const attr = geom.getAttribute('color') as THREE.BufferAttribute;
+    const colors = attr.array as Float32Array;
+    for (let i = 0; i < mesh.triCount; i++) {
+      const c = keepOutTris.has(i)
+        ? FACE_COLOR_KEEP_OUT
+        : keepInTris.has(i) ? FACE_COLOR_KEEP_IN : FACE_COLOR_DEFAULT;
+      for (let v = 0; v < 3; v++) {
+        colors[i * 9 + v * 3] = c[0];
+        colors[i * 9 + v * 3 + 1] = c[1];
+        colors[i * 9 + v * 3 + 2] = c[2];
+      }
+    }
+    attr.needsUpdate = true;
+  }, [geom, mesh.triCount, keepOutTris, keepInTris]);
+
+  // Faces within brushRadius of the hit point that face roughly the same way,
+  // so a stroke cannot bleed through to the far side of a thin wall.
+  const facesUnderBrush = useCallback((point: THREE.Vector3, faceIndex: number): number[] => {
+    if (brushRadius <= 0) return [faceIndex];
+    const radiusSq = brushRadius * brushRadius;
+    const no = faceIndex * 3;
+    const nx = mesh.normals[no];
+    const ny = mesh.normals[no + 1];
+    const nz = mesh.normals[no + 2];
+    const hit: number[] = [];
+    for (let i = 0; i < mesh.triCount; i++) {
+      const c = i * 3;
+      const dx = centroids[c] - point.x;
+      const dy = centroids[c + 1] - point.y;
+      const dz = centroids[c + 2] - point.z;
+      if (dx * dx + dy * dy + dz * dz > radiusSq) continue;
+      if (mesh.normals[c] * nx + mesh.normals[c + 1] * ny + mesh.normals[c + 2] * nz <= 0) continue;
+      hit.push(i);
+    }
+    return hit;
+  }, [brushRadius, centroids, mesh.normals, mesh.triCount]);
+
+  const paintAt = useCallback((e: ThreeEvent<PointerEvent>) => {
+    if (e.faceIndex == null) return;
+    onPaint(facesUnderBrush(e.point, e.faceIndex), !e.altKey);
+  }, [facesUnderBrush, onPaint]);
+
+  const handlePointerDown = useCallback((e: ThreeEvent<PointerEvent>) => {
     if (selectionMode === 'none') return;
     e.stopPropagation();
-    if (e.faceIndex != null) onFaceClick(e.faceIndex as number);
-  }, [selectionMode, onFaceClick]);
+    paintingRef.current = true;
+    // Suspends OrbitControls for the duration of the stroke, so orbit stays
+    // available in paint mode right up until the user actually starts painting.
+    onPaintingChange(true);
+    paintAt(e);
+  }, [selectionMode, paintAt, onPaintingChange]);
+
+  const handlePointerMove = useCallback((e: ThreeEvent<PointerEvent>) => {
+    if (!paintingRef.current) return;
+    e.stopPropagation();
+    paintAt(e);
+  }, [paintAt]);
+
+  // A stroke can end anywhere — off the mesh, or outside the canvas entirely.
+  useEffect(() => {
+    const stop = () => {
+      if (!paintingRef.current) return;
+      paintingRef.current = false;
+      onPaintingChange(false);
+    };
+    window.addEventListener('pointerup', stop);
+    window.addEventListener('pointercancel', stop);
+    return () => {
+      window.removeEventListener('pointerup', stop);
+      window.removeEventListener('pointercancel', stop);
+    };
+  }, [onPaintingChange]);
 
   return (
-    <mesh geometry={geom} onClick={handleClick}>
+    <mesh geometry={geom} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove}>
       <meshPhongMaterial vertexColors side={THREE.DoubleSide} />
     </mesh>
   );
@@ -1200,7 +1278,7 @@ function DemoTileViewerWithMode({ tile, viewMode, clipPlane, selectedLatticeType
   );
 }
 
-function DemoGridView({ params, demoParamsByType, runId, viewMode, clipPlane, selectedLatticeType, onSelectLatticeType, sourceMesh, sphereMode, sphereRadius, sampleShape, keepOutTris }: {
+function DemoGridView({ params, demoParamsByType, runId, viewMode, clipPlane, selectedLatticeType, onSelectLatticeType, sourceMesh, sphereMode, sphereRadius, sampleShape, keepOutTris, keepInTris }: {
   params: LatticeParams;
   demoParamsByType: Partial<Record<LatticeType, LatticeParams>>;
   runId: number;
@@ -1213,6 +1291,7 @@ function DemoGridView({ params, demoParamsByType, runId, viewMode, clipPlane, se
   sphereRadius: number;
   sampleShape: SampleShape | null;
   keepOutTris: Set<number>;
+  keepInTris: Set<number>;
 }) {
   const [tiles, setTiles] = useState<DemoTileState[]>(() => DEMO_TILE_ITEMS.map((item) => ({ ...item, status: 'pending', result: null })));
   const workersRef = useRef<Map<LatticeType, Worker>>(new Map());
@@ -1223,6 +1302,7 @@ function DemoGridView({ params, demoParamsByType, runId, viewMode, clipPlane, se
   const latestParamsRef = useRef(params);
   const latestDemoParamsRef = useRef(demoParamsByType);
   const keepOutKey = useMemo(() => Array.from(keepOutTris).sort((a, b) => a - b).join(','), [keepOutTris]);
+  const keepInKey = useMemo(() => Array.from(keepInTris).sort((a, b) => a - b).join(','), [keepInTris]);
   const sourceKey = useMemo(() => {
     if (sourceMesh) return `mesh:${sourceMesh.triCount}:${sourceMesh.positions.length}:${sourceMesh.normals.length}`;
     return `shape:${sampleShape ?? 'none'}:${sphereMode ? 1 : 0}:${sphereRadius}`;
@@ -1250,9 +1330,10 @@ function DemoGridView({ params, demoParamsByType, runId, viewMode, clipPlane, se
       type,
       source: sourceKey,
       keepOut: keepOutKey,
+      keepIn: keepInKey,
       params: localParams,
     });
-  }, [keepOutKey, sourceKey]);
+  }, [keepInKey, keepOutKey, sourceKey]);
 
   const generateTiles = useCallback((types: LatticeType[], baseParams: LatticeParams, force = false) => {
     for (const type of types) {
@@ -1287,6 +1368,7 @@ function DemoGridView({ params, demoParamsByType, runId, viewMode, clipPlane, se
         sphereRadius,
         resolution: Math.round(24 + localParams.exportResolution * 24),
         keepOutTris: Array.from(keepOutTris),
+        keepInTris: Array.from(keepInTris),
       };
 
       if (sourceMesh) {
@@ -1321,7 +1403,7 @@ function DemoGridView({ params, demoParamsByType, runId, viewMode, clipPlane, se
 
       worker.postMessage(msg);
     }
-  }, [buildTileSignature, keepOutTris, sampleShape, sourceMesh, sphereMode, sphereRadius, stopTileWorker]);
+  }, [buildTileSignature, keepInTris, keepOutTris, sampleShape, sourceMesh, sphereMode, sphereRadius, stopTileWorker]);
 
   useEffect(() => {
     const allTypes = DEMO_TILE_ITEMS.map((item) => item.type);
@@ -1389,16 +1471,14 @@ function DemoGridView({ params, demoParamsByType, runId, viewMode, clipPlane, se
 export function Viewer3D() {
   const {
     originalMesh, sphereMode, sphereRadius, sampleShape, viewMode, clipPlane,
-    keepOutTris, keepInTris, selectionMode, resultMesh,
-    toggleKeepOut, toggleKeepIn, viewerBackground, demoModeActive,
+    keepOutTris, keepInTris, selectionMode, resultMesh, brushRadius,
+    paintTriangles, viewerBackground, demoModeActive,
     demoRunId, params, demoParamsByType, setLatticeType, viewportResetSignal,
   } = useStore();
   const [gizmoViewRequest, setGizmoViewRequest] = useState<{ view: GizmoViewRequest | null; signal: number }>({ view: null, signal: 0 });
+  const [painting, setPainting] = useState(false);
 
-  const handleFaceClick = useCallback((triIdx: number) => {
-    if (selectionMode === 'keep_out') toggleKeepOut(triIdx);
-    else if (selectionMode === 'keep_in') toggleKeepIn(triIdx);
-  }, [selectionMode, toggleKeepOut, toggleKeepIn]);
+  const paintingActive = selectionMode !== 'none' && viewMode === 'original' && Boolean(originalMesh);
 
   if (demoModeActive) {
     return (
@@ -1417,13 +1497,22 @@ export function Viewer3D() {
           sphereRadius={sphereRadius}
           sampleShape={sampleShape}
           keepOutTris={keepOutTris}
+          keepInTris={keepInTris}
         />
       </div>
     );
   }
 
   return (
-    <div style={{ position: 'relative', width: '100%', height: '100%', background: viewerBackground }}>
+    <div
+      style={{
+        position: 'relative',
+        width: '100%',
+        height: '100%',
+        background: viewerBackground,
+        cursor: paintingActive ? 'crosshair' : undefined,
+      }}
+    >
       <Canvas
         camera={{ fov: 50, near: 0.1, far: 10000, up: [0, 0, 1] }}
         gl={{ localClippingEnabled: true }}
@@ -1444,7 +1533,9 @@ export function Viewer3D() {
             keepOutTris={keepOutTris}
             keepInTris={keepInTris}
             selectionMode={selectionMode}
-            onFaceClick={handleFaceClick}
+            brushRadius={brushRadius}
+            onPaint={paintTriangles}
+            onPaintingChange={setPainting}
           />
         )}
         {viewMode === 'original' && sphereMode && !originalMesh && sampleShape && (
@@ -1460,7 +1551,7 @@ export function Viewer3D() {
         {viewMode === 'cross_section' && resultMesh && <CrossSectionView result={resultMesh} clip={clipPlane} />}
         {viewMode === 'xray' && resultMesh && <XRayView result={resultMesh} />}
 
-        <OrbitControls makeDefault target={[0, 0, 0]} />
+        <OrbitControls makeDefault enabled={!painting} target={[0, 0, 0]} />
         <ViewerCameraSession />
         <GizmoHelper alignment={VIEWER_GIZMO_ALIGNMENT} margin={VIEWER_GIZMO_MARGIN}>
           <CleanAxisGizmo
