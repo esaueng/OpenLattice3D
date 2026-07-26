@@ -69,10 +69,8 @@ export function analyzeMesh(mesh: TriangleMesh): MeshInfo {
   };
 }
 
-/** Basic mesh repair: recalculate normals, attempt to fix non-manifold edges by welding */
-export function repairMesh(mesh: TriangleMesh): { mesh: TriangleMesh; repaired: boolean } {
-  // Recalculate face normals
-  const { positions, triCount } = mesh;
+/** Per-face normals derived from triangle winding (right-hand rule). */
+function computeFaceNormals(positions: Float32Array, triCount: number): Float32Array {
   const normals = new Float32Array(triCount * 3);
 
   for (let i = 0; i < triCount; i++) {
@@ -94,8 +92,110 @@ export function repairMesh(mesh: TriangleMesh): { mesh: TriangleMesh; repaired: 
     }
   }
 
+  return normals;
+}
+
+/**
+ * Signed volume via the divergence theorem, taken over triangle winding.
+ * Positive when the mesh is wound counter-clockwise seen from outside, which
+ * is the orientation the SDF sign convention assumes.
+ *
+ * Only meaningful for a closed mesh — on an open surface the result is
+ * arbitrary, so callers must check isWatertight first.
+ */
+export function computeSignedVolume(mesh: TriangleMesh): number {
+  const { positions, triCount } = mesh;
+  let volume = 0;
+
+  for (let i = 0; i < triCount; i++) {
+    const o = i * 9;
+    const ax = positions[o], ay = positions[o + 1], az = positions[o + 2];
+    const bx = positions[o + 3], by = positions[o + 4], bz = positions[o + 5];
+    const cx = positions[o + 6], cy = positions[o + 7], cz = positions[o + 8];
+    // a · (b × c)
+    volume += ax * (by * cz - bz * cy)
+      + ay * (bz * cx - bx * cz)
+      + az * (bx * cy - by * cx);
+  }
+
+  return volume / 6;
+}
+
+/**
+ * Compare each stored facet normal against the normal implied by winding.
+ *
+ * Zero-area faces are excluded rather than counted as disagreements — pole-cap
+ * fans in generated meshes are degenerate by construction and would otherwise
+ * skew the ratio. A face whose stored normal is zero-length (common in STLs
+ * that rely on winding alone) counts as a disagreement, since recomputing is
+ * exactly what such a mesh needs.
+ */
+export function countNormalWindingAgreement(mesh: TriangleMesh): {
+  agree: number;
+  disagree: number;
+  degenerate: number;
+} {
+  const { positions, normals, triCount } = mesh;
+  let agree = 0, disagree = 0, degenerate = 0;
+
+  for (let i = 0; i < triCount; i++) {
+    const o = i * 9, n = i * 3;
+    const e1x = positions[o + 3] - positions[o];
+    const e1y = positions[o + 4] - positions[o + 1];
+    const e1z = positions[o + 5] - positions[o + 2];
+    const e2x = positions[o + 6] - positions[o];
+    const e2y = positions[o + 7] - positions[o + 1];
+    const e2z = positions[o + 8] - positions[o + 2];
+    const wx = e1y * e2z - e1z * e2y;
+    const wy = e1z * e2x - e1x * e2z;
+    const wz = e1x * e2y - e1y * e2x;
+
+    if (Math.sqrt(wx * wx + wy * wy + wz * wz) <= 1e-12) {
+      degenerate++;
+      continue;
+    }
+    if (wx * normals[n] + wy * normals[n + 1] + wz * normals[n + 2] > 0) agree++;
+    else disagree++;
+  }
+
+  return { agree, disagree, degenerate };
+}
+
+/** Replace stored normals with the winding-derived ones, leaving geometry alone. */
+export function alignNormalsToWinding(mesh: TriangleMesh): TriangleMesh {
   return {
-    mesh: { positions: new Float32Array(positions), normals, triCount },
+    positions: mesh.positions,
+    normals: computeFaceNormals(mesh.positions, mesh.triCount),
+    triCount: mesh.triCount,
+  };
+}
+
+/** Reverse winding on every triangle, recomputing normals to match. */
+export function flipMeshOrientation(mesh: TriangleMesh): TriangleMesh {
+  const { positions, triCount } = mesh;
+  const flipped = new Float32Array(positions.length);
+
+  for (let i = 0; i < triCount; i++) {
+    const o = i * 9;
+    for (let k = 0; k < 3; k++) {
+      flipped[o + k] = positions[o + k];          // v0 stays put
+      flipped[o + 3 + k] = positions[o + 6 + k];  // v1 <- v2
+      flipped[o + 6 + k] = positions[o + 3 + k];  // v2 <- v1
+    }
+  }
+
+  return { positions: flipped, normals: computeFaceNormals(flipped, triCount), triCount };
+}
+
+/** Basic mesh repair: recalculate normals, attempt to fix non-manifold edges by welding */
+export function repairMesh(mesh: TriangleMesh): { mesh: TriangleMesh; repaired: boolean } {
+  const { positions, triCount } = mesh;
+  return {
+    mesh: {
+      positions: new Float32Array(positions),
+      normals: computeFaceNormals(positions, triCount),
+      triCount,
+    },
     repaired: true,
   };
 }
@@ -132,11 +232,13 @@ export function generateSphereMesh(radius: number, segments: number): TriangleMe
         radius * Math.cos(theta1),
       ];
 
+      // Counter-clockwise seen from outside, so winding agrees with the
+      // outward radial normals assigned below.
       if (lat > 0) {
-        tris.push(p00[0], p00[1], p00[2], p01[0], p01[1], p01[2], p10[0], p10[1], p10[2]);
+        tris.push(p00[0], p00[1], p00[2], p10[0], p10[1], p10[2], p01[0], p01[1], p01[2]);
       }
       if (lat < segments - 1) {
-        tris.push(p01[0], p01[1], p01[2], p11[0], p11[1], p11[2], p10[0], p10[1], p10[2]);
+        tris.push(p01[0], p01[1], p01[2], p10[0], p10[1], p10[2], p11[0], p11[1], p11[2]);
       }
     }
   }

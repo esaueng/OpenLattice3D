@@ -445,6 +445,73 @@ export class MeshBVH {
     return { distance: Math.sqrt(bestDistSq), point: [bestX, bestY, bestZ], triIndex: bestTri };
   }
 
+  /** Unsigned distance to the nearest triangle.
+   *  Same traversal as closestPoint but returns a number, so the SDF sampling
+   *  loop can query millions of points without allocating a result object each time. */
+  closestDistance(px: number, py: number, pz: number): number {
+    let bestDistSq = Infinity;
+    let stackSize = 0;
+    this.stack[stackSize++] = 0;
+
+    while (stackSize > 0) {
+      const node = this.stack[--stackSize];
+      if (aabbDistSq(px, py, pz, node, this.nodeMin, this.nodeMax) >= bestDistSq) continue;
+
+      const leafCount = this.count[node];
+      const first = this.leftFirst[node];
+      if (leafCount > 0) {
+        for (let i = first; i < first + leafCount; i++) {
+          const dSq = closestPointOnTriangleSq(
+            px,
+            py,
+            pz,
+            this.triIndices[i],
+            this.triA,
+            this.triAB,
+            this.triAC,
+            this.triBC,
+            this.closestScratch
+          );
+          if (dSq < bestDistSq) bestDistSq = dSq;
+        }
+      } else {
+        const left = first;
+        const right = first + 1;
+        const leftDist = aabbDistSq(px, py, pz, left, this.nodeMin, this.nodeMax);
+        const rightDist = aabbDistSq(px, py, pz, right, this.nodeMin, this.nodeMax);
+        if (leftDist < rightDist) {
+          if (rightDist < bestDistSq) this.stack[stackSize++] = right;
+          if (leftDist < bestDistSq) this.stack[stackSize++] = left;
+        } else {
+          if (leftDist < bestDistSq) this.stack[stackSize++] = left;
+          if (rightDist < bestDistSq) this.stack[stackSize++] = right;
+        }
+      }
+    }
+
+    return Math.sqrt(bestDistSq);
+  }
+
+  /** Build a BVH over a subset of this mesh's triangles.
+   *  Used to turn a painted triangle selection into a queryable distance field.
+   *  Returns null when the selection is empty. */
+  subset(triIndices: Iterable<number>): MeshBVH | null {
+    const selected: number[] = [];
+    for (const index of triIndices) {
+      if (index >= 0 && index < this.triCount) selected.push(index);
+    }
+    if (selected.length === 0) return null;
+
+    const positions = new Float32Array(selected.length * 9);
+    const normals = new Float32Array(selected.length * 3);
+    for (let i = 0; i < selected.length; i++) {
+      const src = selected[i];
+      positions.set(this.positions.subarray(src * 9, src * 9 + 9), i * 9);
+      normals.set(this.normals.subarray(src * 3, src * 3 + 3), i * 3);
+    }
+    return new MeshBVH(positions, normals, selected.length);
+  }
+
   /** Signed distance: negative inside, positive outside.
    *  Sign determined by the closest triangle face normal, matching the previous behavior. */
   signedDistance(p: Vec3): number {

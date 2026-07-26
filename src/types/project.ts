@@ -48,6 +48,7 @@ export interface LatticeParams {
   noShell: boolean;            // skip outer shell entirely — pure lattice
   surfaceOnly: boolean;        // lattice confined to a band near outer surface, hollow inside
   surfaceDepth: number;        // mm — depth of the lattice band when surfaceOnly is on
+  keepInDepth: number;         // mm — depth of solid material under painted keep-in faces
   gradientEnabled: boolean;
   gradientStrength: number;    // 0..1
   thinSectionFilter: number;   // mm material removal to suppress ultra-thin/jagged artifacts
@@ -90,6 +91,7 @@ export const DEFAULT_PARAMS: LatticeParams = {
   noShell: false,
   surfaceOnly: false,
   surfaceDepth: 8.0,
+  keepInDepth: 3.0,
   gradientEnabled: false,
   gradientStrength: 0.5,
   thinSectionFilter: 0.0,

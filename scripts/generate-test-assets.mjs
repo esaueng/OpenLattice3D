@@ -29,8 +29,10 @@ function generateSphere(radius, segments) {
       const p10 = p(theta1, phi0);
       const p11 = p(theta1, phi1);
 
-      if (lat > 0) tris.push([p00, p01, p10]);
-      if (lat < segments - 1) tris.push([p01, p11, p10]);
+      // Counter-clockwise seen from outside, so cross(v1-v0, v2-v0) — and
+      // therefore the STL facet normal written below — points outward.
+      if (lat > 0) tris.push([p00, p10, p01]);
+      if (lat < segments - 1) tris.push([p01, p10, p11]);
     }
   }
   return tris;
