@@ -1,6 +1,5 @@
 // Validation: check deviation, thickness, manifoldness, disconnected pieces
 import type { Vec3 } from './vec3';
-import { length, normalize, scale, add } from './vec3';
 import type { MeshBVH } from './bvh';
 import type { LatticeParams, ValidationResult } from '../types/project';
 import type { MarchingCubesResult } from './marching-cubes';
@@ -79,52 +78,123 @@ export function checkSphereDeviation(
   return { passed: maxDev <= tolerance, maxDeviation: maxDev };
 }
 
-/** Minimum thickness check: sample points inside the lattice, trace in normal direction */
+function sdfNormal(
+  sdf: (x: number, y: number, z: number) => number,
+  x: number,
+  y: number,
+  z: number,
+  step: number,
+): Vec3 | null {
+  const gx = sdf(x + step, y, z) - sdf(x - step, y, z);
+  const gy = sdf(x, y + step, z) - sdf(x, y - step, z);
+  const gz = sdf(x, y, z + step) - sdf(x, y, z - step);
+  const magnitude = Math.hypot(gx, gy, gz);
+  if (magnitude < 1e-12) return null;
+  return [gx / magnitude, gy / magnitude, gz / magnitude];
+}
+
+function bisectCrossing(
+  sdf: (x: number, y: number, z: number) => number,
+  origin: Vec3,
+  direction: Vec3,
+  inside: number,
+  outside: number,
+): number {
+  let insideDistance = inside;
+  let outsideDistance = outside;
+  for (let iteration = 0; iteration < 28; iteration++) {
+    const midpoint = (insideDistance + outsideDistance) * 0.5;
+    const value = sdf(
+      origin[0] + direction[0] * midpoint,
+      origin[1] + direction[1] * midpoint,
+      origin[2] + direction[2] * midpoint,
+    );
+    if (value <= 0) insideDistance = midpoint;
+    else outsideDistance = midpoint;
+  }
+  return (insideDistance + outsideDistance) * 0.5;
+}
+
+/**
+ * Measure local wall thickness from the scalar-field gradient, not extracted
+ * triangle winding. Both field crossings are bisection-refined, and the 1st
+ * percentile drives pass/fail so one grazing cusp cannot dominate the result.
+ */
 export function checkMinThickness(
   sdf: (x: number, y: number, z: number) => number,
   result: MarchingCubesResult,
   minRequired: number,
-  sampleCount: number = 500
-): { passed: boolean; minMeasured: number } {
-  const { positions, normals, triCount } = result;
-  let minMeasured = Infinity;
-  const step = Math.max(1, Math.floor(triCount / sampleCount));
+  sampleCount: number = 1500,
+): { passed: boolean; minMeasured: number; absoluteMin: number; sampled: number } {
+  const { positions, triCount } = result;
+  const stride = Math.max(1, Math.floor(triCount / sampleCount));
+  const marchStep = minRequired / 16;
+  const maxDepth = minRequired * 4;
+  const gradientStep = Math.max(1e-4, minRequired * 0.01);
+  const thicknesses: number[] = [];
 
-  for (let i = 0; i < triCount; i += step) {
+  for (let i = 0; i < triCount; i += stride) {
     const o = i * 9;
-    // Surface point (centroid)
     const px = (positions[o] + positions[o + 3] + positions[o + 6]) / 3;
     const py = (positions[o + 1] + positions[o + 4] + positions[o + 7]) / 3;
     const pz = (positions[o + 2] + positions[o + 5] + positions[o + 8]) / 3;
-    const n: Vec3 = [normals[i * 3], normals[i * 3 + 1], normals[i * 3 + 2]];
-    const nLen = length(n);
-    if (nLen < 1e-6) continue;
-    const nn = normalize(n);
 
-    // March inward along normal until SDF becomes positive again (exiting material)
-    let thickness = 0;
-    const stepSize = minRequired * 0.1;
-    let p: Vec3 = [px, py, pz];
-    let enteredMaterial = false;
-    for (let s = 0; s < 50; s++) {
-      p = add(p, scale(nn, -stepSize));  // inward
-      thickness += stepSize;
-      const val = sdf(p[0], p[1], p[2]);
-      if (val <= 0) {
-        enteredMaterial = true;
-      } else if (enteredMaterial) {
-        // Exited material
+    const outward = sdfNormal(sdf, px, py, pz, gradientStep);
+    if (!outward) continue;
+    const inward: Vec3 = [-outward[0], -outward[1], -outward[2]];
+    const origin: Vec3 = [px, py, pz];
+
+    let seed = -1;
+    for (let distance = 0; distance <= marchStep * 4; distance += marchStep) {
+      if (sdf(
+        origin[0] + inward[0] * distance,
+        origin[1] + inward[1] * distance,
+        origin[2] + inward[2] * distance,
+      ) <= 0) {
+        seed = distance;
         break;
       }
-      if (thickness > minRequired * 5) break;
     }
-    if (enteredMaterial && thickness < minMeasured) {
-      minMeasured = thickness;
-    }
+    if (seed < 0) continue;
+
+    const crossing = (sign: number): number => {
+      let lastInside = seed;
+      for (let distance = marchStep; distance <= maxDepth; distance += marchStep) {
+        const candidate = seed + sign * distance;
+        const value = sdf(
+          origin[0] + inward[0] * candidate,
+          origin[1] + inward[1] * candidate,
+          origin[2] + inward[2] * candidate,
+        );
+        if (value > 0) return bisectCrossing(sdf, origin, inward, lastInside, candidate);
+        lastInside = candidate;
+      }
+      return Number.NaN;
+    };
+
+    const far = crossing(1);
+    const near = crossing(-1);
+    if (!Number.isFinite(far) || !Number.isFinite(near)) continue;
+    const thickness = far - near;
+    if (thickness > 0) thicknesses.push(thickness);
   }
 
-  if (minMeasured === Infinity) minMeasured = minRequired; // fallback
-  return { passed: minMeasured >= minRequired * 0.9, minMeasured };
+  if (thicknesses.length === 0) {
+    return { passed: true, minMeasured: maxDepth, absoluteMin: maxDepth, sampled: 0 };
+  }
+
+  thicknesses.sort((a, b) => a - b);
+  const percentileIndex = Math.min(
+    thicknesses.length - 1,
+    Math.floor(thicknesses.length * 0.01),
+  );
+  const minMeasured = thicknesses[percentileIndex];
+  return {
+    passed: minMeasured >= minRequired - 1e-3,
+    minMeasured,
+    absoluteMin: thicknesses[0],
+    sampled: thicknesses.length,
+  };
 }
 
 /** Run full validation suite */

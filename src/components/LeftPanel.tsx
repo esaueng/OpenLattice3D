@@ -2,7 +2,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useStore } from '../store/useStore';
 import { parseSTL } from '../geometry/stl-parser';
-import { analyzeMesh, repairMesh } from '../geometry/mesh-analysis';
+import {
+  alignNormalsToWinding,
+  analyzeMesh,
+  computeSignedVolume,
+  countNormalWindingAgreement,
+  flipMeshOrientation,
+  repairMesh,
+} from '../geometry/mesh-analysis';
 import type { LatticeType, SampleShape } from '../types/project';
 import { parseProjectFile } from '../utils/project-file';
 import { isSheetType } from '../geometry/lattice';
@@ -33,10 +40,33 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
     store.addLog(`Importing ${file.name}...`);
     try {
       const buffer = await file.arrayBuffer();
-      const mesh = parseSTL(buffer);
+      let mesh = parseSTL(buffer);
       const info = analyzeMesh(mesh);
       store.addLog(`Loaded: ${info.triangleCount} triangles, ${info.vertexCount} vertices`);
       store.addLog(`Bounding box: [${info.boundingBox.min.map(v => v.toFixed(1))}] to [${info.boundingBox.max.map(v => v.toFixed(1))}]`);
+
+      if (info.isWatertight) {
+        const signedVolume = computeSignedVolume(mesh);
+        if (signedVolume < 0) {
+          mesh = flipMeshOrientation(mesh);
+          store.addLog(
+            `Inverted winding detected (signed volume ${signedVolume.toFixed(1)}mm3). Flipped mesh orientation.`,
+            'warn',
+          );
+        }
+        const agreement = countNormalWindingAgreement(mesh);
+        const compared = agreement.agree + agreement.disagree;
+        if (compared > 0 && agreement.disagree > agreement.agree) {
+          mesh = alignNormalsToWinding(mesh);
+          store.addLog(
+            `Stored normals disagreed with winding on ${agreement.disagree}/${compared} faces. Recomputed normals.`,
+            'warn',
+          );
+        }
+        store.addLog(`Volume: ${Math.abs(signedVolume).toFixed(1)}mm3`);
+      } else {
+        store.addLog('Mesh is not closed - skipped orientation check', 'warn');
+      }
 
       if (!info.isManifold || !info.isWatertight) {
         store.addLog('Mesh is not watertight/manifold. Attempting repair...', 'warn');
@@ -211,10 +241,44 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
             <button className="btn btn-small" onClick={() => store.setSelectionMode('none')}>Stop</button>
           </div>
           <div className="row" style={{ gap: '6px', flexWrap: 'wrap', marginTop: '6px' }}>
+            <button className="btn btn-small" onClick={store.selectAllKeepOut}>Select all keep-out</button>
             <button className="btn btn-small" onClick={store.undoSelection} disabled={store.selectionUndo.length === 0}>Undo</button>
             <button className="btn btn-small" onClick={store.redoSelection} disabled={store.selectionRedo.length === 0}>Redo</button>
             <button className="btn btn-small" onClick={store.clearSelection}>Clear</button>
           </div>
+          {store.selectionMode !== 'none' && (
+            <>
+              <div className="row" style={{ marginTop: '6px' }}>
+                <label htmlFor="constraint-brush-radius">Brush Radius (mm):</label>
+                <input
+                  id="constraint-brush-radius"
+                  type="number"
+                  title="Radius around the pointer hit. Zero paints one triangle. Hold Alt while dragging to erase."
+                  min={0}
+                  max={100}
+                  step={0.5}
+                  value={store.brushRadius}
+                  onChange={(e) => store.setBrushRadius(Number.parseFloat(e.target.value) || 0)}
+                />
+              </div>
+              <div className="info-block">Drag on the imported model to paint. Hold Alt to erase.</div>
+            </>
+          )}
+          {store.keepInTris.size > 0 && (
+            <div className="row" style={{ marginTop: '6px' }}>
+              <label htmlFor="keep-in-depth">Keep-in Depth (mm):</label>
+              <input
+                id="keep-in-depth"
+                type="number"
+                title="Depth of solid material preserved below painted keep-in faces."
+                min={0.1}
+                max={100}
+                step={0.5}
+                value={store.params.keepInDepth}
+                onChange={(e) => store.updateParams({ keepInDepth: Number.parseFloat(e.target.value) || 3 })}
+              />
+            </div>
+          )}
           <div className="info-block">
             Keep-out: {store.keepOutTris.size.toLocaleString()} faces · Keep-in: {store.keepInTris.size.toLocaleString()} faces
           </div>

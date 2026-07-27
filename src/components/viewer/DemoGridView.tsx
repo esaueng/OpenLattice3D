@@ -97,7 +97,7 @@ function DemoTileViewer({ tile, viewMode, clipPlane, selectedLatticeType, onSele
   );
 }
 
-export function DemoGridView({ params, demoParamsByType, runId, viewMode, clipPlane, selectedLatticeType, onSelectLatticeType, sourceMesh, sphereMode, sphereRadius, sampleShape, keepOutTris }: {
+export function DemoGridView({ params, demoParamsByType, runId, viewMode, clipPlane, selectedLatticeType, onSelectLatticeType, sourceMesh, sphereMode, sphereRadius, sampleShape, keepOutTris, keepInTris }: {
   params: LatticeParams;
   demoParamsByType: Partial<Record<LatticeType, LatticeParams>>;
   runId: number;
@@ -110,6 +110,7 @@ export function DemoGridView({ params, demoParamsByType, runId, viewMode, clipPl
   sphereRadius: number;
   sampleShape: SampleShape | null;
   keepOutTris: Set<number>;
+  keepInTris: Set<number>;
 }) {
   const [tiles, setTiles] = useState<DemoTileState[]>(() => DEMO_TILE_ITEMS.map((item) => ({ ...item, status: 'pending', result: null })));
   const workersRef = useRef<Map<LatticeType, Worker>>(new Map());
@@ -120,6 +121,7 @@ export function DemoGridView({ params, demoParamsByType, runId, viewMode, clipPl
   const latestParamsRef = useRef(params);
   const latestDemoParamsRef = useRef(demoParamsByType);
   const keepOutKey = useMemo(() => Array.from(keepOutTris).sort((a, b) => a - b).join(','), [keepOutTris]);
+  const keepInKey = useMemo(() => Array.from(keepInTris).sort((a, b) => a - b).join(','), [keepInTris]);
   const sourceKey = useMemo(() => sourceMesh
     ? `mesh:${sourceMesh.triCount}:${sourceMesh.positions.length}:${sourceMesh.normals.length}`
     : `shape:${sampleShape ?? 'none'}:${sphereMode ? 1 : 0}:${sphereRadius}`,
@@ -137,8 +139,9 @@ export function DemoGridView({ params, demoParamsByType, runId, viewMode, clipPl
     type,
     source: sourceKey,
     keepOut: keepOutKey,
+    keepIn: keepInKey,
     params: localParams,
-  }), [keepOutKey, sourceKey]);
+  }), [keepInKey, keepOutKey, sourceKey]);
 
   const generateTiles = useCallback((types: LatticeType[], baseParams: LatticeParams, force = false) => {
     for (const type of types) {
@@ -166,6 +169,7 @@ export function DemoGridView({ params, demoParamsByType, runId, viewMode, clipPl
         sphereRadius,
         resolution: Math.round(24 + localParams.exportResolution * 24),
         keepOutTris: Array.from(keepOutTris),
+        keepInTris: Array.from(keepInTris),
       };
       if (sourceMesh) {
         message.meshPositions = sourceMesh.positions;
@@ -196,7 +200,7 @@ export function DemoGridView({ params, demoParamsByType, runId, viewMode, clipPl
       };
       worker.postMessage(message);
     }
-  }, [keepOutTris, sampleShape, signatureFor, sourceMesh, sphereMode, sphereRadius, stopWorker]);
+  }, [keepInTris, keepOutTris, sampleShape, signatureFor, sourceMesh, sphereMode, sphereRadius, stopWorker]);
 
   useEffect(() => {
     const allTypes = DEMO_TILE_ITEMS.map((item) => item.type);
@@ -221,7 +225,7 @@ export function DemoGridView({ params, demoParamsByType, runId, viewMode, clipPl
       cancelled = true;
       for (const type of allTypes) stopWorker(type);
     };
-  }, [generateTiles, keepOutTris, runId, sampleShape, sourceMesh, sphereMode, sphereRadius, stopWorker]);
+  }, [generateTiles, keepInTris, keepOutTris, runId, sampleShape, sourceMesh, sphereMode, sphereRadius, stopWorker]);
 
   useEffect(() => {
     if (!completedInitialRunRef.current || (!sourceMesh && !sphereMode)) return;

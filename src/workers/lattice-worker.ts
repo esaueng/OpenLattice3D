@@ -96,6 +96,7 @@ export interface WorkerMessage {
   sampleShape?: SampleShape | null;
   resolution?: number;
   keepOutTris?: number[];
+  keepInTris?: number[];
   demoMode?: boolean;
 }
 
@@ -792,8 +793,21 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         postMessage({ type: 'progress', progress: 0.1, message: 'BVH built, computing SDF...' } as WorkerResponse);
 
         const keepOutSet = new Set(msg.keepOutTris || []);
+        const keepInSet = new Set(msg.keepInTris || []);
         objectSdf = (x, y, z) => bvh!.signedDistance([x, y, z]);
-        sdf = buildCombinedSDF({ bvh, params });
+        sdf = buildCombinedSDF({
+          bvh,
+          params,
+          keepOutTris: keepOutSet,
+          keepInTris: keepInSet,
+        });
+        if (keepOutSet.size > 0 || keepInSet.size > 0) {
+          postMessage({
+            type: 'progress',
+            progress: 0.1,
+            message: `Constraints active: ${keepOutSet.size} keep-out, ${keepInSet.size} keep-in triangles`,
+          } as WorkerResponse);
+        }
         if (isSurfacePolygon) {
           const positions = msg.meshPositions!;
           const normals = msg.meshNormals!;

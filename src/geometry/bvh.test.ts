@@ -21,6 +21,21 @@ describe('MeshBVH', () => {
 
     const inside = bvh.closestPoint([0, 0, 0]);
     expect(inside.distance).toBeCloseTo(10, 5);
+    expect(bvh.closestDistance(15, 0, 0)).toBeCloseTo(5, 5);
+  });
+
+  it('builds a distance-query BVH for selected triangles only', () => {
+    const cube = generateCubeMesh(20);
+    const bvh = new MeshBVH(cube.positions, cube.normals, cube.triCount);
+    expect(bvh.subset([])).toBeNull();
+    const subset = bvh.subset([0]);
+    expect(subset).not.toBeNull();
+    expect(subset!.triCount).toBe(1);
+    expect(subset!.closestDistance(
+      cube.positions[0],
+      cube.positions[1],
+      cube.positions[2],
+    )).toBeCloseTo(0, 6);
   });
 
   it('computes signed distance with correct sign', () => {
