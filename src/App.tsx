@@ -10,6 +10,69 @@ import { useWorkspaceHotkeys } from './hooks/useWorkspaceHotkeys';
 import './App.css';
 
 function App() {
+  const persistenceHydrated = useStore((state) => state.persistenceHydrated);
+  return persistenceHydrated ? <HydratedApp /> : <AppBootShell />;
+}
+
+function AppBootShell() {
+  return (
+    <div className="app-shell boot-shell" aria-busy="true" data-boot-state="restoring">
+      <h1 className="visually-hidden">OpenLattice3D — 3D lattice generator</h1>
+      <header className="topbar">
+        <div className="brand" aria-label="Open Lattice 3D">
+          <span className="brand-mark" aria-hidden="true">
+            <img src="/vite.svg" alt="" />
+          </span>
+          <span>OpenLattice3D</span>
+          <span className="version-chip">beta</span>
+        </div>
+
+        <div className="topbar-divider" />
+        <div className="chrome-path" aria-label="Project status">
+          <span className="chrome-path-root">OpenLattice3D</span>
+          <span className="breadcrumb-sep">/</span>
+          <span className="breadcrumb-chip">Checking workspace</span>
+        </div>
+      </header>
+
+      <main className="workspace" id="main-content">
+        <section className="tool-panel left-panel" aria-label="Lattice setup">
+          <div className="panel-content boot-panel-placeholder" aria-hidden="true">
+            <div className="panel-intro">
+              <span className="panel-eyebrow">setup</span>
+              <h2>Model and lattice</h2>
+              <span className="boot-skeleton-line boot-skeleton-line-wide" />
+            </div>
+            <section className="panel-section">
+              <span className="boot-skeleton-line boot-skeleton-line-short" />
+              <span className="boot-skeleton-line" />
+              <span className="boot-skeleton-line boot-skeleton-line-wide" />
+            </section>
+            <section className="panel-section">
+              <span className="boot-skeleton-line boot-skeleton-line-short" />
+              <span className="boot-skeleton-line boot-skeleton-line-wide" />
+            </section>
+          </div>
+        </section>
+
+        <section className="viewer-shell boot-viewer-shell" aria-label="3D lattice viewer">
+          <div className="boot-viewer-state" role="status" aria-live="polite">
+            <strong>Checking for a saved workspace…</strong>
+            <span>Your model will appear here when restore is complete.</span>
+          </div>
+        </section>
+      </main>
+
+      <footer className="statusbar">
+        <div className="statusbar-group" aria-label="Workspace restore status">
+          <span className="statusbar-segment">Storage: Restoring</span>
+        </div>
+      </footer>
+    </div>
+  );
+}
+
+function HydratedApp() {
   const {
     originalMesh,
     sphereMode,
