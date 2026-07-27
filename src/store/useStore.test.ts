@@ -3,6 +3,12 @@ import { analyzeMesh, generateCubeMesh } from '../geometry/mesh-analysis';
 import { DEFAULT_PARAMS } from '../types/project';
 import { useStore } from './useStore';
 
+describe('persistence hydration', () => {
+  it('releases the boot gate when browser storage is unavailable', async () => {
+    await expect.poll(() => useStore.getState().persistenceHydrated).toBe(true);
+  });
+});
+
 describe('selection history', () => {
   beforeEach(() => {
     useStore.getState().resetProject();
