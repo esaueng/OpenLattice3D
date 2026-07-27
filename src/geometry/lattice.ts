@@ -62,12 +62,55 @@ function getStrutCache(L: number): StrutCache {
 //  All return a sheet-type SDF: |f(p)| - c  where c sets thickness
 // ═══════════════════════════════════════════════════════════
 
+export type SheetLatticeType = 'gyroid' | 'schwarzP' | 'schwarzD' | 'neovius' | 'iwp' | 'spinodal';
+
+/**
+ * Dimensionless gradient magnitude of each periodic function at its sheet
+ * surface, which is what converts a requested wall thickness into an iso-value.
+ *
+ * A sheet is the band |f| <= c, so its thickness through the wall is
+ * 2c/|grad f|. Writing c = wallThickness * pi / cellSize * G makes the produced
+ * wall equal wallThickness exactly when G is that gradient magnitude, and the
+ * cellSize terms cancel — so the calibration holds at any cell size, which is
+ * confirmed by measurement across cells of 6, 8 and 12mm.
+ *
+ * Values are measured against the thickness estimator rather than derived, so
+ * that the number the panel reports matches the number typed in. They land
+ * close to sqrt(3) = 1.732 for gyroid, Schwarz P, Schwarz D and spinodal, which
+ * is the analytic max|grad f| for those functions — the small shortfall is the
+ * 1st-percentile convention the estimator reports on.
+ */
+const TPMS_SURFACE_GRADIENT: Record<SheetLatticeType, number> = {
+  gyroid: 1.6548,
+  schwarzP: 1.7047,
+  schwarzD: 1.6356,
+  neovius: 5.2120,
+  iwp: 4.5765,
+  spinodal: 1.7791,
+};
+
+/**
+ * Iso-value that yields a wall of `wallThickness` millimetres.
+ *
+ * Single source of truth: the standalone SDFs, the evaluator used for mesh
+ * inputs, the TPMS grid sampler and the WebGPU field kernel all derive the
+ * iso here. They previously each carried their own copy of the expression,
+ * which is exactly the shape of divergence that lets one backend silently
+ * produce different geometry from another.
+ */
+export function tpmsIsoValue(
+  latticeType: SheetLatticeType,
+  wallThickness: number,
+  cellSize: number
+): number {
+  return (wallThickness * Math.PI / cellSize) * TPMS_SURFACE_GRADIENT[latticeType];
+}
+
 /** Gyroid: sin(kx)cos(ky) + sin(ky)cos(kz) + sin(kz)cos(kx) */
 export function gyroidSDF(x: number, y: number, z: number, cellSize: number, wallThickness: number): number {
   const k = TWO_PI / cellSize;
   const val = Math.sin(k*x)*Math.cos(k*y) + Math.sin(k*y)*Math.cos(k*z) + Math.sin(k*z)*Math.cos(k*x);
-  const c = wallThickness * Math.PI / cellSize;
-  return Math.abs(val) - c;
+  return Math.abs(val) - tpmsIsoValue('gyroid', wallThickness, cellSize);
 }
 
 /** Schwarz P (Primitive): cos(kx) + cos(ky) + cos(kz)
@@ -75,9 +118,7 @@ export function gyroidSDF(x: number, y: number, z: number, cellSize: number, wal
 export function schwarzPSDF(x: number, y: number, z: number, cellSize: number, wallThickness: number): number {
   const k = TWO_PI / cellSize;
   const val = Math.cos(k*x) + Math.cos(k*y) + Math.cos(k*z);
-  // Range [-3, 3], Lipschitz ≈ k√3. Normalize thickness: c ~ wallThickness * k / 2
-  const c = wallThickness * Math.PI / cellSize;
-  return Math.abs(val) - c * 3;  // scale c to match the wider range
+  return Math.abs(val) - tpmsIsoValue('schwarzP', wallThickness, cellSize);
 }
 
 /** Schwarz D (Diamond): sin(kx)sin(ky)sin(kz) + sin(kx)cos(ky)cos(kz)
@@ -88,9 +129,7 @@ export function schwarzDSDF(x: number, y: number, z: number, cellSize: number, w
   const sx = Math.sin(k*x), sy = Math.sin(k*y), sz = Math.sin(k*z);
   const cx = Math.cos(k*x), cy = Math.cos(k*y), cz = Math.cos(k*z);
   const val = sx*sy*sz + sx*cy*cz + cx*sy*cz + cx*cy*sz;
-  // Range ~ [-1.4, 1.4]
-  const c = wallThickness * Math.PI / cellSize;
-  return Math.abs(val) - c * 1.4;
+  return Math.abs(val) - tpmsIsoValue('schwarzD', wallThickness, cellSize);
 }
 
 /** Neovius: 3(cos(kx) + cos(ky) + cos(kz)) + 4·cos(kx)cos(ky)cos(kz)
@@ -99,9 +138,7 @@ export function neoviusSDF(x: number, y: number, z: number, cellSize: number, wa
   const k = TWO_PI / cellSize;
   const cx = Math.cos(k*x), cy = Math.cos(k*y), cz = Math.cos(k*z);
   const val = 3*(cx + cy + cz) + 4*cx*cy*cz;
-  // Range ~ [-13, 13]
-  const c = wallThickness * Math.PI / cellSize;
-  return Math.abs(val) - c * 13;
+  return Math.abs(val) - tpmsIsoValue('neovius', wallThickness, cellSize);
 }
 
 /** IWP (Schoen I-WP): 2(cos(kx)cos(ky) + cos(ky)cos(kz) + cos(kz)cos(kx))
@@ -111,9 +148,7 @@ export function iwpSDF(x: number, y: number, z: number, cellSize: number, wallTh
   const k = TWO_PI / cellSize;
   const cx = Math.cos(k*x), cy = Math.cos(k*y), cz = Math.cos(k*z);
   const val = 2*(cx*cy + cy*cz + cz*cx) - (Math.cos(2*k*x) + Math.cos(2*k*y) + Math.cos(2*k*z));
-  // Range ~ [-5, 5]
-  const c = wallThickness * Math.PI / cellSize;
-  return Math.abs(val) - c * 5;
+  return Math.abs(val) - tpmsIsoValue('iwp', wallThickness, cellSize);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -262,9 +297,7 @@ export function spinodalSDF(x: number, y: number, z: number, cellSize: number, w
     sum += Math.cos(kx * x + ky * y + kz * z + phase);
   }
   sum /= Math.sqrt(N_WAVES);
-  // Threshold to control wall thickness: larger c → more material
-  const c = wallThickness * 0.6 / cellSize;
-  return Math.abs(sum) - c * 2;
+  return Math.abs(sum) - tpmsIsoValue('spinodal', wallThickness, cellSize);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -484,7 +517,7 @@ function buildLatticeEvaluator(params: LatticeParams): (x: number, y: number, z:
   switch (latticeType) {
     case 'gyroid': {
       const k = TWO_PI / cellSize;
-      const c = wallThickness * Math.PI / cellSize;
+      const c = tpmsIsoValue('gyroid', wallThickness, cellSize);
       return (x, y, z) => {
         const kx = k * x;
         const ky = k * y;
@@ -497,40 +530,40 @@ function buildLatticeEvaluator(params: LatticeParams): (x: number, y: number, z:
     }
     case 'schwarzP': {
       const k = TWO_PI / cellSize;
-      const c = wallThickness * Math.PI / cellSize;
+      const c = tpmsIsoValue('schwarzP', wallThickness, cellSize);
       return (x, y, z) => {
         const val = Math.cos(k * x) + Math.cos(k * y) + Math.cos(k * z);
-        return Math.abs(val) - c * 3;
+        return Math.abs(val) - c;
       };
     }
     case 'schwarzD': {
       const k = TWO_PI / cellSize;
-      const c = wallThickness * Math.PI / cellSize;
+      const c = tpmsIsoValue('schwarzD', wallThickness, cellSize);
       return (x, y, z) => {
         const sx = Math.sin(k * x), sy = Math.sin(k * y), sz = Math.sin(k * z);
         const cx = Math.cos(k * x), cy = Math.cos(k * y), cz = Math.cos(k * z);
         const val = sx * sy * sz + sx * cy * cz + cx * sy * cz + cx * cy * sz;
-        return Math.abs(val) - c * 1.4;
+        return Math.abs(val) - c;
       };
     }
     case 'neovius': {
       const k = TWO_PI / cellSize;
-      const c = wallThickness * Math.PI / cellSize;
+      const c = tpmsIsoValue('neovius', wallThickness, cellSize);
       return (x, y, z) => {
         const cx = Math.cos(k * x), cy = Math.cos(k * y), cz = Math.cos(k * z);
         const val = 3 * (cx + cy + cz) + 4 * cx * cy * cz;
-        return Math.abs(val) - c * 13;
+        return Math.abs(val) - c;
       };
     }
     case 'iwp': {
       const k = TWO_PI / cellSize;
       const k2 = 2 * k;
-      const c = wallThickness * Math.PI / cellSize;
+      const c = tpmsIsoValue('iwp', wallThickness, cellSize);
       return (x, y, z) => {
         const cx = Math.cos(k * x), cy = Math.cos(k * y), cz = Math.cos(k * z);
         const val = 2 * (cx * cy + cy * cz + cz * cx)
           - (Math.cos(k2 * x) + Math.cos(k2 * y) + Math.cos(k2 * z));
-        return Math.abs(val) - c * 5;
+        return Math.abs(val) - c;
       };
     }
     case 'spinodal': {
@@ -546,7 +579,7 @@ function buildLatticeEvaluator(params: LatticeParams): (x: number, y: number, z:
           phase: TWO_PI * hashF(i, 2),
         };
       });
-      const c = wallThickness * 0.6 / cellSize;
+      const c = tpmsIsoValue('spinodal', wallThickness, cellSize);
       return (x, y, z) => {
         let sum = 0;
         for (let i = 0; i < waves.length; i++) {
@@ -554,7 +587,7 @@ function buildLatticeEvaluator(params: LatticeParams): (x: number, y: number, z:
           sum += Math.cos(w.kx * x + w.ky * y + w.kz * z + w.phase);
         }
         sum /= Math.sqrt(N_WAVES);
-        return Math.abs(sum) - c * 2;
+        return Math.abs(sum) - c;
       };
     }
     case 'bcc':
@@ -598,19 +631,19 @@ function tpmsValueFromTrig(
     }
     case 'schwarzP': {
       const val = cx + cy + cz;
-      return Math.abs(val) - c * 3;
+      return Math.abs(val) - c;
     }
     case 'schwarzD': {
       const val = sx * sy * sz + sx * cy * cz + cx * sy * cz + cx * cy * sz;
-      return Math.abs(val) - c * 1.4;
+      return Math.abs(val) - c;
     }
     case 'neovius': {
       const val = 3 * (cx + cy + cz) + 4 * cx * cy * cz;
-      return Math.abs(val) - c * 13;
+      return Math.abs(val) - c;
     }
     case 'iwp': {
       const val = 2 * (cx * cy + cy * cz + cz * cx) - (c2x + c2y + c2z);
-      return Math.abs(val) - c * 5;
+      return Math.abs(val) - c;
     }
   }
 }
@@ -655,7 +688,7 @@ function attachTpmsGridSampler(
   const latticeType = params.latticeType;
   const k = TWO_PI / params.cellSize;
   const k2 = 2 * k;
-  const c = params.wallThickness * Math.PI / params.cellSize;
+  const c = tpmsIsoValue(latticeType, params.wallThickness, params.cellSize);
 
   target.sampleField = (bounds, resolution, out, onProgress) => {
     const count = resolution + 1;

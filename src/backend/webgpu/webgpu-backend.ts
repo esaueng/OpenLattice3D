@@ -1,4 +1,6 @@
 import type { Vec3 } from '../../geometry/vec3';
+import { tpmsIsoValue } from '../../geometry/lattice';
+import type { SheetLatticeType } from '../../geometry/lattice';
 import type { LatticeParams, SampleShape } from '../../types/project';
 
 type GpuMapModeFlags = { READ: number };
@@ -235,7 +237,8 @@ function packFieldParams(options: WebGpuFieldSampleOptions): Float32Array {
     params.strutDiameter, params.noShell ? 1 : 0, params.surfaceOnly ? 1 : 0, params.surfaceDepth,
     params.gradientEnabled ? 1 : 0, params.gradientStrength, params.thinSectionFilter,
     params.variant === 'shell_core' ? 0 : 1,
-    shapeA, shapeB, shapeC, 0,
+    shapeA, shapeB, shapeC,
+    tpmsIsoValue(params.latticeType as SheetLatticeType, params.wallThickness, params.cellSize),
   ]);
 }
 
@@ -279,7 +282,9 @@ fn object_sdf(pos: vec3<f32>) -> f32 {
 
 fn lattice_sdf(pos: vec3<f32>) -> f32 {
   let k = 6.283185307179586 / p[9];
-  let c = p[10] * 3.141592653589793 / p[9];
+  // Calibrated on the CPU (see tpmsIsoValue); deriving it here again would let
+  // this backend drift away from the others.
+  let c = p[23];
   let lattice = u32(p[8]);
   if (lattice == 0u) {
     let sx = sin(k * pos.x);
@@ -292,7 +297,7 @@ fn lattice_sdf(pos: vec3<f32>) -> f32 {
     return abs(v) - c;
   }
   let v = cos(k * pos.x) + cos(k * pos.y) + cos(k * pos.z);
-  return abs(v) - c * 3.0;
+  return abs(v) - c;
 }
 
 fn combined_sdf(d_obj: f32, lat_in: f32) -> f32 {
