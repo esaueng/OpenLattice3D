@@ -199,7 +199,7 @@ function runProceduralValidation(
   const outerDeviation = shape === 'sphere'
     ? checkSphereDeviation(result, msg.sphereRadius || 25, msg.params.toleranceMm)
     : { passed: true, maxDeviation: 0 };
-  const minThickness = checkMinThickness(sdf, result, msg.params.minFeatureSize, 200);
+  const minThickness = checkMinThickness(sdf, result, msg.params.minFeatureSize);
   const { manifold, disconnected } = checkTopology(result);
   const warnings: string[] = [];
 

@@ -62,7 +62,16 @@ export interface LatticeParams {
 export interface ValidationResult {
   passed: boolean;
   outerDeviation: { passed: boolean; maxDeviation: number; tolerance: number };
-  minThickness: { passed: boolean; minMeasured: number; required: number };
+  minThickness: {
+    passed: boolean;
+    /** 1st-percentile local thickness, mm. Drives pass/fail. */
+    minMeasured: number;
+    required: number;
+    /** Thinnest single sample, mm. Sensitive to cusps, shown for inspection. */
+    absoluteMin?: number;
+    /** Rays that found a measurable wall. */
+    sampled?: number;
+  };
   manifold: { passed: boolean; details: string };
   disconnected: { passed: boolean; fragmentCount: number };
   warnings: string[];

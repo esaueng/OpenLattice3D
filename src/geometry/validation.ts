@@ -1,6 +1,5 @@
 // Validation: check deviation, thickness, manifoldness, disconnected pieces
 import type { Vec3 } from './vec3';
-import { length, normalize, scale, add } from './vec3';
 import type { MeshBVH } from './bvh';
 import type { LatticeParams, ValidationResult } from '../types/project';
 import type { MarchingCubesResult } from './marching-cubes';
@@ -220,52 +219,138 @@ export function checkSphereDeviation(
   return { passed: maxDev <= tolerance, maxDeviation: maxDev };
 }
 
-/** Minimum thickness check: sample points inside the lattice, trace in normal direction */
+/** Unit outward direction from the field gradient, or null where it degenerates. */
+function sdfNormal(
+  sdf: (x: number, y: number, z: number) => number,
+  x: number,
+  y: number,
+  z: number,
+  h: number
+): Vec3 | null {
+  const gx = sdf(x + h, y, z) - sdf(x - h, y, z);
+  const gy = sdf(x, y + h, z) - sdf(x, y - h, z);
+  const gz = sdf(x, y, z + h) - sdf(x, y, z - h);
+  const len = Math.sqrt(gx * gx + gy * gy + gz * gz);
+  if (len < 1e-12) return null;
+  return [gx / len, gy / len, gz / len];
+}
+
+/** Distance along `dir` from `origin` at which the field crosses zero, by bisection. */
+function bisectCrossing(
+  sdf: (x: number, y: number, z: number) => number,
+  origin: Vec3,
+  dir: Vec3,
+  inside: number,
+  outside: number
+): number {
+  let lo = inside;
+  let hi = outside;
+  for (let i = 0; i < 28; i++) {
+    const mid = (lo + hi) * 0.5;
+    const v = sdf(origin[0] + dir[0] * mid, origin[1] + dir[1] * mid, origin[2] + dir[2] * mid);
+    if (v <= 0) lo = mid; else hi = mid;
+  }
+  return (lo + hi) * 0.5;
+}
+
+/**
+ * Local wall thickness, measured through the material along the surface normal.
+ *
+ * The direction comes from the field gradient rather than the mesh face normal.
+ * Marching cubes emits inward-facing winding here, so its face normals point
+ * into the material — the previous implementation marched along the negation of
+ * those and therefore travelled *outward* on every sample. It entered material
+ * only after crossing a gap into the neighbouring lattice wall, which is why it
+ * reported gaps rather than walls and moved non-monotonically with wall
+ * thickness. Where nothing was measured at all it fell back to exactly the
+ * required value, which silently passed.
+ *
+ * Entry and exit are both bisection-refined, so the result is continuous rather
+ * than quantised to the march step.
+ *
+ * The reported figure is the 1st percentile, not the outright minimum: a single
+ * grazing sample at a cusp is a measurement artifact, whereas a genuinely thin
+ * region shows up across many samples. The absolute minimum is reported
+ * alongside it for inspection.
+ */
 export function checkMinThickness(
   sdf: (x: number, y: number, z: number) => number,
   result: MarchingCubesResult,
   minRequired: number,
-  sampleCount: number = 500
-): { passed: boolean; minMeasured: number } {
-  const { positions, normals, triCount } = result;
-  let minMeasured = Infinity;
-  const step = Math.max(1, Math.floor(triCount / sampleCount));
+  sampleCount: number = 1500
+): { passed: boolean; minMeasured: number; absoluteMin: number; sampled: number } {
+  const { positions, triCount } = result;
+  const stride = Math.max(1, Math.floor(triCount / sampleCount));
+  const marchStep = minRequired / 16;
+  // Only thin features matter here; anything past this is comfortably fine and
+  // marching further would dominate the cost on solid regions.
+  const maxDepth = minRequired * 4;
+  const gradientStep = Math.max(1e-4, minRequired * 0.01);
 
-  for (let i = 0; i < triCount; i += step) {
+  const thicknesses: number[] = [];
+
+  for (let i = 0; i < triCount; i += stride) {
     const o = i * 9;
-    // Surface point (centroid)
     const px = (positions[o] + positions[o + 3] + positions[o + 6]) / 3;
     const py = (positions[o + 1] + positions[o + 4] + positions[o + 7]) / 3;
     const pz = (positions[o + 2] + positions[o + 5] + positions[o + 8]) / 3;
-    const n: Vec3 = [normals[i * 3], normals[i * 3 + 1], normals[i * 3 + 2]];
-    const nLen = length(n);
-    if (nLen < 1e-6) continue;
-    const nn = normalize(n);
 
-    // March inward along normal until SDF becomes positive again (exiting material)
-    let thickness = 0;
-    const stepSize = minRequired * 0.1;
-    let p: Vec3 = [px, py, pz];
-    let enteredMaterial = false;
-    for (let s = 0; s < 50; s++) {
-      p = add(p, scale(nn, -stepSize));  // inward
-      thickness += stepSize;
-      const val = sdf(p[0], p[1], p[2]);
-      if (val <= 0) {
-        enteredMaterial = true;
-      } else if (enteredMaterial) {
-        // Exited material
+    const outward = sdfNormal(sdf, px, py, pz, gradientStep);
+    if (!outward) continue;
+    const inward: Vec3 = [-outward[0], -outward[1], -outward[2]];
+    const origin: Vec3 = [px, py, pz];
+
+    // Step just inside the wall. Marching cubes places the centroid on its own
+    // approximation of the surface, which for a wall only a cell or two thick
+    // can sit well inside the true one — so the wall is spanned in both
+    // directions from here rather than assumed to start at the centroid.
+    let seed = -1;
+    for (let t = 0; t <= marchStep * 4; t += marchStep) {
+      if (sdf(origin[0] + inward[0] * t, origin[1] + inward[1] * t, origin[2] + inward[2] * t) <= 0) {
+        seed = t;
         break;
       }
-      if (thickness > minRequired * 5) break;
     }
-    if (enteredMaterial && thickness < minMeasured) {
-      minMeasured = thickness;
-    }
+    if (seed < 0) continue;   // no material along this ray
+
+    const crossing = (sign: number): number => {
+      let lastInside = seed;
+      for (let d = marchStep; d <= maxDepth; d += marchStep) {
+        const t = seed + sign * d;
+        if (sdf(origin[0] + inward[0] * t, origin[1] + inward[1] * t, origin[2] + inward[2] * t) > 0) {
+          return bisectCrossing(sdf, origin, inward, lastInside, t);
+        }
+        lastInside = t;
+      }
+      return NaN;   // still solid at the cap: a thick section, not a thin one
+    };
+
+    const far = crossing(1);
+    const near = crossing(-1);
+    // Either side failing to exit means this is a thick section, which cannot
+    // be the constraining feature — leaving it out keeps it from skewing stats.
+    if (!Number.isFinite(far) || !Number.isFinite(near)) continue;
+
+    const thickness = far - near;
+    if (thickness > 0) thicknesses.push(thickness);
   }
 
-  if (minMeasured === Infinity) minMeasured = minRequired; // fallback
-  return { passed: minMeasured >= minRequired * 0.9, minMeasured };
+  if (thicknesses.length === 0) {
+    // Nothing thin enough to measure anywhere: report the search ceiling rather
+    // than the requirement, so a pass is never manufactured out of no data.
+    return { passed: true, minMeasured: maxDepth, absoluteMin: maxDepth, sampled: 0 };
+  }
+
+  thicknesses.sort((a, b) => a - b);
+  const percentileIndex = Math.min(thicknesses.length - 1, Math.floor(thicknesses.length * 0.01));
+  const minMeasured = thicknesses[percentileIndex];
+
+  return {
+    passed: minMeasured >= minRequired - 1e-3,
+    minMeasured,
+    absoluteMin: thicknesses[0],
+    sampled: thicknesses.length,
+  };
 }
 
 /** Basic manifold check: count edges shared by != 2 triangles */

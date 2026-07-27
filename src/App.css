@@ -743,6 +743,13 @@ svg {
   font-weight: var(--fw-medium);
 }
 
+.check-detail {
+  margin-top: 3px;
+  color: var(--color-text-subtle);
+  font-size: var(--fs-mini);
+  line-height: 1.4;
+}
+
 .metric-headline {
   display: flex;
   align-items: baseline;

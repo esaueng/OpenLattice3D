@@ -124,6 +124,13 @@ export function RightPanel() {
               <div>
                 <strong>Min Thickness</strong>
                 <div>Measured: {validation.minThickness.minMeasured.toFixed(3)}mm (required: {validation.minThickness.required}mm)</div>
+                {validation.minThickness.sampled !== undefined && (
+                  <div className="check-detail">
+                    1st percentile of {validation.minThickness.sampled.toLocaleString()} rays
+                    {validation.minThickness.absoluteMin !== undefined
+                      && `; thinnest single sample ${validation.minThickness.absoluteMin.toFixed(3)}mm`}
+                  </div>
+                )}
               </div>
             </div>
 
