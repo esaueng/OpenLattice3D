@@ -5,6 +5,7 @@
 // unitless, so a file authored in inches is indistinguishable from millimetres
 // and silently scales the lattice by 25.4.
 import { buildIndexedMesh } from '../geometry/mesh-indexing';
+import type { IndexedMesh } from '../geometry/mesh-indexing';
 import type { MarchingCubesResult } from '../geometry/marching-cubes';
 import type { LatticeMetrics } from '../geometry/metrics';
 import type { LatticeParams, ValidationResult } from '../types/project';
@@ -74,8 +75,8 @@ function buildMetadata(options: ThreeMfOptions): string {
     .join('\n');
 }
 
-function buildModelXml(result: MarchingCubesResult, options: ThreeMfOptions): Uint8Array {
-  const mesh = buildIndexedMesh(result);
+function buildModelXml(source: MarchingCubesResult | IndexedMesh, options: ThreeMfOptions): Uint8Array {
+  const mesh = 'indices' in source ? source : buildIndexedMesh(source);
   const encoder = new TextEncoder();
   const chunks: Uint8Array[] = [];
   let buffer: string[] = [];
@@ -138,7 +139,7 @@ const ROOT_RELS = `<?xml version="1.0" encoding="UTF-8"?>
 
 /** Build a complete 3MF package. */
 export async function buildThreeMf(
-  result: MarchingCubesResult,
+  result: MarchingCubesResult | IndexedMesh,
   options: ThreeMfOptions
 ): Promise<Uint8Array> {
   const encoder = new TextEncoder();
