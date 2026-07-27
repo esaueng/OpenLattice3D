@@ -145,6 +145,7 @@ export function useLatticeGeneration(): LatticeGenerationControls {
         keepOutTris: Array.from(latest.keepOutTris),
         keepInTris: Array.from(latest.keepInTris),
         escapeHoles: resp.escapeHoles,
+        thinFilterSkipped: resp.thinFilterSkipped,
         surfaceSamplePositions: resp.surfaceSamplePositions,
         surfaceSampleNormals: resp.surfaceSampleNormals,
         surfaceSampleHoleScales: resp.surfaceSampleHoleScales,
