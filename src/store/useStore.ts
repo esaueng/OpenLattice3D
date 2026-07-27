@@ -47,6 +47,7 @@ interface PersistedState {
   viewMode: ViewMode;
   clipPlane: ClipPlaneState;
   viewerBackground: string;
+  brushRadius: number;
 }
 
 type DemoParamsByType = Partial<Record<LatticeType, LatticeParams>>;
@@ -83,6 +84,14 @@ function pushSelectionHistory(state: AppState): Pick<AppState, 'selectionUndo' |
     selectionUndo: [...state.selectionUndo.slice(-(MAX_SELECTION_HISTORY - 1)), currentSelection(state)],
     selectionRedo: [],
   };
+}
+
+function selectionsMatch(a: SelectionSnapshot, b: SelectionSnapshot): boolean {
+  if (a.keepOut.length !== b.keepOut.length || a.keepIn.length !== b.keepIn.length) return false;
+  const keepOut = new Set(a.keepOut);
+  const keepIn = new Set(a.keepIn);
+  return b.keepOut.every((triangle) => keepOut.has(triangle))
+    && b.keepIn.every((triangle) => keepIn.has(triangle));
 }
 
 interface PersistedAppState extends PersistedState {
@@ -278,8 +287,10 @@ interface AppState {
   selectionMode: SelectionMode;
   keepOutTris: Set<number>;
   keepInTris: Set<number>;
+  brushRadius: number;
   selectionUndo: SelectionSnapshot[];
   selectionRedo: SelectionSnapshot[];
+  selectionStrokeStart: SelectionSnapshot | null;
 
   // Params
   params: LatticeParams;
@@ -312,6 +323,10 @@ interface AppState {
   setSampleShape: (shape: SampleShape) => void;
   setSphereMode: (radius: number) => void;
   setSelectionMode: (mode: SelectionMode) => void;
+  setBrushRadius: (radius: number) => void;
+  beginSelectionStroke: () => void;
+  endSelectionStroke: () => void;
+  paintTriangles: (triIndices: number[], additive: boolean) => void;
   toggleKeepOut: (triIdx: number) => void;
   toggleKeepIn: (triIdx: number) => void;
   selectAllKeepOut: () => void;
@@ -360,8 +375,10 @@ export const useStore = create<AppState>((set) => ({
   selectionMode: 'none',
   keepOutTris: new Set<number>(),
   keepInTris: new Set<number>(),
+  brushRadius: persisted?.brushRadius ?? 0,
   selectionUndo: [],
   selectionRedo: [],
+  selectionStrokeStart: null,
   params: persisted?.params ? { ...DEFAULT_PARAMS, ...persisted.params } : { ...DEFAULT_PARAMS },
   demoParamsByType: {},
   generating: false,
@@ -390,6 +407,7 @@ export const useStore = create<AppState>((set) => ({
     keepInTris: new Set(),
     selectionUndo: [],
     selectionRedo: [],
+    selectionStrokeStart: null,
     demoParamsByType: {},
     viewerCameraState: null,
   }),
@@ -412,6 +430,7 @@ export const useStore = create<AppState>((set) => ({
     keepInTris: new Set(),
     selectionUndo: [],
     selectionRedo: [],
+    selectionStrokeStart: null,
     demoParamsByType: {},
     viewerCameraState: null,
     params: {
@@ -438,6 +457,7 @@ export const useStore = create<AppState>((set) => ({
     keepInTris: new Set(),
     selectionUndo: [],
     selectionRedo: [],
+    selectionStrokeStart: null,
     demoParamsByType: {},
     viewerCameraState: null,
     params: {
@@ -453,23 +473,70 @@ export const useStore = create<AppState>((set) => ({
 
   setSelectionMode: (mode) => set({ selectionMode: mode }),
 
+  setBrushRadius: (radius) => set({ brushRadius: Math.max(0, radius) }),
+
+  beginSelectionStroke: () => set((s) => (
+    s.selectionStrokeStart ? {} : { selectionStrokeStart: currentSelection(s) }
+  )),
+
+  endSelectionStroke: () => set((s) => {
+    if (!s.selectionStrokeStart) return {};
+    const start = s.selectionStrokeStart;
+    if (selectionsMatch(start, currentSelection(s))) return { selectionStrokeStart: null };
+    return {
+      selectionStrokeStart: null,
+      selectionUndo: [...s.selectionUndo.slice(-(MAX_SELECTION_HISTORY - 1)), start],
+      selectionRedo: [],
+    };
+  }),
+
+  paintTriangles: (triIndices, additive) => set((s) => {
+    if (s.selectionMode === 'none' || triIndices.length === 0) return {};
+    const target = new Set(s.selectionMode === 'keep_out' ? s.keepOutTris : s.keepInTris);
+    const other = new Set(s.selectionMode === 'keep_out' ? s.keepInTris : s.keepOutTris);
+    let changed = false;
+    for (const triIdx of triIndices) {
+      if (triIdx < 0 || triIdx >= (s.originalMesh?.triCount ?? 0)) continue;
+      if (additive) {
+        if (!target.has(triIdx)) {
+          target.add(triIdx);
+          changed = true;
+        }
+        if (other.delete(triIdx)) changed = true;
+      } else if (target.delete(triIdx)) {
+        changed = true;
+      }
+    }
+    if (!changed) return {};
+    const selection = s.selectionMode === 'keep_out'
+      ? { keepOutTris: target, keepInTris: other }
+      : { keepOutTris: other, keepInTris: target };
+    return s.selectionStrokeStart
+      ? selection
+      : { ...selection, ...pushSelectionHistory(s) };
+  }),
+
   toggleKeepOut: (triIdx) => set((s) => {
     const next = new Set(s.keepOutTris);
+    const keepIn = new Set(s.keepInTris);
     if (next.has(triIdx)) next.delete(triIdx); else next.add(triIdx);
-    return { keepOutTris: next, ...pushSelectionHistory(s) };
+    keepIn.delete(triIdx);
+    return { keepOutTris: next, keepInTris: keepIn, ...pushSelectionHistory(s) };
   }),
 
   toggleKeepIn: (triIdx) => set((s) => {
     const next = new Set(s.keepInTris);
+    const keepOut = new Set(s.keepOutTris);
     if (next.has(triIdx)) next.delete(triIdx); else next.add(triIdx);
-    return { keepInTris: next, ...pushSelectionHistory(s) };
+    keepOut.delete(triIdx);
+    return { keepInTris: next, keepOutTris: keepOut, ...pushSelectionHistory(s) };
   }),
 
   selectAllKeepOut: () => set((s) => {
     if (!s.originalMesh) return {};
     const all = new Set<number>();
     for (let i = 0; i < s.originalMesh.triCount; i++) all.add(i);
-    return { keepOutTris: all, ...pushSelectionHistory(s) };
+    return { keepOutTris: all, keepInTris: new Set<number>(), ...pushSelectionHistory(s) };
   }),
 
   clearSelection: () => set((s) => ({
@@ -640,6 +707,7 @@ export const useStore = create<AppState>((set) => ({
     keepInTris: new Set(project.keepInTris),
     selectionUndo: [],
     selectionRedo: [],
+    selectionStrokeStart: null,
     params: { ...project.params },
     demoParamsByType: {},
     generating: false,
@@ -673,8 +741,10 @@ export const useStore = create<AppState>((set) => ({
       validation: null,
       keepOutTris: new Set(),
       keepInTris: new Set(),
+      brushRadius: 0,
       selectionUndo: [],
       selectionRedo: [],
+      selectionStrokeStart: null,
       params: { ...DEFAULT_PARAMS },
       demoParamsByType: {},
       generating: false,
@@ -701,6 +771,7 @@ function persistedSubset(state: AppState): PersistedState {
     viewMode: state.viewMode,
     clipPlane: state.clipPlane,
     viewerBackground: state.viewerBackground,
+    brushRadius: state.brushRadius,
   };
 }
 
@@ -738,8 +809,10 @@ function hydrateFromSnapshot(snapshot: Partial<PersistedAppState>): Partial<AppS
     selectionMode: snapshot.selectionMode ?? 'none',
     keepOutTris: new Set(snapshot.keepOutTris ?? []),
     keepInTris: new Set(snapshot.keepInTris ?? []),
+    brushRadius: snapshot.brushRadius ?? 0,
     selectionUndo: [],
     selectionRedo: [],
+    selectionStrokeStart: null,
     params: snapshot.params ? { ...DEFAULT_PARAMS, ...snapshot.params } : { ...DEFAULT_PARAMS },
     demoParamsByType: snapshot.demoParamsByType ?? {},
     generating: false,

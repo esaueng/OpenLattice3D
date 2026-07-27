@@ -51,6 +51,10 @@ export function RightPanel() {
               <div>
                 <strong>Min Thickness</strong>
                 <div>Measured: {validation.minThickness.minMeasured.toFixed(3)}mm (required: {validation.minThickness.required}mm)</div>
+                <div>
+                  Absolute min: {(validation.minThickness.absoluteMin ?? validation.minThickness.minMeasured).toFixed(3)}mm
+                  {' '}across {validation.minThickness.sampled ?? 0} measured rays
+                </div>
               </div>
             </div>
 

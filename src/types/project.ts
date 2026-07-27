@@ -52,6 +52,7 @@ export interface LatticeParams {
   surfaceDepth: number;        // mm — depth of the lattice band when surfaceOnly is on
   gradientEnabled: boolean;
   gradientStrength: number;    // 0..1
+  keepInDepth: number;         // mm of solid material below painted keep-in faces
   thinSectionFilter: number;   // mm material removal to suppress ultra-thin/jagged artifacts
   exportResolution: number;    // grid divisions per cell
   escapeHoles: boolean;
@@ -65,7 +66,13 @@ export interface LatticeParams {
 export interface ValidationResult {
   passed: boolean;
   outerDeviation: { passed: boolean; maxDeviation: number; tolerance: number };
-  minThickness: { passed: boolean; minMeasured: number; required: number };
+  minThickness: {
+    passed: boolean;
+    minMeasured: number;
+    required: number;
+    absoluteMin: number;
+    sampled: number;
+  };
   manifold: { passed: boolean; details: string };
   disconnected: { passed: boolean; fragmentCount: number };
   warnings: string[];
@@ -96,6 +103,7 @@ export const DEFAULT_PARAMS: LatticeParams = {
   surfaceDepth: 8.0,
   gradientEnabled: false,
   gradientStrength: 0.5,
+  keepInDepth: 3.0,
   thinSectionFilter: 0.0,
   exportResolution: 3,
   escapeHoles: true,
@@ -150,6 +158,7 @@ const PARAM_VALIDATORS: Record<keyof LatticeParams, ParamValidator> = {
   surfaceDepth: isFiniteNumberIn(0.1, 500),
   gradientEnabled: isBoolean,
   gradientStrength: isFiniteNumberIn(0, 1),
+  keepInDepth: isFiniteNumberIn(0.01, 100),
   thinSectionFilter: isFiniteNumberIn(0, 10),
   exportResolution: isFiniteNumberIn(1, 10),
   escapeHoles: isBoolean,
