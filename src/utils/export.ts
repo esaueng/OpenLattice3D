@@ -4,6 +4,23 @@ import type { MarchingCubesResult } from '../geometry/marching-cubes';
 import type { ValidationResult, LatticeParams } from '../types/project';
 import { massGrams } from '../geometry/metrics';
 import type { LatticeMetrics } from '../geometry/metrics';
+import { buildThreeMf } from './threemf';
+import type { ThreeMfOptions } from './threemf';
+
+export async function download3MF(
+  result: MarchingCubesResult,
+  options: ThreeMfOptions,
+  filename: string = 'lattice-design.3mf'
+) {
+  const bytes = await buildThreeMf(result, options);
+  const blob = new Blob([bytes as BlobPart], { type: 'model/3mf' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 export function downloadSTL(result: MarchingCubesResult, filename: string = 'lattice-design.stl') {
   const buffer = exportBinarySTL(result.positions, result.normals, result.triCount);

@@ -215,11 +215,18 @@ function emitCubeTriangles(
   writeOffset: number
 ): number {
   let offset = writeOffset;
-  for (let i = 0; i < triList.length; i++) {
-    const edgeOffset = triList[i] * 3;
-    positions[offset++] = edgeVerts[edgeOffset];
-    positions[offset++] = edgeVerts[edgeOffset + 1];
-    positions[offset++] = edgeVerts[edgeOffset + 2];
+  // The second and third corners are swapped so triangles come out wound
+  // counter-clockwise seen from outside. The lookup tables are written for the
+  // opposite convention, which made the enclosed volume negative and every
+  // exported STL inside-out. Face normals are derived from this winding further
+  // down, so they follow automatically.
+  for (let i = 0; i + 2 < triList.length; i += 3) {
+    for (const corner of [triList[i], triList[i + 2], triList[i + 1]]) {
+      const edgeOffset = corner * 3;
+      positions[offset++] = edgeVerts[edgeOffset];
+      positions[offset++] = edgeVerts[edgeOffset + 1];
+      positions[offset++] = edgeVerts[edgeOffset + 2];
+    }
   }
   return offset;
 }
