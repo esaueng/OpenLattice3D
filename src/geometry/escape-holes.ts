@@ -75,6 +75,44 @@ export function escapeHolesSdf(
   return distance;
 }
 
+/** Cut the configured escape holes into an already sampled field. */
+export function cutEscapeHolesInField(
+  field: Float32Array,
+  bounds: BoundingBox,
+  cells: Vec3,
+  params: LatticeParams,
+): void {
+  if (!shouldApplyEscapeHoles(params)) return;
+  const centers = escapeHoleCenters(
+    bounds,
+    params.escapeHoleAxis,
+    params.escapeHoleCount,
+  );
+  const [nx, ny, nz] = cells;
+  const dx = (bounds.max[0] - bounds.min[0]) / nx;
+  const dy = (bounds.max[1] - bounds.min[1]) / ny;
+  const dz = (bounds.max[2] - bounds.min[2]) / nz;
+  let index = 0;
+  for (let zIndex = 0; zIndex <= nz; zIndex++) {
+    const z = bounds.min[2] + zIndex * dz;
+    for (let yIndex = 0; yIndex <= ny; yIndex++) {
+      const y = bounds.min[1] + yIndex * dy;
+      for (let xIndex = 0; xIndex <= nx; xIndex++, index++) {
+        const x = bounds.min[0] + xIndex * dx;
+        const hole = escapeHolesSdf(
+          x,
+          y,
+          z,
+          centers,
+          params.escapeHoleAxis,
+          params.escapeHoleDiameter,
+        );
+        field[index] = Math.max(field[index], -hole);
+      }
+    }
+  }
+}
+
 /** Subtract escape-hole cylinders from a negative-inside material SDF. */
 export function withEscapeHoles(
   base: SampledSdf,

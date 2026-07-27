@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { escapeHoleCenters, withEscapeHoles, type SampledSdf } from './escape-holes';
+import {
+  cutEscapeHolesInField,
+  escapeHoleCenters,
+  withEscapeHoles,
+  type SampledSdf,
+} from './escape-holes';
 import { DEFAULT_PARAMS } from '../types/project';
 
 describe('escape-hole channels', () => {
@@ -38,6 +43,34 @@ describe('escape-hole channels', () => {
     const y = Math.round((center[1] - bounds.min[1]) / 2);
     for (let z = 0; z <= resolution; z++) {
       expect(field[x + y * count + z * count * count]).toBeGreaterThan(0);
+    }
+  });
+
+  it('cuts configured holes into a sampled field after other field operations', () => {
+    const bounds = {
+      min: [-2, -2, -2] as [number, number, number],
+      max: [2, 2, 2] as [number, number, number],
+    };
+    const cells: [number, number, number] = [4, 4, 4];
+    const params = {
+      ...DEFAULT_PARAMS,
+      variant: 'shell_core' as const,
+      noShell: false,
+      surfaceOnly: false,
+      escapeHoles: true,
+      escapeHoleAxis: 'z' as const,
+      escapeHoleCount: 1,
+      escapeHoleDiameter: 2,
+    };
+    const count = cells[0] + 1;
+    const field = new Float32Array(count ** 3);
+    field.fill(-1);
+
+    cutEscapeHolesInField(field, bounds, cells, params);
+
+    for (let z = 0; z < count; z++) {
+      expect(field[2 + 2 * count + z * count * count]).toBeGreaterThan(0);
+      expect(field[4 + 2 * count + z * count * count]).toBeLessThan(0);
     }
   });
 });
