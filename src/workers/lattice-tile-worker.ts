@@ -7,6 +7,7 @@ import {
   buildSphereLattice,
   buildTorusLattice,
 } from '../geometry/lattice';
+import { withEscapeHoles } from '../geometry/escape-holes';
 import type { SampleShape } from '../types/project';
 import type { LatticeTileJob, LatticeTileResponse } from './tile-types';
 
@@ -42,7 +43,12 @@ self.onmessage = (event: MessageEvent<LatticeTileJob>) => {
   try {
     const start = performance.now();
     const sdf = withThinSectionFilter(buildShapeSdf(msg), msg.params.thinSectionFilter);
-    const result = marchingCubesRectangular(sdf, msg.bounds, msg.cells, 0);
+    const result = marchingCubesRectangular(
+      withEscapeHoles(sdf, msg.escapeHoles),
+      msg.bounds,
+      msg.cells,
+      0
+    );
     const response: LatticeTileResponse = {
       type: 'result',
       tileId: msg.tileId,

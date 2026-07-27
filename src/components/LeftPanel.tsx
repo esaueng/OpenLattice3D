@@ -536,6 +536,62 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
         </section>
       )}
 
+      {/* Escape holes */}
+      {hasModelOrDemo && (
+        <section className="panel-section">
+          <h3>Escape Holes</h3>
+          {store.params.noShell || store.params.surfaceOnly ? (
+            <div className="constraint-hint">
+              Not needed here — {store.params.noShell ? 'a pure lattice has' : 'a hollow surface lattice has'} no
+              enclosed cavity to drain.
+            </div>
+          ) : (
+            <>
+              <div className="row checkbox-row param-toggle-row">
+                <label className="param-toggle-label">
+                  <input
+                    type="checkbox"
+                    title="Cut drainage channels through the shell so trapped powder or resin can escape."
+                    checked={store.params.escapeHoles}
+                    onChange={(e) => store.updateParams({ escapeHoles: e.target.checked })}
+                  />
+                  Cut escape holes
+                </label>
+              </div>
+
+              {store.params.escapeHoles ? (
+                <>
+                  <div className="row">
+                    <label>Hole Count:</label>
+                    <input
+                      type="number"
+                      title="Number of drainage channels, spread evenly over the surface."
+                      value={store.params.escapeHoleCount}
+                      min={1} max={12} step={1}
+                      onChange={(e) => store.updateParams({ escapeHoleCount: parseInt(e.target.value) || 1 })}
+                    />
+                  </div>
+                  <div className="row">
+                    <label>Hole Diameter (mm):</label>
+                    <input
+                      type="number"
+                      title="Channel diameter. The process preset sets a sensible default."
+                      value={store.params.escapeHoleDiameter}
+                      min={0.5} max={30} step={0.5}
+                      onChange={(e) => store.updateParams({ escapeHoleDiameter: parseFloat(e.target.value) || 5.0 })}
+                    />
+                  </div>
+                </>
+              ) : (
+                <div className="warning">
+                  A sealed shell traps powder or resin in the lattice core.
+                </div>
+              )}
+            </>
+          )}
+        </section>
+      )}
+
       {/* Generate */}
       {hasModel && (
         <section className="panel-section">
