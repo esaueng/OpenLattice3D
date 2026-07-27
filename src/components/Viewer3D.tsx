@@ -1031,8 +1031,8 @@ function ViewerCameraSession() {
 export function Viewer3D() {
   const {
     originalMesh, sphereMode, sphereRadius, sampleShape, viewMode, clipPlane,
-    keepOutTris, keepInTris, selectionMode, resultMesh,
-    toggleKeepOut, toggleKeepIn, viewerBackground, demoModeActive,
+    keepOutTris, keepInTris, selectionMode, resultMesh, brushRadius,
+    paintTriangles, beginSelectionStroke, endSelectionStroke, viewerBackground, demoModeActive,
     demoRunId, params, demoParamsByType, setLatticeType, viewportResetSignal,
   } = useStore(useShallow((s) => ({
     originalMesh: s.originalMesh,
@@ -1045,8 +1045,10 @@ export function Viewer3D() {
     keepInTris: s.keepInTris,
     selectionMode: s.selectionMode,
     resultMesh: s.resultMesh,
-    toggleKeepOut: s.toggleKeepOut,
-    toggleKeepIn: s.toggleKeepIn,
+    brushRadius: s.brushRadius,
+    paintTriangles: s.paintTriangles,
+    beginSelectionStroke: s.beginSelectionStroke,
+    endSelectionStroke: s.endSelectionStroke,
     viewerBackground: s.viewerBackground,
     demoModeActive: s.demoModeActive,
     demoRunId: s.demoRunId,
@@ -1056,17 +1058,13 @@ export function Viewer3D() {
     viewportResetSignal: s.viewportResetSignal,
   })));
   const [gizmoViewRequest, setGizmoViewRequest] = useState<{ view: GizmoViewRequest | null; signal: number }>({ view: null, signal: 0 });
+  const [painting, setPainting] = useState(false);
   const r3fStateRef = useRef<RootState | null>(null);
   const escapeHolePreviewBounds = useMemo(() => {
     if (originalMesh) return meshBounds(originalMesh);
     if (sphereMode && sampleShape) return meshBounds(generateSampleMesh(sampleShape, sphereRadius));
     return new THREE.Box3();
   }, [originalMesh, sampleShape, sphereMode, sphereRadius]);
-
-  const handleFaceClick = useCallback((triIdx: number) => {
-    if (selectionMode === 'keep_out') toggleKeepOut(triIdx);
-    else if (selectionMode === 'keep_in') toggleKeepIn(triIdx);
-  }, [selectionMode, toggleKeepOut, toggleKeepIn]);
 
   const requestView = useCallback((view: GizmoViewRequest) => {
     setGizmoViewRequest((request) => ({ view, signal: request.signal + 1 }));
@@ -1099,6 +1097,7 @@ export function Viewer3D() {
           sphereRadius={sphereRadius}
           sampleShape={sampleShape}
           keepOutTris={keepOutTris}
+          keepInTris={keepInTris}
         />
       </div>
     );
@@ -1118,6 +1117,7 @@ export function Viewer3D() {
         aria-label="3D model viewport. Use arrow keys to orbit, plus and minus to zoom, and hold Shift with arrow keys to pan."
         tabIndex={0}
         onKeyDown={handleViewportKeyDown}
+        style={{ cursor: selectionMode !== 'none' && originalMesh ? 'crosshair' : undefined }}
       >
       <Canvas
         camera={{ fov: 50, near: 0.1, far: 10000, up: [0, 0, 1] }}
@@ -1140,7 +1140,11 @@ export function Viewer3D() {
             keepOutTris={keepOutTris}
             keepInTris={keepInTris}
             selectionMode={selectionMode}
-            onFaceClick={handleFaceClick}
+            brushRadius={brushRadius}
+            onPaint={paintTriangles}
+            onStrokeStart={beginSelectionStroke}
+            onStrokeEnd={endSelectionStroke}
+            onPaintingChange={setPainting}
           />
         )}
         {viewMode === 'original' && sphereMode && !originalMesh && sampleShape && (
@@ -1157,7 +1161,7 @@ export function Viewer3D() {
         {viewMode === 'cross_section' && resultMesh && <CrossSectionView result={resultMesh} clip={clipPlane} />}
         {viewMode === 'xray' && resultMesh && <XRayView result={resultMesh} />}
 
-        <OrbitControls makeDefault target={[0, 0, 0]} />
+        <OrbitControls makeDefault enabled={!painting} target={[0, 0, 0]} />
         <ViewerCameraSession />
         <GizmoHelper alignment={VIEWER_GIZMO_ALIGNMENT} margin={VIEWER_GIZMO_MARGIN}>
           <CleanAxisGizmo onSelectView={requestView} />
