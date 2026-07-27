@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_PARAMS, sanitizeLatticeParams } from './project';
 
 describe('sanitizeLatticeParams', () => {
+  it('keeps escape holes disabled by default', () => {
+    expect(DEFAULT_PARAMS.escapeHoles).toBe(false);
+  });
+
   it('accepts a full valid parameter set', () => {
     const { params, accepted, rejected } = sanitizeLatticeParams(DEFAULT_PARAMS);
     expect(rejected).toEqual([]);
