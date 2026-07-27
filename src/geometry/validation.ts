@@ -22,31 +22,36 @@ function vertexBucketKey(qx: number, qy: number, qz: number): number {
   return h >>> 0;
 }
 
-function getQuantizedVertexId(
+/** Negative zero compares equal to zero but has different bits; fold it. */
+function normalizeZeroBits(bits: number): number {
+  return bits === 0x80000000 ? 0 : bits;
+}
+
+function getExactVertexId(
   buckets: Map<number, number[]>,
-  qxById: number[],
-  qyById: number[],
-  qzById: number[],
-  qx: number,
-  qy: number,
-  qz: number
+  bxById: number[],
+  byById: number[],
+  bzById: number[],
+  bx: number,
+  by: number,
+  bz: number
 ): number {
-  const bucketKey = vertexBucketKey(qx, qy, qz);
+  const bucketKey = vertexBucketKey(bx, by, bz);
   let bucket = buckets.get(bucketKey);
   if (bucket) {
     for (let i = 0; i < bucket.length; i++) {
       const id = bucket[i];
-      if (qxById[id] === qx && qyById[id] === qy && qzById[id] === qz) return id;
+      if (bxById[id] === bx && byById[id] === by && bzById[id] === bz) return id;
     }
   } else {
     bucket = [];
     buckets.set(bucketKey, bucket);
   }
 
-  const id = qxById.length;
-  qxById.push(qx);
-  qyById.push(qy);
-  qzById.push(qz);
+  const id = bxById.length;
+  bxById.push(bx);
+  byById.push(by);
+  bzById.push(bz);
   bucket.push(id);
   return id;
 }
@@ -58,43 +63,47 @@ function addEdge(edgeToTris: Map<number, number[]>, a: number, b: number, triInd
   else edgeToTris.set(key, [triIndex]);
 }
 
+/**
+ * Weld vertices by exact position and index the edges.
+ *
+ * Identity is the float bits, not a rounded bucket. Marching cubes derives a
+ * vertex from the two field values on one grid edge, so the same edge visited
+ * from two neighbouring cubes yields bit-identical coordinates and welds
+ * cleanly. Rounding to a tolerance instead — this previously quantised to
+ * 0.001mm — merges genuinely distinct vertices that happen to lie close
+ * together, and each false merge invents a non-manifold edge. Because vertex
+ * spacing shrinks as resolution rises, that count climbed with resolution and
+ * looked like an extractor defect: 30 at resolution 48 and 251 at 96, against
+ * an exact count of zero in both cases.
+ */
 function buildEdgeTopology(result: MarchingCubesResult): EdgeTopology {
   const { positions, triCount } = result;
+  const bits = new Uint32Array(positions.buffer, positions.byteOffset, positions.length);
   const buckets = new Map<number, number[]>();
-  const qxById: number[] = [];
-  const qyById: number[] = [];
-  const qzById: number[] = [];
+  const bxById: number[] = [];
+  const byById: number[] = [];
+  const bzById: number[] = [];
   const edgeToTris = new Map<number, number[]>();
+
+  const idAt = (offset: number) => getExactVertexId(
+    buckets,
+    bxById,
+    byById,
+    bzById,
+    normalizeZeroBits(bits[offset]),
+    normalizeZeroBits(bits[offset + 1]),
+    normalizeZeroBits(bits[offset + 2])
+  );
 
   for (let i = 0; i < triCount; i++) {
     const base = i * 9;
-    const v0 = getQuantizedVertexId(
-      buckets,
-      qxById,
-      qyById,
-      qzById,
-      Math.round(positions[base] * 1e3),
-      Math.round(positions[base + 1] * 1e3),
-      Math.round(positions[base + 2] * 1e3)
-    );
-    const v1 = getQuantizedVertexId(
-      buckets,
-      qxById,
-      qyById,
-      qzById,
-      Math.round(positions[base + 3] * 1e3),
-      Math.round(positions[base + 4] * 1e3),
-      Math.round(positions[base + 5] * 1e3)
-    );
-    const v2 = getQuantizedVertexId(
-      buckets,
-      qxById,
-      qyById,
-      qzById,
-      Math.round(positions[base + 6] * 1e3),
-      Math.round(positions[base + 7] * 1e3),
-      Math.round(positions[base + 8] * 1e3)
-    );
+    const v0 = idAt(base);
+    const v1 = idAt(base + 3);
+    const v2 = idAt(base + 6);
+
+    // A degenerate triangle has no edges to contribute and would otherwise
+    // register as unmatched, reading as a hole in the surface.
+    if (v0 === v1 || v1 === v2 || v0 === v2) continue;
 
     addEdge(edgeToTris, v0, v1, i);
     addEdge(edgeToTris, v1, v2, i);
