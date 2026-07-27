@@ -16,11 +16,6 @@ type WorkerPostMessage = (message: unknown, transfer: Transferable[]) => void;
 
 const postWorkerMessage = self.postMessage.bind(self) as WorkerPostMessage;
 
-function withThinSectionFilter(sdf: SdfFunction, filter: number): SdfFunction {
-  if (filter <= 0) return sdf;
-  return (x, y, z) => sdf(x, y, z) + filter;
-}
-
 function buildShapeSdf(msg: LatticeTileJob): SdfFunction {
   switch (msg.shape as SampleShape) {
     case 'sphere':
@@ -42,7 +37,9 @@ self.onmessage = (event: MessageEvent<LatticeTileJob>) => {
 
   try {
     const start = performance.now();
-    const sdf = withThinSectionFilter(buildShapeSdf(msg), msg.params.thinSectionFilter);
+    // The host worker keeps tiling off whenever the feature filter is active,
+    // since opening is a whole-volume operation.
+    const sdf = buildShapeSdf(msg);
     const result = marchingCubesRectangular(
       withEscapeHoles(sdf, msg.escapeHoles),
       msg.bounds,

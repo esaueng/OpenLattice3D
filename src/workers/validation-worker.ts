@@ -45,6 +45,8 @@ export interface ValidationWorkerMessage {
   keepOutTris?: number[];
   keepInTris?: number[];
   escapeHoles?: EscapeHole[];
+  /** Set when the requested feature threshold was too small for the grid. */
+  thinFilterSkipped?: string;
   surfaceSamplePositions?: Float32Array;
   surfaceSampleNormals?: Float32Array;
   surfaceSampleHoleScales?: Float32Array;
@@ -71,11 +73,6 @@ function computeMetrics(
     surfaceArea: computeSurfaceArea(result),
     volumeSamplesPerAxis: VOLUME_SAMPLES_PER_AXIS,
   };
-}
-
-function withThinSectionFilter(sdf: SdfFunction, filter: number): SdfFunction {
-  if (filter <= 0) return sdf;
-  return (x, y, z) => sdf(x, y, z) + filter;
 }
 
 function unpackSurfaceSamples(
@@ -209,6 +206,7 @@ function runProceduralValidation(
   if (msg.params.processPreset === 'FDM' && msg.params.variant === 'implicit_conformal') {
     warnings.push('FDM with open lattice exterior can be difficult to print');
   }
+  if (msg.thinFilterSkipped) warnings.push(msg.thinFilterSkipped);
 
   return {
     passed: outerDeviation.passed && minThickness.passed && manifold.passed && disconnected.passed,
@@ -246,10 +244,11 @@ self.onmessage = (event: MessageEvent<ValidationWorkerMessage>) => {
         : latticeSdf(msg.params);
       // Same wrapping order as generation, so thickness is measured against
       // the geometry that was actually produced.
-      const finalSdf = withEscapeHoles(
-        withThinSectionFilter(baseSdf, msg.params.thinSectionFilter),
-        msg.escapeHoles ?? []
-      );
+      // Feature removal happens on the generation grid and cannot be replayed
+      // against a point-sampled SDF, so validation measures the unfiltered
+      // field. Opening only deletes material that was already too thin, so the
+      // reported thickness is a lower bound on what was actually produced.
+      const finalSdf = withEscapeHoles(baseSdf, msg.escapeHoles ?? []);
       validation = runProceduralValidation(msg, finalSdf);
       metrics = computeMetrics(finalSdf, boundsFor(msg.params.cellSize * 0.5), envelopeVolume, result);
     } else {
@@ -263,11 +262,9 @@ self.onmessage = (event: MessageEvent<ValidationWorkerMessage>) => {
             keepOutTris: new Set(msg.keepOutTris || []),
             keepInTris: new Set(msg.keepInTris || []),
           });
-      const finalSdf = withEscapeHoles(
-        withThinSectionFilter(baseSdf, msg.params.thinSectionFilter),
-        msg.escapeHoles ?? []
-      );
+      const finalSdf = withEscapeHoles(baseSdf, msg.escapeHoles ?? []);
       validation = runValidation(result, finalSdf, msg.params, bvh, null);
+      if (msg.thinFilterSkipped) validation.warnings.push(msg.thinFilterSkipped);
 
       // The imported mesh is closed by the time it reaches here — the import
       // guards flip inverted winding — so its signed volume is exact and there

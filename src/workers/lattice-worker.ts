@@ -1,13 +1,14 @@
 // Web Worker for lattice generation (SDF sampling + marching cubes)
 // This runs heavy computation off the main thread.
 
-import { marchingCubes, marchingCubesFromField } from '../geometry/marching-cubes';
+import { marchingCubesFromField, sampleSdfField, sealFieldBoundary } from '../geometry/marching-cubes';
+import { openField, openingIsResolvable } from '../geometry/morphology';
 import type { MarchingCubesResult } from '../geometry/marching-cubes';
 import type { GridSdfSampler } from '../geometry/marching-cubes';
 import { buildCombinedSDF, buildSurfaceHexLattice, buildSphereLattice, buildCubeLattice, buildCylinderLattice, buildTorusLattice, buildCapsuleLattice } from '../geometry/lattice';
 import { MeshBVH } from '../geometry/bvh';
 import { closeBoundaryLoops } from '../geometry/mesh-repair';
-import { cutEscapeHolesInField, planEscapeHoles, withEscapeHoles } from '../geometry/escape-holes';
+import { cutEscapeHolesInField, planEscapeHoles } from '../geometry/escape-holes';
 import type { EscapeHole } from '../geometry/escape-holes';
 import type { LatticeParams, ValidationResult, SampleShape } from '../types/project';
 import type { Vec3 } from '../geometry/vec3';
@@ -35,17 +36,6 @@ const ENABLE_WEBGPU_FIELD_CPU_MC = false;
 
 let activeTileWorkers: Worker[] = [];
 
-function withThinSectionFilter(sdf: SdfFunction, filter: number): SdfFunction {
-  if (filter <= 0) return sdf;
-  const filtered: SdfFunction = (x, y, z) => sdf(x, y, z) + filter;
-  if (sdf.sampleField) {
-    filtered.sampleField = (bounds, resolution, out, onProgress) => {
-      sdf.sampleField!(bounds, resolution, out, onProgress);
-      for (let i = 0; i < out.length; i++) out[i] += filter;
-    };
-  }
-  return filtered;
-}
 
 function generatedResultTransferList(response: WorkerResponse): Transferable[] {
   const transfers: Transferable[] = [];
@@ -128,6 +118,8 @@ export interface WorkerResponse {
   surfaceSampleNormals?: Float32Array;
   surfaceSampleHoleScales?: Float32Array;
   escapeHoles?: EscapeHole[];
+  /** Set when the requested feature threshold was too small for the grid. */
+  thinFilterSkipped?: string;
   backend?: TileBackend;
 }
 
@@ -1005,6 +997,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
       let surfaceHexSdf: SdfFunction | null = null;
       let bounds: { min: Vec3; max: Vec3 };
       let sphereRadius: number | null = null;
+      let thinFilterSkipped: string | null = null;
       let bvh: MeshBVH | null = null;
       let surfaceSamples: SurfaceHexSample[] = [];
 
@@ -1284,7 +1277,13 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         } as WorkerResponse);
       }
 
-      const tileWorkerPoolAvailable = Boolean(shape && !isSurfacePolygon && !isDemoGrid && tileWorkerCount() > 0);
+      // Opening is a whole-volume distance transform, so it cannot be split
+      // across tiles without seams. Generation falls back to the single-volume
+      // backend whenever it is active.
+      const thinFilterActive = params.thinSectionFilter > 0;
+      const tileWorkerPoolAvailable = Boolean(
+        shape && !isSurfacePolygon && !isDemoGrid && !thinFilterActive && tileWorkerCount() > 0
+      );
       const backendCapabilities = detectGenerationBackendCapabilities(self, { tileWorkerPoolAvailable });
       const selectedBackend = selectBestBackend({
         capabilities: backendCapabilities,
@@ -1448,13 +1447,36 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
       const marchingStart = performance.now();
       const preSecondsActual = (marchingStart - generationStart) / 1000;
       const sdfToSample = surfaceHexSdf ?? sdf;
-      // Holes are cut after the thin-section filter so the erosion offset does
-      // not widen the channels past their specified diameter.
-      const sdfWithThinFilter = withEscapeHoles(
-        withThinSectionFilter(sdfToSample, params.thinSectionFilter),
-        escapeHoles
-      );
-      const rawResult = marchingCubes(sdfWithThinFilter, bounds, resolution, 0, (frac) => {
+      const cells: Vec3 = [resolution, resolution, resolution];
+      const spacing: Vec3 = [
+        (bounds.max[0] - bounds.min[0]) / resolution,
+        (bounds.max[1] - bounds.min[1]) / resolution,
+        (bounds.max[2] - bounds.min[2]) / resolution,
+      ];
+      const field = sampleSdfField(sdfToSample, bounds, cells, (frac) => {
+        if (cancelled) throw new Error('Cancelled');
+        postMessage({ type: 'progress', progress: 0.12 + frac * 0.3, message: `Sampling field: ${Math.round(frac * 100)}%` } as WorkerResponse);
+      });
+
+      if (thinFilterActive) {
+        // The structuring element lives on the sample grid, so a feature
+        // smaller than the spacing cannot be represented. Say so rather than
+        // appearing to have done something.
+        const radius = params.thinSectionFilter / 2;
+        if (openingIsResolvable(radius, spacing)) {
+          postMessage({ type: 'progress', progress: 0.44, message: `Removing features under ${params.thinSectionFilter}mm` } as WorkerResponse);
+          openField(field, [resolution + 1, resolution + 1, resolution + 1], spacing, radius);
+        } else {
+          const needed = Math.ceil((2 * Math.max(...spacing) / params.thinSectionFilter) * resolution);
+          thinFilterSkipped = `Cannot remove features under ${params.thinSectionFilter}mm at this grid: samples are ${Math.max(...spacing).toFixed(2)}mm apart. Raise export resolution to about ${needed} or increase the threshold.`;
+          postMessage({ type: 'progress', progress: 0.44, message: thinFilterSkipped } as WorkerResponse);
+        }
+      }
+
+      cutEscapeHolesInField(field, bounds, cells, escapeHoles);
+      sealFieldBoundary(field, cells, 0);
+
+      const rawResult = marchingCubesFromField(field, bounds, cells, 0, (frac) => {
         if (cancelled) throw new Error('Cancelled');
         const overallProgress = 0.1 + frac * 0.7;
         const elapsedSeconds = (performance.now() - generationStart) / 1000;
@@ -1499,6 +1521,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         surfaceSampleNormals: packedSamples?.normals,
         surfaceSampleHoleScales: packedSamples?.holeScales,
         escapeHoles,
+        thinFilterSkipped: thinFilterSkipped ?? undefined,
         backend: 'cpu-single',
       };
       postWorkerMessage(response, generatedResultTransferList(response));
