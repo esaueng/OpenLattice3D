@@ -6,6 +6,7 @@ import type { MarchingCubesResult } from '../geometry/marching-cubes';
 import type { GridSdfSampler } from '../geometry/marching-cubes';
 import { buildCombinedSDF, buildSurfaceHexLattice, buildSphereLattice, buildCubeLattice, buildCylinderLattice, buildTorusLattice, buildCapsuleLattice } from '../geometry/lattice';
 import { MeshBVH } from '../geometry/bvh';
+import { closeBoundaryLoops } from '../geometry/mesh-repair';
 import { cutEscapeHolesInField, planEscapeHoles, withEscapeHoles } from '../geometry/escape-holes';
 import type { EscapeHole } from '../geometry/escape-holes';
 import type { LatticeParams, ValidationResult, SampleShape } from '../types/project';
@@ -1331,7 +1332,8 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
             } as WorkerResponse);
           });
           const cpuMcMs = performance.now() - cpuMcStart;
-          const result = removeDisconnectedFragments(rawResult, 0.004);
+          const cleaned = removeDisconnectedFragments(rawResult, 0.004);
+      const result = { ...cleaned, ...closeBoundaryLoops(cleaned).result };
           if (result.removedTriangles > 0) {
             postMessage({
               type: 'progress',
@@ -1389,7 +1391,10 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
             }
           );
           if (cancelled) throw new Error('Cancelled');
-          const result = removeDisconnectedFragments(rawTiledResult, 0.004);
+          // Tiles are extracted open along their seams and merged here, so the
+          // whole-surface repair belongs after the merge rather than per tile.
+          const cleanedTiles = removeDisconnectedFragments(rawTiledResult, 0.004);
+          const result = { ...cleanedTiles, ...closeBoundaryLoops(cleanedTiles).result };
           if (result.removedTriangles > 0) {
             postMessage({
               type: 'progress',
@@ -1470,7 +1475,8 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         } as WorkerResponse);
       });
 
-      const result = removeDisconnectedFragments(rawResult, 0.004);
+      const cleaned = removeDisconnectedFragments(rawResult, 0.004);
+      const result = { ...cleaned, ...closeBoundaryLoops(cleaned).result };
       if (result.removedTriangles > 0) {
         postMessage({
           type: 'progress',
