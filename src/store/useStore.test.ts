@@ -33,6 +33,39 @@ describe('selection history', () => {
     useStore.getState().toggleKeepIn(2);
     expect(useStore.getState().selectionRedo).toHaveLength(0);
   });
+
+  it('bulk-paints imported faces, keeps masks exclusive, and supports erasing', () => {
+    const mesh = generateCubeMesh(10);
+    useStore.getState().setOriginalMesh(mesh, analyzeMesh(mesh), 'cube.stl');
+    useStore.getState().setSelectionMode('keep_out');
+    useStore.getState().paintTriangles([1, 2, 3], true);
+    expect(Array.from(useStore.getState().keepOutTris)).toEqual([1, 2, 3]);
+
+    useStore.getState().setSelectionMode('keep_in');
+    useStore.getState().paintTriangles([2, 4], true);
+    expect(Array.from(useStore.getState().keepOutTris)).toEqual([1, 3]);
+    expect(Array.from(useStore.getState().keepInTris)).toEqual([2, 4]);
+
+    useStore.getState().paintTriangles([2], false);
+    expect(Array.from(useStore.getState().keepInTris)).toEqual([4]);
+    useStore.getState().undoSelection();
+    expect(Array.from(useStore.getState().keepInTris)).toEqual([2, 4]);
+  });
+
+  it('undoes a multi-segment brush stroke as one action', () => {
+    const mesh = generateCubeMesh(10);
+    useStore.getState().setOriginalMesh(mesh, analyzeMesh(mesh), 'cube.stl');
+    useStore.getState().setSelectionMode('keep_in');
+    useStore.getState().beginSelectionStroke();
+    useStore.getState().paintTriangles([1, 2], true);
+    useStore.getState().paintTriangles([2, 3, 4], true);
+    useStore.getState().endSelectionStroke();
+
+    expect(Array.from(useStore.getState().keepInTris)).toEqual([1, 2, 3, 4]);
+    expect(useStore.getState().selectionUndo).toHaveLength(1);
+    useStore.getState().undoSelection();
+    expect(useStore.getState().keepInTris.size).toBe(0);
+  });
 });
 
 describe('project restoration', () => {
