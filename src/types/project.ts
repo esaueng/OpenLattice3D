@@ -102,6 +102,30 @@ export const DEFAULT_PARAMS: LatticeParams = {
   toleranceMm: 0.2,
 };
 
+/** Bulk densities in g/cm3, for turning lattice volume into a printed mass. */
+export interface MaterialPreset {
+  name: string;
+  density: number;
+  process: ProcessPreset;
+}
+
+export const MATERIAL_PRESETS: MaterialPreset[] = [
+  { name: 'PA12 (Nylon)',        density: 1.01, process: 'SLS_MJF' },
+  { name: 'PA11 (Nylon)',        density: 1.03, process: 'SLS_MJF' },
+  { name: 'PA12 Glass-Filled',   density: 1.35, process: 'SLS_MJF' },
+  { name: 'TPU',                 density: 1.20, process: 'SLS_MJF' },
+  { name: 'AlSi10Mg (Aluminum)', density: 2.67, process: 'SLS_MJF' },
+  { name: 'Ti6Al4V (Titanium)',  density: 4.43, process: 'SLS_MJF' },
+  { name: '316L Stainless',      density: 7.99, process: 'SLS_MJF' },
+  { name: 'Standard Resin',      density: 1.15, process: 'SLA_DLP' },
+  { name: 'Tough Resin',         density: 1.18, process: 'SLA_DLP' },
+  { name: 'PLA',                 density: 1.24, process: 'FDM' },
+  { name: 'ABS',                 density: 1.04, process: 'FDM' },
+  { name: 'PETG',                density: 1.27, process: 'FDM' },
+];
+
+export const DEFAULT_MATERIAL = MATERIAL_PRESETS[0];
+
 export const PROCESS_DEFAULTS: Record<ProcessPreset, Partial<LatticeParams>> = {
   SLS_MJF: { minFeatureSize: 0.8, escapeHoleDiameter: 5.0, escapeHoleCount: 2 },
   SLA_DLP: { minFeatureSize: 0.5, escapeHoleDiameter: 3.5, escapeHoleCount: 2 },

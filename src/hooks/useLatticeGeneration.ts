@@ -73,6 +73,7 @@ export function useLatticeGeneration(): LatticeGenerationControls {
     console.info('[OpenLattice3D] Browser features at generation start', browserFeatures);
     // Clear previous result without changing viewMode - view is preserved for regeneration.
     store.setValidation(null);
+    store.setMetrics(null);
     store.setDemoModeActive(false);
 
     if (workerRef.current) {
@@ -162,6 +163,7 @@ export function useLatticeGeneration(): LatticeGenerationControls {
           if (validationResp.message) current.addLog(validationResp.message);
         } else if (validationResp.type === 'result') {
           current.setValidation(validationResp.validation || null);
+          current.setMetrics(validationResp.metrics || null);
           current.addLog('Validation complete');
           validationWorker.terminate();
           if (validationWorkerRef.current === validationWorker) validationWorkerRef.current = null;

@@ -743,6 +743,63 @@ svg {
   font-weight: var(--fw-medium);
 }
 
+.metric-headline {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 10px;
+  background: var(--color-accent-dim);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-md);
+}
+
+.metric-headline-value {
+  color: var(--color-accent);
+  font-family: var(--font-mono);
+  font-size: 22px;
+  font-weight: var(--fw-medium);
+  line-height: 1;
+}
+
+.metric-headline-label {
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+}
+
+.metric-grid {
+  display: grid;
+  gap: 2px;
+  margin-top: 10px;
+}
+
+.metric-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 0;
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+}
+
+.metric-row strong {
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-weight: var(--fw-medium);
+}
+
+.metric-row-muted strong {
+  color: var(--color-text-muted);
+}
+
+.metric-note {
+  margin-top: 8px;
+  color: var(--color-text-subtle);
+  font-size: var(--fs-mini);
+  line-height: 1.4;
+}
+
 .constraint-mode-buttons {
   display: flex;
   flex: 1 1 auto;
