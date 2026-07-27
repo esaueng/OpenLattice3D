@@ -414,6 +414,68 @@ export class MeshBVH {
     return { distance: Math.sqrt(bestDistSq), point: [bestX, bestY, bestZ], triIndex: bestTri };
   }
 
+  /** Allocation-free unsigned distance to the nearest triangle. */
+  closestDistance(px: number, py: number, pz: number): number {
+    let bestDistSq = Infinity;
+    let stackSize = 0;
+    this.stack[stackSize++] = 0;
+
+    while (stackSize > 0) {
+      const node = this.stack[--stackSize];
+      if (aabbDistSq(px, py, pz, node, this.nodeMin, this.nodeMax) >= bestDistSq) continue;
+      const leafCount = this.count[node];
+      const first = this.leftFirst[node];
+      if (leafCount > 0) {
+        for (let i = first; i < first + leafCount; i++) {
+          const distanceSquared = closestPointOnTriangleSq(
+            px,
+            py,
+            pz,
+            this.triIndices[i],
+            this.triA,
+            this.triAB,
+            this.triAC,
+            this.triBC,
+            this.closestScratch,
+          );
+          if (distanceSquared < bestDistSq) bestDistSq = distanceSquared;
+        }
+      } else {
+        const left = first;
+        const right = first + 1;
+        const leftDistance = aabbDistSq(px, py, pz, left, this.nodeMin, this.nodeMax);
+        const rightDistance = aabbDistSq(px, py, pz, right, this.nodeMin, this.nodeMax);
+        if (leftDistance < rightDistance) {
+          if (rightDistance < bestDistSq) this.stack[stackSize++] = right;
+          if (leftDistance < bestDistSq) this.stack[stackSize++] = left;
+        } else {
+          if (leftDistance < bestDistSq) this.stack[stackSize++] = left;
+          if (rightDistance < bestDistSq) this.stack[stackSize++] = right;
+        }
+      }
+    }
+
+    return Math.sqrt(bestDistSq);
+  }
+
+  /** Build a queryable BVH from a selected subset of this mesh's triangles. */
+  subset(triangleIndices: Iterable<number>): MeshBVH | null {
+    const selected: number[] = [];
+    for (const triangleIndex of triangleIndices) {
+      if (triangleIndex >= 0 && triangleIndex < this.triCount) selected.push(triangleIndex);
+    }
+    if (selected.length === 0) return null;
+
+    const positions = new Float32Array(selected.length * 9);
+    const normals = new Float32Array(selected.length * 3);
+    for (let index = 0; index < selected.length; index++) {
+      const source = selected[index];
+      positions.set(this.positions.subarray(source * 9, source * 9 + 9), index * 9);
+      normals.set(this.normals.subarray(source * 3, source * 3 + 3), index * 3);
+    }
+    return new MeshBVH(positions, normals, selected.length);
+  }
+
   /** Signed distance: negative inside, positive outside.
    *  Sign determined by the closest triangle face normal, matching the previous behavior. */
   signedDistance(p: Vec3): number {
