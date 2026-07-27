@@ -143,6 +143,7 @@ export function useLatticeGeneration(): LatticeGenerationControls {
         sampleShape: latest.sampleShape,
         keepOutTris: Array.from(latest.keepOutTris),
         keepInTris: Array.from(latest.keepInTris),
+        escapeHoles: resp.escapeHoles,
         surfaceSamplePositions: resp.surfaceSamplePositions,
         surfaceSampleNormals: resp.surfaceSampleNormals,
         surfaceSampleHoleScales: resp.surfaceSampleHoleScales,

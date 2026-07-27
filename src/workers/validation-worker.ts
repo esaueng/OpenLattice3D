@@ -16,6 +16,8 @@ import {
   checkTopology,
   runValidation,
 } from '../geometry/validation';
+import { withEscapeHoles } from '../geometry/escape-holes';
+import type { EscapeHole } from '../geometry/escape-holes';
 import type { LatticeParams, SampleShape, ValidationResult } from '../types/project';
 import type { Vec3 } from '../geometry/vec3';
 
@@ -35,6 +37,7 @@ export interface ValidationWorkerMessage {
   meshTriCount?: number;
   keepOutTris?: number[];
   keepInTris?: number[];
+  escapeHoles?: EscapeHole[];
   surfaceSamplePositions?: Float32Array;
   surfaceSampleNormals?: Float32Array;
   surfaceSampleHoleScales?: Float32Array;
@@ -180,7 +183,12 @@ self.onmessage = (event: MessageEvent<ValidationWorkerMessage>) => {
       const baseSdf = isSurfacePolygon && surfaceSamples.length > 0
         ? buildSurfaceHexLattice(objectSdf, msg.params, surfaceSamples)
         : latticeSdf(msg.params);
-      validation = runProceduralValidation(msg, withThinSectionFilter(baseSdf, msg.params.thinSectionFilter));
+      // Same wrapping order as generation, so thickness is measured against
+      // the geometry that was actually produced.
+      validation = runProceduralValidation(msg, withEscapeHoles(
+        withThinSectionFilter(baseSdf, msg.params.thinSectionFilter),
+        msg.escapeHoles ?? []
+      ));
     } else {
       const bvh = new MeshBVH(msg.meshPositions!, msg.meshNormals!, msg.meshTriCount!);
       const objectSdf = (x: number, y: number, z: number) => bvh.signedDistance([x, y, z] as Vec3);
@@ -194,7 +202,10 @@ self.onmessage = (event: MessageEvent<ValidationWorkerMessage>) => {
           });
       validation = runValidation(
         result,
-        withThinSectionFilter(baseSdf, msg.params.thinSectionFilter),
+        withEscapeHoles(
+          withThinSectionFilter(baseSdf, msg.params.thinSectionFilter),
+          msg.escapeHoles ?? []
+        ),
         msg.params,
         bvh,
         null

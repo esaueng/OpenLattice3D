@@ -1,5 +1,6 @@
 import type { LatticeParams, SampleShape } from '../types/project';
 import type { Vec3 } from '../geometry/vec3';
+import type { EscapeHole } from '../geometry/escape-holes';
 import type { GenerationBackendName } from '../backend/generation-backend';
 
 export type TileBackend = GenerationBackendName;
@@ -12,6 +13,8 @@ export interface LatticeTileJob {
   sphereRadius: number;
   bounds: { min: Vec3; max: Vec3 };
   cells: Vec3;
+  /** Planned once on the host worker so every tile cuts identical channels. */
+  escapeHoles: EscapeHole[];
 }
 
 export interface TileSkipStats {

@@ -6,6 +6,8 @@ import type { MarchingCubesResult } from '../geometry/marching-cubes';
 import type { GridSdfSampler } from '../geometry/marching-cubes';
 import { buildCombinedSDF, buildSurfaceHexLattice, buildSphereLattice, buildCubeLattice, buildCylinderLattice, buildTorusLattice, buildCapsuleLattice } from '../geometry/lattice';
 import { MeshBVH } from '../geometry/bvh';
+import { cutEscapeHolesInField, planEscapeHoles, withEscapeHoles } from '../geometry/escape-holes';
+import type { EscapeHole } from '../geometry/escape-holes';
 import type { LatticeParams, ValidationResult, SampleShape } from '../types/project';
 import type { Vec3 } from '../geometry/vec3';
 import { add, sub, dot, cross, length, scale, normalize } from '../geometry/vec3';
@@ -124,6 +126,7 @@ export interface WorkerResponse {
   surfaceSamplePositions?: Float32Array;
   surfaceSampleNormals?: Float32Array;
   surfaceSampleHoleScales?: Float32Array;
+  escapeHoles?: EscapeHole[];
   backend?: TileBackend;
 }
 
@@ -833,7 +836,8 @@ function buildTileJobs(
   shape: SampleShape,
   sphereRadius: number,
   bounds: { min: Vec3; max: Vec3 },
-  resolution: number
+  resolution: number,
+  escapeHoles: EscapeHole[]
 ): { jobs: LatticeTileJob[]; stats: TileSkipStats } {
   const jobs: LatticeTileJob[] = [];
   const dx = (bounds.max[0] - bounds.min[0]) / resolution;
@@ -867,6 +871,7 @@ function buildTileJobs(
           sphereRadius,
           cells: [cx, cy, cz],
           bounds: tileBounds,
+          escapeHoles,
         });
       }
     }
@@ -913,9 +918,10 @@ function runTiledGeneration(
   sphereRadius: number,
   bounds: { min: Vec3; max: Vec3 },
   resolution: number,
+  escapeHoles: EscapeHole[],
   onProgress: (completed: number, total: number, timingMs: number, stats: TileSkipStats) => void
 ): Promise<{ result: MarchingCubesResult; stats: TileSkipStats }> {
-  const { jobs, stats } = buildTileJobs(params, shape, sphereRadius, bounds, resolution);
+  const { jobs, stats } = buildTileJobs(params, shape, sphereRadius, bounds, resolution, escapeHoles);
   if (jobs.length === 0) {
     return Promise.resolve({
       result: { positions: new Float32Array(0), normals: new Float32Array(0), triCount: 0 },
@@ -1260,6 +1266,23 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         }
       }
 
+      // Planned once here, from the raw object field, so every backend and the
+      // validation pass all cut exactly the same channels.
+      const escapeHoles = objectSdf ? planEscapeHoles(objectSdf, bounds, params) : [];
+      if (escapeHoles.length > 0) {
+        postMessage({
+          type: 'progress',
+          progress: 0.11,
+          message: `Escape holes: ${escapeHoles.length} x ${params.escapeHoleDiameter}mm channels planned`
+        } as WorkerResponse);
+      } else if (params.escapeHoles && objectSdf && !params.noShell && !params.surfaceOnly) {
+        postMessage({
+          type: 'progress',
+          progress: 0.11,
+          message: 'Escape holes enabled but no placement found on this surface'
+        } as WorkerResponse);
+      }
+
       const tileWorkerPoolAvailable = Boolean(shape && !isSurfacePolygon && !isDemoGrid && tileWorkerCount() > 0);
       const backendCapabilities = detectGenerationBackendCapabilities(self, { tileWorkerPoolAvailable });
       const selectedBackend = selectBestBackend({
@@ -1297,6 +1320,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
             progress: 0.45,
             message: `WebGPU field ${Math.round(sampled.timing.webgpuFieldMs)}ms, GPU readback ${Math.round(sampled.timing.readbackMs)}ms`
           } as WorkerResponse);
+          cutEscapeHolesInField(sampled.field, bounds, [resolution, resolution, resolution], escapeHoles);
           const cpuMcStart = performance.now();
           const rawResult = marchingCubesFromField(sampled.field, bounds, [resolution, resolution, resolution], 0, (frac) => {
             if (cancelled) throw new Error('Cancelled');
@@ -1325,6 +1349,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
             positions: result.positions,
             normals: result.normals,
             triCount: result.triCount,
+            escapeHoles,
             backend: selectedBackend,
           };
           postWorkerMessage(response, generatedResultTransferList(response));
@@ -1354,6 +1379,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
             sphereRadius ?? msg.sphereRadius ?? 25,
             bounds,
             resolution,
+            escapeHoles,
             (completed, total, timingMs, stats) => {
               postMessage({
                 type: 'progress',
@@ -1381,6 +1407,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
             positions: result.positions,
             normals: result.normals,
             triCount: result.triCount,
+            escapeHoles,
             backend: selectedBackend,
           };
           postWorkerMessage(response, generatedResultTransferList(response));
@@ -1416,7 +1443,12 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
       const marchingStart = performance.now();
       const preSecondsActual = (marchingStart - generationStart) / 1000;
       const sdfToSample = surfaceHexSdf ?? sdf;
-      const sdfWithThinFilter = withThinSectionFilter(sdfToSample, params.thinSectionFilter);
+      // Holes are cut after the thin-section filter so the erosion offset does
+      // not widen the channels past their specified diameter.
+      const sdfWithThinFilter = withEscapeHoles(
+        withThinSectionFilter(sdfToSample, params.thinSectionFilter),
+        escapeHoles
+      );
       const rawResult = marchingCubes(sdfWithThinFilter, bounds, resolution, 0, (frac) => {
         if (cancelled) throw new Error('Cancelled');
         const overallProgress = 0.1 + frac * 0.7;
@@ -1460,6 +1492,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         surfaceSamplePositions: packedSamples?.positions,
         surfaceSampleNormals: packedSamples?.normals,
         surfaceSampleHoleScales: packedSamples?.holeScales,
+        escapeHoles,
         backend: 'cpu-single',
       };
       postWorkerMessage(response, generatedResultTransferList(response));
