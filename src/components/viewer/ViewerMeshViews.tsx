@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import type { ThreeEvent } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { TriangleMesh } from '../../geometry/stl-parser';
@@ -14,6 +14,7 @@ import {
   generateTorusMesh,
 } from '../../geometry/mesh-analysis';
 import { escapeHoleCenters, shouldApplyEscapeHoles } from '../../geometry/escape-holes';
+import { computeTriangleCentroids, facesWithinBrush } from '../../geometry/constraint-painting';
 
 export function resultBounds(result: MarchingCubesResult): THREE.Box3 {
   const box = new THREE.Box3();
@@ -82,42 +83,101 @@ export function EscapeHolePreview({ bounds, params }: { bounds: THREE.Box3; para
   );
 }
 
-export function OriginalMeshView({ mesh, keepOutTris, keepInTris, selectionMode, onFaceClick }: {
+const FACE_COLOR_DEFAULT: [number, number, number] = [0.7, 0.7, 0.75];
+const FACE_COLOR_KEEP_OUT: [number, number, number] = [0.2, 0.6, 1];
+const FACE_COLOR_KEEP_IN: [number, number, number] = [1, 0.4, 0.2];
+
+export function OriginalMeshView({
+  mesh,
+  keepOutTris,
+  keepInTris,
+  selectionMode,
+  brushRadius,
+  onPaint,
+  onStrokeStart,
+  onStrokeEnd,
+  onPaintingChange,
+}: {
   mesh: TriangleMesh;
   keepOutTris: Set<number>;
   keepInTris: Set<number>;
   selectionMode: string;
-  onFaceClick: (triIdx: number) => void;
+  brushRadius: number;
+  onPaint: (triIndices: number[], additive: boolean) => void;
+  onStrokeStart: () => void;
+  onStrokeEnd: () => void;
+  onPaintingChange: (painting: boolean) => void;
 }) {
+  const paintingRef = useRef(false);
   const geometry = useDisposable(useMemo(() => {
     const next = new THREE.BufferGeometry();
     next.setAttribute('position', new THREE.BufferAttribute(mesh.positions, 3));
-    const colors = new Float32Array(mesh.positions.length);
-    for (let triangle = 0; triangle < mesh.triCount; triangle++) {
-      let red = 0.7;
-      let green = 0.7;
-      let blue = 0.75;
-      if (keepOutTris.has(triangle)) { red = 0.2; green = 0.6; blue = 1; }
-      if (keepInTris.has(triangle)) { red = 1; green = 0.4; blue = 0.2; }
-      for (let vertex = 0; vertex < 3; vertex++) {
-        colors[triangle * 9 + vertex * 3] = red;
-        colors[triangle * 9 + vertex * 3 + 1] = green;
-        colors[triangle * 9 + vertex * 3 + 2] = blue;
-      }
-    }
-    next.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    next.setAttribute('color', new THREE.BufferAttribute(new Float32Array(mesh.positions.length), 3));
     next.computeVertexNormals();
     return next;
-  }, [keepInTris, keepOutTris, mesh]));
+  }, [mesh]));
+  const centroids = useMemo(() => computeTriangleCentroids(mesh), [mesh]);
 
-  const handleClick = useCallback((event: ThreeEvent<MouseEvent>) => {
+  useEffect(() => {
+    const attribute = geometry.getAttribute('color') as THREE.BufferAttribute;
+    const colors = attribute.array as Float32Array;
+    for (let triangle = 0; triangle < mesh.triCount; triangle++) {
+      const color = keepOutTris.has(triangle)
+        ? FACE_COLOR_KEEP_OUT
+        : keepInTris.has(triangle) ? FACE_COLOR_KEEP_IN : FACE_COLOR_DEFAULT;
+      for (let vertex = 0; vertex < 3; vertex++) {
+        colors[triangle * 9 + vertex * 3] = color[0];
+        colors[triangle * 9 + vertex * 3 + 1] = color[1];
+        colors[triangle * 9 + vertex * 3 + 2] = color[2];
+      }
+    }
+    attribute.needsUpdate = true;
+  }, [geometry, keepInTris, keepOutTris, mesh.triCount]);
+
+  const paintAt = useCallback((event: ThreeEvent<PointerEvent>) => {
+    if (event.faceIndex == null) return;
+    const faces = facesWithinBrush(
+      mesh,
+      centroids,
+      [event.point.x, event.point.y, event.point.z],
+      event.faceIndex,
+      brushRadius,
+    );
+    onPaint(faces, !event.altKey);
+  }, [brushRadius, centroids, mesh, onPaint]);
+
+  const handlePointerDown = useCallback((event: ThreeEvent<PointerEvent>) => {
     if (selectionMode === 'none') return;
     event.stopPropagation();
-    if (event.faceIndex != null) onFaceClick(event.faceIndex);
-  }, [onFaceClick, selectionMode]);
+    paintingRef.current = true;
+    onStrokeStart();
+    onPaintingChange(true);
+    paintAt(event);
+  }, [onPaintingChange, onStrokeStart, paintAt, selectionMode]);
+
+  const handlePointerMove = useCallback((event: ThreeEvent<PointerEvent>) => {
+    if (!paintingRef.current) return;
+    event.stopPropagation();
+    paintAt(event);
+  }, [paintAt]);
+
+  useEffect(() => {
+    const stopPainting = () => {
+      if (!paintingRef.current) return;
+      paintingRef.current = false;
+      onStrokeEnd();
+      onPaintingChange(false);
+    };
+    window.addEventListener('pointerup', stopPainting);
+    window.addEventListener('pointercancel', stopPainting);
+    return () => {
+      window.removeEventListener('pointerup', stopPainting);
+      window.removeEventListener('pointercancel', stopPainting);
+    };
+  }, [onPaintingChange, onStrokeEnd]);
 
   return (
-    <mesh geometry={geometry} onClick={handleClick}>
+    <mesh geometry={geometry} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove}>
       <meshPhongMaterial vertexColors side={THREE.DoubleSide} />
     </mesh>
   );
