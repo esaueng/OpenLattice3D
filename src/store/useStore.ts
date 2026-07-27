@@ -3,6 +3,8 @@ import { create } from 'zustand';
 import type { LatticeParams, MeshInfo, ValidationResult, ProcessPreset, LatticeType, GenerationVariant, SelectionMode, SampleShape } from '../types/project';
 import { DEFAULT_PARAMS, PROCESS_DEFAULTS } from '../types/project';
 import type { TriangleMesh } from '../geometry/stl-parser';
+import type { LatticeMetrics } from '../geometry/metrics';
+import { DEFAULT_MATERIAL } from '../types/project';
 import type { MarchingCubesResult } from '../geometry/marching-cubes';
 
 export type ViewMode = 'original' | 'lattice' | 'cross_section' | 'xray';
@@ -48,6 +50,8 @@ interface PersistedState {
   clipPlane: ClipPlaneState;
   viewerBackground: string;
   brushRadius: number;
+  materialName: string;
+  materialDensity: number;
 }
 
 type DemoParamsByType = Partial<Record<LatticeType, LatticeParams>>;
@@ -65,6 +69,7 @@ interface PersistedAppState extends PersistedState {
   demoParamsByType: DemoParamsByType;
   resultMesh: MarchingCubesResult | null;
   validation: ValidationResult | null;
+  metrics: LatticeMetrics | null;
   viewerCameraState: ViewerCameraState | null;
   demoModeActive: boolean;
   demoRunId: number;
@@ -259,6 +264,9 @@ interface AppState {
 
   // Validation
   validation: ValidationResult | null;
+  metrics: LatticeMetrics | null;
+  materialName: string;
+  materialDensity: number;   // g/cm3
 
   // View
   viewMode: ViewMode;
@@ -292,6 +300,8 @@ interface AppState {
   setProgress: (progress: number, message: string) => void;
   setResultMesh: (result: MarchingCubesResult | null) => void;
   setValidation: (validation: ValidationResult | null) => void;
+  setMetrics: (metrics: LatticeMetrics | null) => void;
+  setMaterial: (name: string, density: number) => void;
   setViewMode: (mode: ViewMode) => void;
   setClipPlane: (partial: Partial<ClipPlaneState>) => void;
   setViewerBackground: (color: string) => void;
@@ -333,6 +343,9 @@ export const useStore = create<AppState>((set) => ({
   progressMessage: '',
   resultMesh: null,
   validation: null,
+  metrics: null,
+  materialName: persisted?.materialName ?? DEFAULT_MATERIAL.name,
+  materialDensity: persisted?.materialDensity ?? DEFAULT_MATERIAL.density,
   viewMode: persisted?.viewMode ?? 'original',
   clipPlane: persisted?.clipPlane ?? { axis: 'z', position: 0.5, flipped: false },
   viewerBackground: persisted?.viewerBackground ?? '#000000',
@@ -541,6 +554,10 @@ export const useStore = create<AppState>((set) => ({
 
   setValidation: (validation) => set({ validation }),
 
+  setMetrics: (metrics) => set({ metrics }),
+
+  setMaterial: (name, density) => set({ materialName: name, materialDensity: Math.max(0, density) }),
+
   setViewMode: (mode) => set({ viewMode: mode }),
 
   setClipPlane: (partial) => set((s) => ({ clipPlane: { ...s.clipPlane, ...partial } })),
@@ -612,6 +629,7 @@ export const useStore = create<AppState>((set) => ({
       selectionMode: 'none',
       resultMesh: null,
       validation: null,
+      metrics: null,
       keepOutTris: new Set(),
       keepInTris: new Set(),
       brushRadius: 0,
@@ -642,6 +660,8 @@ function persistedSubset(state: AppState): PersistedState {
     clipPlane: state.clipPlane,
     viewerBackground: state.viewerBackground,
     brushRadius: state.brushRadius,
+    materialName: state.materialName,
+    materialDensity: state.materialDensity,
   };
 }
 
@@ -660,6 +680,7 @@ function buildPersistedAppState(state: AppState): PersistedAppState {
     demoParamsByType: state.demoParamsByType,
     resultMesh: state.resultMesh,
     validation: state.validation,
+    metrics: state.metrics,
     viewerCameraState: state.viewerCameraState,
     demoModeActive: state.demoModeActive,
     demoRunId: state.demoRunId,
@@ -690,6 +711,9 @@ function hydrateFromSnapshot(snapshot: Partial<PersistedAppState>): Partial<AppS
     viewMode: snapshot.viewMode ?? 'original',
     clipPlane: snapshot.clipPlane ?? { axis: 'z', position: 0.5, flipped: false },
     viewerBackground: snapshot.viewerBackground ?? '#000000',
+    metrics: snapshot.metrics ?? null,
+    materialName: snapshot.materialName ?? DEFAULT_MATERIAL.name,
+    materialDensity: snapshot.materialDensity ?? DEFAULT_MATERIAL.density,
     viewerCameraState: snapshot.viewerCameraState ?? null,
     demoModeActive: snapshot.demoModeActive ?? false,
     demoRunId: snapshot.demoRunId ?? 0,

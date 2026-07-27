@@ -2,6 +2,8 @@
 import { exportBinarySTL } from '../geometry/stl-parser';
 import type { MarchingCubesResult } from '../geometry/marching-cubes';
 import type { ValidationResult, LatticeParams } from '../types/project';
+import { massGrams } from '../geometry/metrics';
+import type { LatticeMetrics } from '../geometry/metrics';
 
 export function downloadSTL(result: MarchingCubesResult, filename: string = 'lattice-design.stl') {
   const buffer = exportBinarySTL(result.positions, result.normals, result.triCount);
@@ -18,12 +20,29 @@ export function downloadValidationReport(
   validation: ValidationResult,
   params: LatticeParams,
   meshFileName: string,
+  metrics: LatticeMetrics | null = null,
+  material: { name: string; density: number } | null = null,
   filename: string = 'validation-report.json'
 ) {
   const report = {
     timestamp: new Date().toISOString(),
     meshFile: meshFileName,
     parameters: params,
+    metrics: metrics && {
+      envelopeVolumeMm3: metrics.envelopeVolume,
+      latticeVolumeMm3: metrics.latticeVolume,
+      relativeDensity: metrics.relativeDensity,
+      surfaceAreaMm2: metrics.surfaceArea,
+      massGrams: material ? massGrams(metrics.latticeVolume, material.density) : null,
+      solidMassGrams: material ? massGrams(metrics.envelopeVolume, material.density) : null,
+      material: material?.name ?? null,
+      materialDensityGramsPerCm3: material?.density ?? null,
+      basis: {
+        volume: `occupancy sampling, ${metrics.volumeSamplesPerAxis}^3 field samples`,
+        envelopeVolume: 'exact (divergence theorem on the source solid)',
+        surfaceArea: 'extracted mesh at the current export resolution',
+      },
+    },
     validation: {
       overallPassed: validation.passed,
       outerDeviation: validation.outerDeviation,
