@@ -5,6 +5,7 @@ import { marchingCubes } from '../geometry/marching-cubes';
 import type { GridSdfSampler } from '../geometry/marching-cubes';
 import { buildCombinedSDF, buildSurfaceHexLattice, buildSphereLattice, buildCubeLattice, buildCylinderLattice, buildTorusLattice, buildCapsuleLattice } from '../geometry/lattice';
 import { MeshBVH } from '../geometry/bvh';
+import { closeBoundaryLoops } from '../geometry/mesh-repair';
 import type { LatticeParams, ValidationResult, SampleShape } from '../types/project';
 import type { Vec3 } from '../geometry/vec3';
 import { add, sub, dot, cross, length, scale, normalize } from '../geometry/vec3';
@@ -883,7 +884,10 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
             () => cancelled,
           );
           if (cancelled) throw new Error('Cancelled');
-          const result = removeDisconnectedFragments(rawTiledResult, 0.004);
+          // Tiles are extracted open along their seams and merged here, so the
+          // whole-surface repair belongs after the merge rather than per tile.
+          const cleanedTiles = removeDisconnectedFragments(rawTiledResult, 0.004);
+          const result = { ...cleanedTiles, ...closeBoundaryLoops(cleanedTiles).result };
           if (result.removedTriangles > 0) {
             postMessage({
               type: 'progress',
@@ -952,7 +956,9 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         } as WorkerResponse);
       });
 
-      const result = removeDisconnectedFragments(rawResult, 0.004);
+      const cleaned = removeDisconnectedFragments(rawResult, 0.004);
+      // Fragment removal can reopen a closed surface, so repair after cleanup.
+      const result = { ...cleaned, ...closeBoundaryLoops(cleaned).result };
       if (result.removedTriangles > 0) {
         postMessage({
           type: 'progress',
