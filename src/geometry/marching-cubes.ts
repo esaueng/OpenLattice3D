@@ -286,32 +286,7 @@ export function marchingCubesRectangular(
   onProgress?: (fraction: number) => void,
   sealBoundary: boolean = false
 ): MarchingCubesResult {
-  const nx = cells[0], ny = cells[1], nz = cells[2];
-  const minX = bounds.min[0];
-  const minY = bounds.min[1];
-  const minZ = bounds.min[2];
-  const dx = (bounds.max[0] - bounds.min[0]) / nx;
-  const dy = (bounds.max[1] - bounds.min[1]) / ny;
-  const dz = (bounds.max[2] - bounds.min[2]) / nz;
-  const strideY = nx + 1;
-  const strideZ = strideY * (ny + 1);
-
-  const field = new Float32Array((nx + 1) * (ny + 1) * (nz + 1));
-  if (nx === ny && ny === nz && hasGridSampler(sdf)) {
-    sdf.sampleField(bounds, nx, field, onProgress ? (fraction) => onProgress(fraction * 0.45) : undefined);
-  } else {
-    for (let z = 0; z <= nz; z++) {
-      if (onProgress) onProgress((z / nz) * 0.45);
-      const pz = minZ + z * dz;
-      for (let y = 0; y <= ny; y++) {
-        const py = minY + y * dy;
-        const rowOffset = fieldIndex(0, y, z, strideY, strideZ);
-        for (let x = 0; x <= nx; x++) {
-          field[rowOffset + x] = sdf(minX + x * dx, py, pz);
-        }
-      }
-    }
-  }
+  const field = sampleSdfField(sdf, bounds, cells, onProgress ? (fraction) => onProgress(fraction * 0.45) : undefined);
 
   if (sealBoundary) sealFieldBoundary(field, cells, isoValue);
 
@@ -329,7 +304,7 @@ export function marchingCubesRectangular(
  * Samples already outside are left untouched, so the common case of padded
  * bounds produces a bit-identical field and no change in output.
  */
-function sealFieldBoundary(field: Float32Array, cells: Vec3, isoValue: number): void {
+export function sealFieldBoundary(field: Float32Array, cells: Vec3, isoValue: number): void {
   const nx = cells[0], ny = cells[1], nz = cells[2];
   const strideY = nx + 1;
   const strideZ = strideY * (ny + 1);
@@ -352,6 +327,47 @@ function sealFieldBoundary(field: Float32Array, cells: Vec3, isoValue: number): 
       }
     }
   }
+}
+
+/**
+ * Sample an SDF onto the marching-cubes grid.
+ *
+ * Exported so callers can operate on the grid before extraction — morphological
+ * opening and escape-hole cutting are both whole-field operations that cannot
+ * be expressed as a per-point wrapper.
+ */
+export function sampleSdfField(
+  sdf: (x: number, y: number, z: number) => number,
+  bounds: { min: Vec3; max: Vec3 },
+  cells: Vec3,
+  onProgress?: (fraction: number) => void
+): Float32Array {
+  const nx = cells[0], ny = cells[1], nz = cells[2];
+  const minX = bounds.min[0], minY = bounds.min[1], minZ = bounds.min[2];
+  const dx = (bounds.max[0] - minX) / nx;
+  const dy = (bounds.max[1] - minY) / ny;
+  const dz = (bounds.max[2] - minZ) / nz;
+  const strideY = nx + 1;
+  const strideZ = strideY * (ny + 1);
+  const field = new Float32Array((nx + 1) * (ny + 1) * (nz + 1));
+
+  if (nx === ny && ny === nz && hasGridSampler(sdf)) {
+    sdf.sampleField(bounds, nx, field, onProgress);
+    return field;
+  }
+
+  for (let z = 0; z <= nz; z++) {
+    if (onProgress) onProgress(z / nz);
+    const pz = minZ + z * dz;
+    for (let y = 0; y <= ny; y++) {
+      const py = minY + y * dy;
+      const rowOffset = fieldIndex(0, y, z, strideY, strideZ);
+      for (let x = 0; x <= nx; x++) {
+        field[rowOffset + x] = sdf(minX + x * dx, py, pz);
+      }
+    }
+  }
+  return field;
 }
 
 export function marchingCubesFromField(
