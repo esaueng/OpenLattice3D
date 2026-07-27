@@ -69,33 +69,103 @@ export function analyzeMesh(mesh: TriangleMesh): MeshInfo {
   };
 }
 
-/** Basic mesh repair: recalculate normals, attempt to fix non-manifold edges by welding */
-export function repairMesh(mesh: TriangleMesh): { mesh: TriangleMesh; repaired: boolean } {
-  // Recalculate face normals
-  const { positions, triCount } = mesh;
+/** Per-face normals derived from triangle winding (right-hand rule). */
+function computeFaceNormals(positions: Float32Array, triCount: number): Float32Array {
   const normals = new Float32Array(triCount * 3);
-
   for (let i = 0; i < triCount; i++) {
     const v0 = getVertex(positions, i, 0);
     const v1 = getVertex(positions, i, 1);
     const v2 = getVertex(positions, i, 2);
     const e1: Vec3 = [v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2]];
     const e2: Vec3 = [v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2]];
-    const n: Vec3 = [
-      e1[1] * e2[2] - e1[2] * e2[1],
-      e1[2] * e2[0] - e1[0] * e2[2],
-      e1[0] * e2[1] - e1[1] * e2[0],
-    ];
-    const len = Math.sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
-    if (len > 1e-12) {
-      normals[i * 3] = n[0] / len;
-      normals[i * 3 + 1] = n[1] / len;
-      normals[i * 3 + 2] = n[2] / len;
-    }
+    const nx = e1[1] * e2[2] - e1[2] * e2[1];
+    const ny = e1[2] * e2[0] - e1[0] * e2[2];
+    const nz = e1[0] * e2[1] - e1[1] * e2[0];
+    const magnitude = Math.hypot(nx, ny, nz);
+    if (magnitude <= 1e-12) continue;
+    normals[i * 3] = nx / magnitude;
+    normals[i * 3 + 1] = ny / magnitude;
+    normals[i * 3 + 2] = nz / magnitude;
   }
+  return normals;
+}
 
+/**
+ * Signed volume from triangle winding. Positive means counter-clockwise when
+ * viewed from outside. This is only meaningful for a closed mesh.
+ */
+export function computeSignedVolume(mesh: TriangleMesh): number {
+  let volume = 0;
+  for (let i = 0; i < mesh.triCount; i++) {
+    const o = i * 9;
+    const ax = mesh.positions[o], ay = mesh.positions[o + 1], az = mesh.positions[o + 2];
+    const bx = mesh.positions[o + 3], by = mesh.positions[o + 4], bz = mesh.positions[o + 5];
+    const cx = mesh.positions[o + 6], cy = mesh.positions[o + 7], cz = mesh.positions[o + 8];
+    volume += ax * (by * cz - bz * cy)
+      + ay * (bz * cx - bx * cz)
+      + az * (bx * cy - by * cx);
+  }
+  return volume / 6;
+}
+
+/** Compare stored STL normals with the normals implied by triangle winding. */
+export function countNormalWindingAgreement(mesh: TriangleMesh): {
+  agree: number;
+  disagree: number;
+  degenerate: number;
+} {
+  const windingNormals = computeFaceNormals(mesh.positions, mesh.triCount);
+  let agree = 0;
+  let disagree = 0;
+  let degenerate = 0;
+  for (let i = 0; i < mesh.triCount; i++) {
+    const o = i * 3;
+    const wx = windingNormals[o];
+    const wy = windingNormals[o + 1];
+    const wz = windingNormals[o + 2];
+    if (Math.hypot(wx, wy, wz) <= 1e-12) {
+      degenerate++;
+      continue;
+    }
+    const dot = wx * mesh.normals[o] + wy * mesh.normals[o + 1] + wz * mesh.normals[o + 2];
+    if (dot > 0) agree++;
+    else disagree++;
+  }
+  return { agree, disagree, degenerate };
+}
+
+export function alignNormalsToWinding(mesh: TriangleMesh): TriangleMesh {
   return {
-    mesh: { positions: new Float32Array(positions), normals, triCount },
+    positions: mesh.positions,
+    normals: computeFaceNormals(mesh.positions, mesh.triCount),
+    triCount: mesh.triCount,
+  };
+}
+
+export function flipMeshOrientation(mesh: TriangleMesh): TriangleMesh {
+  const positions = new Float32Array(mesh.positions.length);
+  for (let i = 0; i < mesh.triCount; i++) {
+    const o = i * 9;
+    positions.set(mesh.positions.subarray(o, o + 3), o);
+    positions.set(mesh.positions.subarray(o + 6, o + 9), o + 3);
+    positions.set(mesh.positions.subarray(o + 3, o + 6), o + 6);
+  }
+  return {
+    positions,
+    normals: computeFaceNormals(positions, mesh.triCount),
+    triCount: mesh.triCount,
+  };
+}
+
+/** Basic mesh repair: recalculate normals, attempt to fix non-manifold edges by welding */
+export function repairMesh(mesh: TriangleMesh): { mesh: TriangleMesh; repaired: boolean } {
+  const { positions, triCount } = mesh;
+  return {
+    mesh: {
+      positions: new Float32Array(positions),
+      normals: computeFaceNormals(positions, triCount),
+      triCount,
+    },
     repaired: true,
   };
 }
