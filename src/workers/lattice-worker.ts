@@ -1,11 +1,20 @@
 // Web Worker for lattice generation (SDF sampling + marching cubes)
 // This runs heavy computation off the main thread.
 
-import { marchingCubes } from '../geometry/marching-cubes';
+import {
+  marchingCubesFromField,
+  sampleSdfField,
+  sealFieldBoundary,
+} from '../geometry/marching-cubes';
 import type { GridSdfSampler } from '../geometry/marching-cubes';
+import { openField, openingIsResolvable } from '../geometry/morphology';
 import { buildCombinedSDF, buildSurfaceHexLattice, buildSphereLattice, buildCubeLattice, buildCylinderLattice, buildTorusLattice, buildCapsuleLattice } from '../geometry/lattice';
 import { MeshBVH } from '../geometry/bvh';
 import { closeBoundaryLoops } from '../geometry/mesh-repair';
+import {
+  cutEscapeHolesInField,
+  shouldApplyEscapeHoles,
+} from '../geometry/escape-holes';
 import type { LatticeParams, ValidationResult, SampleShape } from '../types/project';
 import type { Vec3 } from '../geometry/vec3';
 import { add, sub, dot, cross, length, scale, normalize } from '../geometry/vec3';
@@ -25,17 +34,6 @@ type SdfFunction = ((x: number, y: number, z: number) => number) & Partial<GridS
 type WorkerPostMessage = (message: unknown, transfer: Transferable[]) => void;
 
 const postWorkerMessage = self.postMessage.bind(self) as WorkerPostMessage;
-function withThinSectionFilter(sdf: SdfFunction, filter: number): SdfFunction {
-  if (filter <= 0) return sdf;
-  const filtered: SdfFunction = (x, y, z) => sdf(x, y, z) + filter;
-  if (sdf.sampleField) {
-    filtered.sampleField = (bounds, resolution, out, onProgress) => {
-      sdf.sampleField!(bounds, resolution, out, onProgress);
-      for (let i = 0; i < out.length; i++) out[i] += filter;
-    };
-  }
-  return filtered;
-}
 
 function generatedResultTransferList(response: WorkerResponse): Transferable[] {
   const transfers: Transferable[] = [];
@@ -112,6 +110,8 @@ export interface WorkerResponse {
   surfaceSamplePositions?: Float32Array;
   surfaceSampleNormals?: Float32Array;
   surfaceSampleHoleScales?: Float32Array;
+  /** Set when the requested feature width is smaller than the sample grid. */
+  thinFilterSkipped?: string;
   backend?: TileBackend;
 }
 
@@ -579,12 +579,19 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
     try {
       const generationStart = performance.now();
       const params = msg.params!;
+      const thinFilterActive = params.thinSectionFilter > 0;
+      // Morphological opening must run before escape-hole subtraction so it
+      // cannot silently change the requested hole diameter.
+      const fieldParams = thinFilterActive && shouldApplyEscapeHoles(params)
+        ? { ...params, escapeHoles: false }
+        : params;
       const resolution = msg.resolution || 64;
       let sdf: SdfFunction;
       let objectSdf: ((x: number, y: number, z: number) => number) | null = null;
       let surfaceHexSdf: SdfFunction | null = null;
       let bounds: { min: Vec3; max: Vec3 };
       let sphereRadius: number | null = null;
+      let thinFilterSkipped: string | null = null;
       let bvh: MeshBVH | null = null;
       let surfaceSamples: SurfaceHexSample[] = [];
 
@@ -660,7 +667,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
             const R = sphereRadius;
             bounds = { min: [-(R+pad), -(R+pad), -(R+pad)], max: [R+pad, R+pad, R+pad] };
             objectSdf = (x, y, z) => Math.sqrt(x * x + y * y + z * z) - R;
-            sdf = isSurfacePolygon ? objectSdf : buildSphereLattice(R, params);
+            sdf = isSurfacePolygon ? objectSdf : buildSphereLattice(R, fieldParams);
             break;
           }
           case 'cube': {
@@ -674,7 +681,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
               const inside = Math.min(Math.max(dx, dy, dz), 0);
               return outside + inside;
             };
-            sdf = isSurfacePolygon ? objectSdf : buildCubeLattice(h, params);
+            sdf = isSurfacePolygon ? objectSdf : buildCubeLattice(h, fieldParams);
             break;
           }
           case 'cylinder': {
@@ -687,7 +694,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
               const inside = Math.min(Math.max(dRadial, dAxial), 0);
               return outside + inside;
             };
-            sdf = isSurfacePolygon ? objectSdf : buildCylinderLattice(cr, ch, params);
+            sdf = isSurfacePolygon ? objectSdf : buildCylinderLattice(cr, ch, fieldParams);
             break;
           }
           case 'torus': {
@@ -698,7 +705,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
               const qx = Math.sqrt(x * x + y * y) - mR;
               return Math.sqrt(qx * qx + z * z) - tR;
             };
-            sdf = isSurfacePolygon ? objectSdf : buildTorusLattice(mR, tR, params);
+            sdf = isSurfacePolygon ? objectSdf : buildTorusLattice(mR, tR, fieldParams);
             break;
           }
           case 'capsule': {
@@ -709,7 +716,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
               const cz = Math.max(-capHH, Math.min(capHH, z));
               return Math.sqrt(x * x + y * y + (z - cz) * (z - cz)) - capR;
             };
-            sdf = isSurfacePolygon ? objectSdf : buildCapsuleLattice(capR, capHH, params);
+            sdf = isSurfacePolygon ? objectSdf : buildCapsuleLattice(capR, capHH, fieldParams);
             break;
           }
         }
@@ -762,7 +769,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
           };
           relaxSurfaceSamples(target, params.cellSize * 0.95, 10, 0.35);
           applyAdaptiveHoleScales(surfaceSamples, params.cellSize);
-          surfaceHexSdf = buildSurfaceHexLattice(objectSdf!, params, surfaceSamples);
+          surfaceHexSdf = buildSurfaceHexLattice(objectSdf!, fieldParams, surfaceSamples);
         }
       } else {
         // Build BVH from mesh
@@ -798,7 +805,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         objectSdf = (x, y, z) => bvh!.signedDistance([x, y, z]);
         sdf = buildCombinedSDF({
           bvh,
-          params,
+          params: fieldParams,
           keepOutTris: keepOutSet,
           keepInTris: keepInSet,
         });
@@ -848,11 +855,19 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
           };
           relaxSurfaceSamples(target, params.cellSize * 0.95, 10, 0.35);
           applyAdaptiveHoleScales(surfaceSamples, params.cellSize);
-          surfaceHexSdf = buildSurfaceHexLattice(objectSdf!, params, surfaceSamples);
+          surfaceHexSdf = buildSurfaceHexLattice(objectSdf!, fieldParams, surfaceSamples);
         }
       }
 
-      const tileWorkerPoolAvailable = Boolean(shape && !isSurfacePolygon && !isDemoGrid && tileWorkerCount() > 0);
+      // Morphological opening is a whole-volume distance transform; tiling it
+      // would make neighbouring seams disagree.
+      const tileWorkerPoolAvailable = Boolean(
+        shape
+        && !isSurfacePolygon
+        && !isDemoGrid
+        && !thinFilterActive
+        && tileWorkerCount() > 0
+      );
       const selectedBackend: TileBackend = tileWorkerPoolAvailable ? 'cpu-tiled' : 'cpu-single';
       postMessage({
         type: 'progress',
@@ -934,10 +949,57 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
       const marchingStart = performance.now();
       const preSecondsActual = (marchingStart - generationStart) / 1000;
       const sdfToSample = surfaceHexSdf ?? sdf;
-      const sdfWithThinFilter = withThinSectionFilter(sdfToSample, params.thinSectionFilter);
-      const rawResult = marchingCubes(sdfWithThinFilter, bounds, resolution, 0, (frac) => {
+      const cells: Vec3 = [resolution, resolution, resolution];
+      const spacing: Vec3 = [
+        (bounds.max[0] - bounds.min[0]) / resolution,
+        (bounds.max[1] - bounds.min[1]) / resolution,
+        (bounds.max[2] - bounds.min[2]) / resolution,
+      ];
+      const field = sampleSdfField(sdfToSample, bounds, cells, (fraction) => {
         if (cancelled) throw new Error('Cancelled');
-        const overallProgress = 0.1 + frac * 0.7;
+        postMessage({
+          type: 'progress',
+          progress: 0.12 + fraction * 0.3,
+          message: `Sampling field: ${Math.round(fraction * 100)}%`,
+        } as WorkerResponse);
+      });
+
+      if (thinFilterActive) {
+        const radius = params.thinSectionFilter / 2;
+        if (openingIsResolvable(radius, spacing)) {
+          postMessage({
+            type: 'progress',
+            progress: 0.44,
+            message: `Removing features under ${params.thinSectionFilter}mm`,
+          } as WorkerResponse);
+          openField(
+            field,
+            [resolution + 1, resolution + 1, resolution + 1],
+            spacing,
+            radius,
+          );
+        } else {
+          const largestSpacing = Math.max(...spacing);
+          const needed = Math.ceil(
+            (2 * largestSpacing / params.thinSectionFilter) * resolution,
+          );
+          thinFilterSkipped = `Cannot remove features under ${params.thinSectionFilter}mm at this grid: samples are ${largestSpacing.toFixed(2)}mm apart. Raise export resolution to about ${needed} or increase the threshold.`;
+          postMessage({
+            type: 'progress',
+            progress: 0.44,
+            message: thinFilterSkipped,
+          } as WorkerResponse);
+        }
+      }
+
+      if (!isDemoGrid) {
+        cutEscapeHolesInField(field, bounds, cells, params);
+      }
+      sealFieldBoundary(field, cells, 0);
+
+      const rawResult = marchingCubesFromField(field, bounds, cells, 0, (frac) => {
+        if (cancelled) throw new Error('Cancelled');
+        const overallProgress = 0.45 + frac * 0.39;
         const elapsedSeconds = (performance.now() - generationStart) / 1000;
         const marchElapsedSeconds = Math.max(0, elapsedSeconds - preSecondsActual);
         if (frac > 0.02) {
@@ -980,6 +1042,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         surfaceSamplePositions: packedSamples?.positions,
         surfaceSampleNormals: packedSamples?.normals,
         surfaceSampleHoleScales: packedSamples?.holeScales,
+        thinFilterSkipped: thinFilterSkipped ?? undefined,
         backend: 'cpu-single',
       };
       postWorkerMessage(response, generatedResultTransferList(response));

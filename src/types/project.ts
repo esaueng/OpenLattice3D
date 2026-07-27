@@ -53,7 +53,11 @@ export interface LatticeParams {
   gradientEnabled: boolean;
   gradientStrength: number;    // 0..1
   keepInDepth: number;         // mm of solid material below painted keep-in faces
-  thinSectionFilter: number;   // mm material removal to suppress ultra-thin/jagged artifacts
+  /**
+   * Minimum feature width to keep, mm. Features thinner than this are removed
+   * by a morphological opening; 0 disables it.
+   */
+  thinSectionFilter: number;
   exportResolution: number;    // grid divisions per cell
   escapeHoles: boolean;
   escapeHoleDiameter: number;  // mm
