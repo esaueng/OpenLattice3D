@@ -17,13 +17,13 @@ export interface DecimateOptions {
   /** Fraction of triangles to keep, 0..1. */
   targetRatio: number;
   /**
-   * Largest geometric deviation any single collapse may introduce, in mm.
+   * Largest source-plane deviation any collapse may introduce, in mm.
    *
-   * Compared against the root-mean-square distance to the planes a vertex
-   * accumulated, not the raw quadric. The raw value sums squared distances over
-   * every incident plane and keeps growing as quadrics merge, so testing it
-   * directly against a tolerance is stricter by a factor of the valence — on a
-   * real lattice that pinned every reduction at 59% no matter what was asked.
+   * The raw quadric is a sum of squared distances to every source plane carried
+   * by the two endpoint clusters. Requiring that sum to stay below
+   * `maxError²` is conservative: every individual plane distance is then also
+   * bounded by `maxError`. Do not average by plane count here; that turns the
+   * tolerance into an RMS target and permits individual deviations above it.
    */
   maxError?: number;
 }
@@ -129,9 +129,6 @@ export function decimateMesh(mesh: IndexedMesh, options: DecimateOptions): Decim
 
   // Quadrics accumulate the squared distance to the planes of incident faces.
   const quadrics: Quadric[] = Array.from({ length: vertexCount }, () => new Float64Array(10));
-  // How many planes each quadric accumulated, so its error can be turned back
-  // into a per-plane distance.
-  const planeCount = new Float64Array(vertexCount);
   const vertexFaces: number[][] = Array.from({ length: vertexCount }, () => []);
   const ring: Set<number>[] = Array.from({ length: vertexCount }, () => new Set<number>());
 
@@ -150,7 +147,7 @@ export function decimateMesh(mesh: IndexedMesh, options: DecimateOptions): Decim
     if (len < 1e-20) continue;
     nx /= len; ny /= len; nz /= len;
     const d = -(nx*ax + ny*ay + nz*az);
-    for (const v of [a, b, c]) { addPlaneQuadric(quadrics[v], nx, ny, nz, d); planeCount[v]++; }
+    for (const v of [a, b, c]) addPlaneQuadric(quadrics[v], nx, ny, nz, d);
   }
 
   const alive = new Uint8Array(vertexCount).fill(1);
@@ -164,12 +161,9 @@ export function decimateMesh(mesh: IndexedMesh, options: DecimateOptions): Decim
     for (let i = 0; i < 10; i++) sum[i] = q[i] + q2[i];
     const costU = Math.abs(quadricError(sum, positions[u*3], positions[u*3+1], positions[u*3+2]));
     const costV = Math.abs(quadricError(sum, positions[v*3], positions[v*3+1], positions[v*3+2]));
-    // Mean squared distance per contributing plane, so the figure stays
-    // comparable to a millimetre tolerance as quadrics merge.
-    const planes = Math.max(1, planeCount[u] + planeCount[v]);
     return costU <= costV
-      ? { cost: costU / planes, to: u }
-      : { cost: costV / planes, to: v };
+      ? { cost: costU, to: u }
+      : { cost: costV, to: v };
   };
 
   // Edges are keyed as a single number so the heap can carry them as payload.
@@ -268,7 +262,6 @@ export function decimateMesh(mesh: IndexedMesh, options: DecimateOptions): Decim
     }
 
     for (let i = 0; i < 10; i++) quadrics[to][i] += quadrics[from][i];
-    planeCount[to] += planeCount[from];
     for (const n of ring[from]) {
       if (n === to || !alive[n]) continue;
       ring[n].delete(from);

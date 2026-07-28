@@ -102,6 +102,32 @@ describe('morphological opening', () => {
     expect(openingIsResolvable(0.35, [0.6, 0.6, 0.6])).toBe(false);
     expect(openingIsResolvable(0.7, [0.6, 0.6, 0.6])).toBe(true);
     expect(openingIsResolvable(0, [0.1, 0.1, 0.1])).toBe(false);
+    expect(openingIsResolvable(0.5, [1, 0.25, 0.25])).toBe(false);
+    expect(openingIsResolvable(1, [1, 0, 0.25])).toBe(false);
+  });
+
+  it('uses physical axis spacing on anisotropic grids', () => {
+    const samples: Vec3 = [21, 17, 17];
+    const anisotropicSpacing: Vec3 = [1, 0.25, 0.25];
+    const field = new Float32Array(samples[0] * samples[1] * samples[2]);
+    field.fill(1);
+    const index = (x: number, y: number, z: number) =>
+      x + y * samples[0] + z * samples[0] * samples[1];
+
+    // A 3mm slab normal to X is thicker than the 2mm opening diameter and must
+    // survive. Treating every axis as the 0.25mm spacing incorrectly erodes it
+    // by four X samples per side and removes it completely.
+    for (let z = 0; z < samples[2]; z++) {
+      for (let y = 0; y < samples[1]; y++) {
+        for (let x = 9; x <= 11; x++) field[index(x, y, z)] = -1;
+      }
+    }
+
+    openField(field, samples, anisotropicSpacing, 1);
+
+    expect(field[index(10, 8, 8)]).toBeLessThan(0);
+    expect(field[index(8, 8, 8)]).toBeGreaterThanOrEqual(0);
+    expect(field[index(12, 8, 8)]).toBeGreaterThanOrEqual(0);
   });
 
   it('leaves a solid with no thin features essentially unchanged', () => {

@@ -21,17 +21,30 @@ const INF = 1e20;
  * Felzenszwalb and Huttenlocher: the lower envelope of the parabolas rooted at
  * each sample, computed in linear time.
  */
-function edt1d(f: Float64Array, d: Float64Array, v: Int32Array, z: Float64Array, n: number): void {
+function edt1d(
+  f: Float64Array,
+  d: Float64Array,
+  v: Int32Array,
+  z: Float64Array,
+  n: number,
+  spacingSquared: number,
+): void {
   let k = 0;
   v[0] = 0;
   z[0] = -INF;
   z[1] = INF;
 
   for (let q = 1; q < n; q++) {
-    let s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+    let s = (
+      (f[q] + spacingSquared * q * q)
+      - (f[v[k]] + spacingSquared * v[k] * v[k])
+    ) / (2 * spacingSquared * (q - v[k]));
     while (s <= z[k]) {
       k--;
-      s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+      s = (
+        (f[q] + spacingSquared * q * q)
+        - (f[v[k]] + spacingSquared * v[k] * v[k])
+      ) / (2 * spacingSquared * (q - v[k]));
     }
     k++;
     v[k] = q;
@@ -43,15 +56,20 @@ function edt1d(f: Float64Array, d: Float64Array, v: Int32Array, z: Float64Array,
   for (let q = 0; q < n; q++) {
     while (z[k + 1] < q) k++;
     const dist = q - v[k];
-    d[q] = dist * dist + f[v[k]];
+    d[q] = spacingSquared * dist * dist + f[v[k]];
   }
 }
 
 /**
- * Squared distance, in voxels, from every sample to the nearest sample where
- * `seed` is set. Separable, so it runs one axis at a time.
+ * Squared physical distance, in millimetres, from every sample to the nearest
+ * sample where `seed` is set. Axis weights keep the transform Euclidean when
+ * the sampled bounds produce anisotropic voxels.
  */
-function squaredDistanceToSeeds(seed: Uint8Array, cells: Vec3): Float64Array {
+function squaredDistanceToSeeds(
+  seed: Uint8Array,
+  cells: Vec3,
+  spacing: Vec3,
+): Float64Array {
   const [nx, ny, nz] = cells;
   const out = new Float64Array(nx * ny * nz);
   for (let i = 0; i < out.length; i++) out[i] = seed[i] ? 0 : INF;
@@ -67,21 +85,21 @@ function squaredDistanceToSeeds(seed: Uint8Array, cells: Vec3): Float64Array {
   for (let z2 = 0; z2 < nz; z2++) {
     for (let y = 0; y < ny; y++) {
       for (let x = 0; x < nx; x++) f[x] = out[idx(x, y, z2)];
-      edt1d(f, d, v, z, nx);
+      edt1d(f, d, v, z, nx, spacing[0] * spacing[0]);
       for (let x = 0; x < nx; x++) out[idx(x, y, z2)] = d[x];
     }
   }
   for (let z2 = 0; z2 < nz; z2++) {
     for (let x = 0; x < nx; x++) {
       for (let y = 0; y < ny; y++) f[y] = out[idx(x, y, z2)];
-      edt1d(f, d, v, z, ny);
+      edt1d(f, d, v, z, ny, spacing[1] * spacing[1]);
       for (let y = 0; y < ny; y++) out[idx(x, y, z2)] = d[y];
     }
   }
   for (let y = 0; y < ny; y++) {
     for (let x = 0; x < nx; x++) {
       for (let z2 = 0; z2 < nz; z2++) f[z2] = out[idx(x, y, z2)];
-      edt1d(f, d, v, z, nz);
+      edt1d(f, d, v, z, nz, spacing[2] * spacing[2]);
       for (let z2 = 0; z2 < nz; z2++) out[idx(x, y, z2)] = d[z2];
     }
   }
@@ -105,37 +123,33 @@ export function openField(
 ): void {
   const [nx, ny, nz] = cells;
   const voxels = nx * ny * nz;
-  if (radius <= 0 || field.length < voxels) return;
-
-  // Uniform voxels are assumed for the transform; use the finest axis so the
-  // structuring element is never larger than intended.
-  const scale = Math.min(spacing[0], spacing[1], spacing[2]);
-  const radiusVoxels = radius / scale;
-  if (radiusVoxels < 1) return;
-  const radiusVoxelsSq = radiusVoxels * radiusVoxels;
+  if (field.length < voxels || !openingIsResolvable(radius, spacing)) return;
+  const radiusSquared = radius * radius;
 
   // Erode: keep only samples at least `radius` inside the original solid.
   // Distance to the outside comes from a transform seeded on outside samples.
   const outside = new Uint8Array(voxels);
   for (let i = 0; i < voxels; i++) outside[i] = field[i] > 0 ? 1 : 0;
-  const distToOutsideSq = squaredDistanceToSeeds(outside, cells);
+  const distToOutsideSq = squaredDistanceToSeeds(outside, cells, spacing);
 
   const eroded = new Uint8Array(voxels);
   for (let i = 0; i < voxels; i++) {
-    eroded[i] = !outside[i] && distToOutsideSq[i] >= radiusVoxelsSq ? 1 : 0;
+    eroded[i] = !outside[i] && distToOutsideSq[i] >= radiusSquared ? 1 : 0;
   }
 
   // Dilate the eroded set back by the same radius. Everything within `radius`
   // of surviving material is solid again, so survivors regain their thickness
   // while anything too thin to hold the ball stays gone.
-  const distToErodedSq = squaredDistanceToSeeds(eroded, cells);
+  const distToErodedSq = squaredDistanceToSeeds(eroded, cells, spacing);
   for (let i = 0; i < voxels; i++) {
     // Signed distance to the opened solid, in millimetres.
-    field[i] = (Math.sqrt(distToErodedSq[i]) - radiusVoxels) * scale;
+    field[i] = Math.sqrt(distToErodedSq[i]) - radius;
   }
 }
 
-/** Whether a radius is large enough to be represented on this grid. */
+/** Whether a radius is large enough to be represented along every grid axis. */
 export function openingIsResolvable(radius: number, spacing: Vec3): boolean {
-  return radius > 0 && radius >= Math.min(spacing[0], spacing[1], spacing[2]);
+  return radius > 0
+    && spacing.every((value) => Number.isFinite(value) && value > 0)
+    && radius >= Math.max(spacing[0], spacing[1], spacing[2]);
 }
