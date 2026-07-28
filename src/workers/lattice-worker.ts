@@ -955,12 +955,16 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         (bounds.max[1] - bounds.min[1]) / resolution,
         (bounds.max[2] - bounds.min[2]) / resolution,
       ];
+      let lastSamplingPercent = -5;
       const field = sampleSdfField(sdfToSample, bounds, cells, (fraction) => {
         if (cancelled) throw new Error('Cancelled');
+        const percent = Math.floor(fraction * 100);
+        if (percent < 100 && percent < lastSamplingPercent + 5) return;
+        lastSamplingPercent = percent;
         postMessage({
           type: 'progress',
           progress: 0.12 + fraction * 0.3,
-          message: `Sampling field: ${Math.round(fraction * 100)}%`,
+          message: `Sampling field: ${percent}%`,
         } as WorkerResponse);
       });
 
@@ -997,8 +1001,12 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
       }
       sealFieldBoundary(field, cells, 0);
 
+      let lastMarchingPercent = -5;
       const rawResult = marchingCubesFromField(field, bounds, cells, 0, (frac) => {
         if (cancelled) throw new Error('Cancelled');
+        const percent = Math.floor(frac * 100);
+        if (percent < 100 && percent < lastMarchingPercent + 5) return;
+        lastMarchingPercent = percent;
         const overallProgress = 0.45 + frac * 0.39;
         const elapsedSeconds = (performance.now() - generationStart) / 1000;
         const marchElapsedSeconds = Math.max(0, elapsedSeconds - preSecondsActual);
@@ -1014,7 +1022,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         postMessage({
           type: 'progress',
           progress: overallProgress,
-          message: `Marching cubes: ${Math.round(frac * 100)}% (~${estimateLabel} remaining)`
+          message: `Marching cubes: ${percent}% (~${estimateLabel} remaining)`
         } as WorkerResponse);
       });
 

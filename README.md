@@ -80,7 +80,9 @@ COEP compatibility problems with third-party form resources.
 - **Wall Thickness / Strut Diameter**: lattice feature size depending on type.
 - **Min Feature Size & Tolerance**: validation targets.
 - **Export Resolution**: marching cubes sampling density (1–10).
-- **Thin Artifact Filter**: removes very thin/jagged sections.
+- **Remove Features**: applies a morphological opening that removes features
+  below the selected width without uniformly thinning geometry that survives.
+  The run log reports when the export grid cannot resolve the requested width.
 
 ### 3. Multiview
 
@@ -106,7 +108,11 @@ After generation, the validation panel shows:
 
 - **Export STL**: binary STL of the lattice result (outward-oriented triangles)
 - **Export 3MF**: indexed triangle mesh in a standards-based, millimetre-unit 3MF package
+- **Export OBJ**: indexed Wavefront OBJ geometry (the format does not declare units)
 - **Export Project JSON**: a resumable project with its source geometry and workspace state
+
+Mesh exports can optionally reduce triangle count while keeping simplification
+error within the configured geometric tolerance.
 
 After validation, the right panel also reports generated volume, relative density, material
 reduction, and optional mass when a material density is configured.
@@ -138,7 +144,7 @@ src/
     LeftPanel.tsx           # Import, parameters, generate
     RightPanel.tsx          # Validation and manufacturing statistics
     ViewerControls.tsx      # View modes, cross-section, background
-    ExportControls.tsx      # STL, 3MF, and project JSON export
+    ExportControls.tsx      # STL, 3MF, OBJ, and project JSON export
   hooks/
     useLatticeGeneration.ts # Worker lifecycle for generation + validation
     useWorkspaceHotkeys.ts  # Keyboard shortcuts
@@ -172,8 +178,8 @@ single-worker paths; see [the backend decision](./docs/performance/backend-decis
 
 Unit tests cover STL parsing (including malformed and shipped-asset round trips), marching
 cubes, BVH distances, all lattice SDFs and TPMS thickness calibration, topology stress cases,
-escape-hole subtraction, statistics, 3MF packaging, project restoration, state history, and
-parameter sanitization.
+escape-hole subtraction, watertight repair, tolerance-bounded simplification, morphology,
+3MF/OBJ packaging, project restoration, state history, and parameter sanitization.
 
 ```bash
 npm test
