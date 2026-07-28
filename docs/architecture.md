@@ -22,6 +22,13 @@ BVH for nearest-surface queries and inside/outside classification. Both paths
 combine the same lattice field, shell, surface-only band, and escape-hole
 subtraction rules.
 
+The procedural source shown in the viewport is a disposable display mesh, not
+the manufacturing representation. Curved samples use screen-space chordal and
+angular tolerances with bounded LOD tiers, and analytic edge samples share the
+surface's angular grid. Camera zoom or source changes regenerate this display
+cache without changing the analytic SDF used by generation or the exported
+lattice mesh.
+
 ## Geometry composition
 
 Shell-bearing generation divides the part into an outer shell and a lattice
