@@ -114,11 +114,19 @@ interface PersistedAppState extends PersistedState {
 }
 
 function canUseBrowserStorage() {
-  return typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
+  try {
+    return typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
+  } catch {
+    return false;
+  }
 }
 
 function canUseIndexedDb() {
-  return typeof indexedDB !== 'undefined';
+  try {
+    return typeof indexedDB !== 'undefined';
+  } catch {
+    return false;
+  }
 }
 
 function loadLegacyPersistedState(): Partial<PersistedState> | null {
@@ -317,6 +325,9 @@ interface AppState {
   // Logs
   logs: LogEntry[];
 
+  // Boot
+  persistenceHydrated: boolean;
+
   // Actions
   setOriginalMesh: (mesh: TriangleMesh | null, info: MeshInfo | null, fileName: string) => void;
   setMeshRepaired: (repaired: boolean) => void;
@@ -394,6 +405,9 @@ export const useStore = create<AppState>((set) => ({
   demoModeActive: false,
   demoRunId: 0,
   logs: [],
+  // IndexedDB is asynchronous, so the UI must not render the empty workspace
+  // until we know whether a saved workspace needs to be restored.
+  persistenceHydrated: false,
 
   setOriginalMesh: (mesh, info, fileName) => set({
     originalMesh: mesh,
@@ -854,9 +868,11 @@ async function hydratePersistence() {
   try {
     const snapshot = await loadPersistedAppState();
     if (snapshot) useStore.setState(hydrateFromSnapshot(snapshot));
+  } catch {
+    // Storage-disabled/private contexts must fall back to a usable new project.
   } finally {
     persistenceReady = true;
-    schedulePersistence();
+    useStore.setState({ persistenceHydrated: true });
   }
 }
 

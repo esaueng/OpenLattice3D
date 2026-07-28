@@ -418,6 +418,52 @@ textarea:focus-visible,
   height: 100% !important;
 }
 
+.boot-panel-placeholder {
+  gap: 0;
+}
+
+.boot-skeleton-line {
+  display: block;
+  width: 68%;
+  height: 10px;
+  margin-bottom: 10px;
+  background: var(--color-surface-2);
+  border-radius: var(--radius-sm);
+}
+
+.boot-skeleton-line-wide {
+  width: 88%;
+}
+
+.boot-skeleton-line-short {
+  width: 34%;
+}
+
+.boot-viewer-shell {
+  display: grid;
+  place-items: center;
+}
+
+.boot-viewer-state {
+  display: grid;
+  gap: 6px;
+  max-width: 360px;
+  padding: 18px 20px;
+  color: var(--color-text-muted);
+  background: rgba(17, 24, 33, 0.82);
+  border: var(--border-thin);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  text-align: center;
+}
+
+.boot-viewer-state strong {
+  color: var(--color-text);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+}
+
 .viewer-hud {
   position: absolute;
   inset: 12px auto auto 12px;
