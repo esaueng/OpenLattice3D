@@ -2,6 +2,7 @@
 // Uses the classic edge table and tri table
 
 import type { Vec3 } from './vec3';
+import { closeBoundaryLoops } from './mesh-repair';
 
 // Edge table: for each of 256 cube configurations, which edges are intersected
 // Tri table: for each configuration, list of triangles as edge indices
@@ -263,7 +264,18 @@ export function marchingCubes(
   isoValue: number = 0,
   onProgress?: (fraction: number) => void
 ): MarchingCubesResult {
-  return marchingCubesRectangular(sdf, bounds, [resolution, resolution, resolution], isoValue, onProgress);
+  const raw = marchingCubesRectangular(
+    sdf,
+    bounds,
+    [resolution, resolution, resolution],
+    isoValue,
+    onProgress,
+    true
+  );
+  // Only the whole-volume entry point closes cracks. Tiles are extracted with
+  // marchingCubesRectangular directly and are legitimately open along their
+  // seams until merged, so repairing one in isolation would seal it shut.
+  return closeBoundaryLoops(raw).result;
 }
 
 export function marchingCubesRectangular(
@@ -271,36 +283,91 @@ export function marchingCubesRectangular(
   bounds: { min: Vec3; max: Vec3 },
   cells: Vec3,
   isoValue: number = 0,
-  onProgress?: (fraction: number) => void
+  onProgress?: (fraction: number) => void,
+  sealBoundary: boolean = false
 ): MarchingCubesResult {
+  const field = sampleSdfField(sdf, bounds, cells, onProgress ? (fraction) => onProgress(fraction * 0.45) : undefined);
+
+  if (sealBoundary) sealFieldBoundary(field, cells, isoValue);
+
+  return marchingCubesFromField(field, bounds, cells, isoValue, onProgress ? (fraction) => onProgress(0.45 + fraction * 0.55) : undefined);
+}
+
+/**
+ * Force the outermost shell of samples to read as outside the solid.
+ *
+ * A surface that reaches the edge of the sampling volume is otherwise cut off
+ * there, leaving the mesh open along the whole intersection — a clipped sphere
+ * left 1704 unmatched edges. Capping it closes the solid against the boundary
+ * instead.
+ *
+ * Samples already outside are left untouched, so the common case of padded
+ * bounds produces a bit-identical field and no change in output.
+ */
+export function sealFieldBoundary(field: Float32Array, cells: Vec3, isoValue: number): void {
   const nx = cells[0], ny = cells[1], nz = cells[2];
-  const minX = bounds.min[0];
-  const minY = bounds.min[1];
-  const minZ = bounds.min[2];
-  const dx = (bounds.max[0] - bounds.min[0]) / nx;
-  const dy = (bounds.max[1] - bounds.min[1]) / ny;
-  const dz = (bounds.max[2] - bounds.min[2]) / nz;
   const strideY = nx + 1;
   const strideZ = strideY * (ny + 1);
+  const outside = isoValue + 1;
 
-  const field = new Float32Array((nx + 1) * (ny + 1) * (nz + 1));
-  if (nx === ny && ny === nz && hasGridSampler(sdf)) {
-    sdf.sampleField(bounds, nx, field, onProgress ? (fraction) => onProgress(fraction * 0.45) : undefined);
-  } else {
-    for (let z = 0; z <= nz; z++) {
-      if (onProgress) onProgress((z / nz) * 0.45);
-      const pz = minZ + z * dz;
-      for (let y = 0; y <= ny; y++) {
-        const py = minY + y * dy;
-        const rowOffset = fieldIndex(0, y, z, strideY, strideZ);
-        for (let x = 0; x <= nx; x++) {
-          field[rowOffset + x] = sdf(minX + x * dx, py, pz);
-        }
+  const seal = (index: number) => {
+    if (field[index] <= isoValue) field[index] = outside;
+  };
+
+  for (let z = 0; z <= nz; z++) {
+    const zOnFace = z === 0 || z === nz;
+    for (let y = 0; y <= ny; y++) {
+      const yOnFace = y === 0 || y === ny;
+      const rowOffset = y * strideY + z * strideZ;
+      if (zOnFace || yOnFace) {
+        for (let x = 0; x <= nx; x++) seal(rowOffset + x);
+      } else {
+        seal(rowOffset);
+        seal(rowOffset + nx);
       }
     }
   }
+}
 
-  return marchingCubesFromField(field, bounds, cells, isoValue, onProgress ? (fraction) => onProgress(0.45 + fraction * 0.55) : undefined);
+/**
+ * Sample an SDF onto the marching-cubes grid.
+ *
+ * Exported so callers can operate on the grid before extraction — morphological
+ * opening and escape-hole cutting are both whole-field operations that cannot
+ * be expressed as a per-point wrapper.
+ */
+export function sampleSdfField(
+  sdf: (x: number, y: number, z: number) => number,
+  bounds: { min: Vec3; max: Vec3 },
+  cells: Vec3,
+  onProgress?: (fraction: number) => void
+): Float32Array {
+  const nx = cells[0], ny = cells[1], nz = cells[2];
+  const minX = bounds.min[0], minY = bounds.min[1], minZ = bounds.min[2];
+  const dx = (bounds.max[0] - minX) / nx;
+  const dy = (bounds.max[1] - minY) / ny;
+  const dz = (bounds.max[2] - minZ) / nz;
+  const strideY = nx + 1;
+  const strideZ = strideY * (ny + 1);
+  const field = new Float32Array((nx + 1) * (ny + 1) * (nz + 1));
+
+  if (nx === ny && ny === nz && hasGridSampler(sdf)) {
+    sdf.sampleField(bounds, nx, field, onProgress);
+    return field;
+  }
+
+  for (let z = 0; z <= nz; z++) {
+    if (onProgress) onProgress(z / nz);
+    const pz = minZ + z * dz;
+    for (let y = 0; y <= ny; y++) {
+      const py = minY + y * dy;
+      const rowOffset = fieldIndex(0, y, z, strideY, strideZ);
+      for (let x = 0; x <= nx; x++) {
+        field[rowOffset + x] = sdf(minX + x * dx, py, pz);
+      }
+    }
+  }
+  return field;
 }
 
 export function marchingCubesFromField(

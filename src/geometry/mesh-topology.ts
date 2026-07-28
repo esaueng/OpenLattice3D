@@ -1,9 +1,6 @@
-// Shared triangle-soup topology: quantized vertex welding, edge→triangle
+// Shared triangle-soup topology: exact vertex welding, edge→triangle
 // lists, and connected components. Used by validation checks and by
 // disconnected-fragment cleanup after marching cubes.
-
-// Vertices are welded on a 1/QUANT_SCALE grid (1 µm at mm units).
-const QUANT_SCALE = 1e3;
 
 export interface EdgeTopology {
   /** For each unique edge, the indices of triangles sharing it. */
@@ -19,53 +16,61 @@ function vertexBucketKey(qx: number, qy: number, qz: number): number {
   return h >>> 0;
 }
 
-function getQuantizedVertexId(
+function normalizeZeroBits(bits: number): number {
+  return bits === 0x80000000 ? 0 : bits;
+}
+
+function getExactVertexId(
   buckets: Map<number, number[]>,
-  qxById: number[],
-  qyById: number[],
-  qzById: number[],
-  qx: number,
-  qy: number,
-  qz: number
+  bxById: number[],
+  byById: number[],
+  bzById: number[],
+  bx: number,
+  by: number,
+  bz: number
 ): number {
-  const bucketKey = vertexBucketKey(qx, qy, qz);
+  const bucketKey = vertexBucketKey(bx, by, bz);
   let bucket = buckets.get(bucketKey);
   if (bucket) {
     for (let i = 0; i < bucket.length; i++) {
       const id = bucket[i];
-      if (qxById[id] === qx && qyById[id] === qy && qzById[id] === qz) return id;
+      if (bxById[id] === bx && byById[id] === by && bzById[id] === bz) return id;
     }
   } else {
     bucket = [];
     buckets.set(bucketKey, bucket);
   }
 
-  const id = qxById.length;
-  qxById.push(qx);
-  qyById.push(qy);
-  qzById.push(qz);
+  const id = bxById.length;
+  bxById.push(bx);
+  byById.push(by);
+  bzById.push(bz);
   bucket.push(id);
   return id;
 }
 
 /** Build edge→triangle topology from a flat triangle soup.
+ *  Vertex identity is the exact float bits. Marching cubes derives the same
+ *  shared-edge vertex bit-for-bit in adjacent cubes; rounding distinct nearby
+ *  vertices together invents non-manifold edges as resolution increases.
  *  Edge keys are exact for any vertex count (nested maps, no number packing). */
 export function buildEdgeTopology(positions: Float32Array, triCount: number): EdgeTopology {
+  const bits = new Uint32Array(positions.buffer, positions.byteOffset, positions.length);
   const buckets = new Map<number, number[]>();
-  const qxById: number[] = [];
-  const qyById: number[] = [];
-  const qzById: number[] = [];
+  const bxById: number[] = [];
+  const byById: number[] = [];
+  const bzById: number[] = [];
   const edgesByLo = new Map<number, Map<number, number[]>>();
   const edgeTriangleLists: number[][] = [];
 
-  const vertexId = (offset: number) => getQuantizedVertexId(
+  const vertexId = (offset: number) => getExactVertexId(
     buckets,
-    qxById,
-    qyById,
-    qzById,
-    Math.round(positions[offset] * QUANT_SCALE),
-    Math.round(positions[offset + 1] * QUANT_SCALE),
-    Math.round(positions[offset + 2] * QUANT_SCALE)
+    bxById,
+    byById,
+    bzById,
+    normalizeZeroBits(bits[offset]),
+    normalizeZeroBits(bits[offset + 1]),
+    normalizeZeroBits(bits[offset + 2])
   );
 
   const addEdge = (a: number, b: number, triIndex: number) => {
@@ -90,6 +95,7 @@ export function buildEdgeTopology(positions: Float32Array, triCount: number): Ed
     const v0 = vertexId(base);
     const v1 = vertexId(base + 3);
     const v2 = vertexId(base + 6);
+    if (v0 === v1 || v1 === v2 || v0 === v2) continue;
     addEdge(v0, v1, i);
     addEdge(v1, v2, i);
     addEdge(v2, v0, i);

@@ -524,18 +524,18 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
 
 
           <div className="row">
-            <label htmlFor="thin-filter">Thin Artifact Filter:</label>
+            <label htmlFor="thin-filter">Remove Features:</label>
             <select
               id="thin-filter"
-              title="Removes very thin/jagged sections. Higher levels remove more material."
+              title="Remove features thinner than this by morphological opening. The run log explains when the export grid cannot resolve the requested size."
               value={store.params.thinSectionFilter}
               onChange={(e) => store.updateParams({ thinSectionFilter: parseFloat(e.target.value) || 0 })}
             >
               <option value={0}>Off</option>
-              <option value={0.05}>Low</option>
-              <option value={0.1}>Medium</option>
-              <option value={0.2}>High</option>
-              <option value={0.35}>Very High</option>
+              <option value={0.5}>Under 0.5mm</option>
+              <option value={0.8}>Under 0.8mm</option>
+              <option value={1.2}>Under 1.2mm</option>
+              <option value={2}>Under 2.0mm</option>
             </select>
           </div>
 
