@@ -21,6 +21,11 @@ import {
   SampleMeshView,
 } from './viewer/ViewerMeshViews';
 import { DemoGridView } from './viewer/DemoGridView';
+import {
+  finishOrbitControlsAfterCameraReset,
+  prepareOrbitControlsForCameraReset,
+  type ResettableOrbitControls,
+} from './viewer/orbit-controls-reset';
 
 const VIEWPORT_PADDING = 1.2;
 const WORLD_UP = new THREE.Vector3(0, 0, 1);
@@ -57,25 +62,6 @@ type GizmoViewRequest = ViewAxis | 'iso' | { kind: 'corner'; direction: ViewCube
 type ViewCubeFaceLabel = 'Front' | 'Back' | 'Right' | 'Left' | 'Top' | 'Bottom';
 type GizmoViewTarget = '+x' | '+y' | '+z' | 'front' | 'right' | 'top' | 'iso';
 type ViewCubeFaceDirection = ViewCubeCornerDirection;
-
-type ResettableOrbitControls = {
-  enabled?: boolean;
-  target?: THREE.Vector3;
-  update?: () => void;
-  addEventListener?: (type: 'change', listener: () => void) => void;
-  removeEventListener?: (type: 'change', listener: () => void) => void;
-  state?: number;
-  _sphericalDelta?: { set: (radius: number, phi: number, theta: number) => void };
-  _panOffset?: { set: (x: number, y: number, z: number) => void };
-  _scale?: number;
-  _performCursorZoom?: boolean;
-  _dollyDirection?: { set: (x: number, y: number, z: number) => void };
-};
-
-type OrbitControlsResetSession = {
-  controls: ResettableOrbitControls;
-  wasEnabled: boolean | undefined;
-};
 
 function distanceToFitBoundingSphere(camera: THREE.Camera, radius: number): number {
   if (!(camera instanceof THREE.PerspectiveCamera)) return radius * 4;
@@ -174,49 +160,6 @@ function cameraViewForRequest(viewRequest: GizmoViewRequest): { direction: THREE
     return cameraViewForDirection(viewRequest.direction);
   }
   return cameraViewForAxis(viewRequest);
-}
-
-function prepareOrbitControlsForCameraReset(controls: unknown): OrbitControlsResetSession | null {
-  const orbitControls = controls as ResettableOrbitControls | null;
-  if (!orbitControls) return null;
-
-  const wasEnabled = orbitControls.enabled;
-  orbitControls.enabled = false;
-  orbitControls.state = -1;
-  orbitControls._sphericalDelta?.set(0, 0, 0);
-  orbitControls._panOffset?.set(0, 0, 0);
-  orbitControls._scale = 1;
-  orbitControls._performCursorZoom = false;
-  orbitControls._dollyDirection?.set(0, 0, 0);
-  return { controls: orbitControls, wasEnabled };
-}
-
-function finishOrbitControlsAfterCameraReset(
-  resetSession: OrbitControlsResetSession | null,
-  target: THREE.Vector3
-): (() => void) | undefined {
-  if (!resetSession) return undefined;
-
-  const { controls, wasEnabled } = resetSession;
-  controls.target?.copy(target);
-  controls.update?.();
-
-  const restoreControls = () => {
-    if (wasEnabled !== undefined) controls.enabled = wasEnabled;
-    controls.state = -1;
-    controls.update?.();
-  };
-
-  if (typeof window === 'undefined') {
-    restoreControls();
-    return undefined;
-  }
-
-  const frameId = window.requestAnimationFrame(restoreControls);
-  return () => {
-    window.cancelAnimationFrame(frameId);
-    restoreControls();
-  };
 }
 
 function vectorToTuple(vector: THREE.Vector3): ViewerVector3 {
