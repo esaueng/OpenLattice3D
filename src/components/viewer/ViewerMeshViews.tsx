@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
-import { useCallback, useEffect, useMemo, useRef } from 'react';
-import type { ThreeEvent } from '@react-three/fiber';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useFrame, useThree, type ThreeEvent } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { TriangleMesh } from '../../geometry/stl-parser';
 import type { MarchingCubesResult } from '../../geometry/marching-cubes';
@@ -15,6 +15,20 @@ import {
 } from '../../geometry/mesh-analysis';
 import { escapeHoleCenters, shouldApplyEscapeHoles } from '../../geometry/escape-holes';
 import { computeTriangleCentroids, facesWithinBrush } from '../../geometry/constraint-painting';
+import {
+  generateCylinderDisplayMesh,
+  perspectiveProjectedRadiusPx,
+  radialSegmentsForProjectedRadius,
+  sampleCircularEdge,
+} from '../../geometry/display-tessellation';
+
+const SAMPLE_CYLINDER_RADIUS_MM = 15;
+const SAMPLE_CYLINDER_HEIGHT_MM = 40;
+const SAMPLE_CYLINDER_EDGE_CENTERS: ReadonlyArray<readonly [number, number, number]> = [
+  [0, 0, SAMPLE_CYLINDER_HEIGHT_MM / 2],
+  [0, 0, -SAMPLE_CYLINDER_HEIGHT_MM / 2],
+];
+const PROCEDURAL_EDGE_COLOR = '#101820';
 
 export function resultBounds(result: MarchingCubesResult): THREE.Box3 {
   const box = new THREE.Box3();
@@ -43,7 +57,7 @@ export function generateSampleMesh(shape: SampleShape, radius: number): Triangle
   switch (shape) {
     case 'sphere': return generateSphereMesh(radius, 32);
     case 'cube': return generateCubeMesh(30);
-    case 'cylinder': return generateCylinderMesh(15, 40, 32);
+    case 'cylinder': return generateCylinderMesh(SAMPLE_CYLINDER_RADIUS_MM, SAMPLE_CYLINDER_HEIGHT_MM, 32);
     case 'torus': return generateTorusMesh(20, 8, 32, 16);
     case 'capsule': return generateCapsuleMesh(12, 30, 24);
   }
@@ -69,13 +83,24 @@ export function EscapeHolePreview({ bounds, params }: { bounds: THREE.Box3; para
         : [0, 0, 0];
     return { centers, length: length + params.escapeHoleDiameter, rotation };
   }, [bounds, params]);
+  const radialSegments = useAdaptiveRadialSegments(
+    params.escapeHoleDiameter / 2,
+    preview?.centers,
+  );
 
   if (!preview) return null;
   return (
     <group>
       {preview.centers.map((center, index) => (
         <mesh key={index} position={center} rotation={preview.rotation} renderOrder={5}>
-          <cylinderGeometry args={[params.escapeHoleDiameter / 2, params.escapeHoleDiameter / 2, preview.length, 32]} />
+          <cylinderGeometry
+            args={[
+              params.escapeHoleDiameter / 2,
+              params.escapeHoleDiameter / 2,
+              preview.length,
+              radialSegments,
+            ]}
+          />
           <meshBasicMaterial color="#ff9f43" transparent opacity={0.42} depthWrite={false} wireframe />
         </mesh>
       ))}
@@ -86,6 +111,171 @@ export function EscapeHolePreview({ bounds, params }: { bounds: THREE.Box3; para
 const FACE_COLOR_DEFAULT: [number, number, number] = [0.7, 0.7, 0.75];
 const FACE_COLOR_KEEP_OUT: [number, number, number] = [0.2, 0.6, 1];
 const FACE_COLOR_KEEP_IN: [number, number, number] = [1, 0.4, 0.2];
+
+function projectedRadiusPixels(
+  camera: THREE.Camera,
+  viewportHeightPx: number,
+  radiusWorld: number,
+  centers: ReadonlyArray<readonly [number, number, number]> = [[0, 0, 0]],
+): number {
+  if (camera instanceof THREE.PerspectiveCamera) {
+    let largestProjectedRadius = 0;
+    for (const center of centers) {
+      const centerDistance = Math.hypot(
+        camera.position.x - center[0],
+        camera.position.y - center[1],
+        camera.position.z - center[2],
+      );
+      // A circle's nearest point can be one radius closer than its center.
+      const conservativeDistance = Math.max(camera.near, centerDistance - radiusWorld);
+      largestProjectedRadius = Math.max(
+        largestProjectedRadius,
+        perspectiveProjectedRadiusPx(
+          radiusWorld,
+          conservativeDistance,
+          THREE.MathUtils.degToRad(camera.getEffectiveFOV()),
+          viewportHeightPx,
+        ),
+      );
+    }
+    return largestProjectedRadius;
+  }
+  if (camera instanceof THREE.OrthographicCamera) {
+    const viewHeight = (camera.top - camera.bottom) / camera.zoom;
+    return viewHeight > 0 ? radiusWorld * viewportHeightPx / viewHeight : 0;
+  }
+  return 0;
+}
+
+function useAdaptiveRadialSegments(
+  radiusWorld: number,
+  centers?: ReadonlyArray<readonly [number, number, number]>,
+): number {
+  const { camera, size } = useThree();
+  const initialSegments = radialSegmentsForProjectedRadius(
+    projectedRadiusPixels(camera, size.height, radiusWorld, centers),
+  );
+  const [segments, setSegments] = useState(initialSegments);
+  const segmentsRef = useRef(initialSegments);
+
+  useFrame(() => {
+    const nextSegments = radialSegmentsForProjectedRadius(
+      projectedRadiusPixels(camera, size.height, radiusWorld, centers),
+    );
+    if (nextSegments === segmentsRef.current) return;
+    segmentsRef.current = nextSegments;
+    setSegments(nextSegments);
+  });
+
+  return segments;
+}
+
+function faceColors(
+  triCount: number,
+  keepOutTris: Set<number>,
+  keepInTris: Set<number>,
+): Float32Array {
+  const colors = new Float32Array(triCount * 9);
+  for (let triangle = 0; triangle < triCount; triangle++) {
+    const color = keepInTris.has(triangle)
+      ? FACE_COLOR_KEEP_IN
+      : keepOutTris.has(triangle) ? FACE_COLOR_KEEP_OUT : FACE_COLOR_DEFAULT;
+    for (let vertex = 0; vertex < 3; vertex++) {
+      const offset = triangle * 9 + vertex * 3;
+      colors[offset] = color[0];
+      colors[offset + 1] = color[1];
+      colors[offset + 2] = color[2];
+    }
+  }
+  return colors;
+}
+
+function CylinderSampleView({
+  keepOutTris,
+  keepInTris,
+}: {
+  keepOutTris: Set<number>;
+  keepInTris: Set<number>;
+}) {
+  const radialSegments = useAdaptiveRadialSegments(
+    SAMPLE_CYLINDER_RADIUS_MM,
+    SAMPLE_CYLINDER_EDGE_CENTERS,
+  );
+  const displayMesh = useMemo(
+    () => generateCylinderDisplayMesh(
+      SAMPLE_CYLINDER_RADIUS_MM,
+      SAMPLE_CYLINDER_HEIGHT_MM,
+      radialSegments,
+    ),
+    [radialSegments],
+  );
+  const surfaceGeometry = useDisposable(useMemo(() => {
+    const next = new THREE.BufferGeometry();
+    next.setAttribute('position', new THREE.BufferAttribute(displayMesh.positions, 3));
+    next.setAttribute('normal', new THREE.BufferAttribute(displayMesh.normals, 3));
+    next.setAttribute(
+      'color',
+      new THREE.BufferAttribute(faceColors(displayMesh.triCount, keepOutTris, keepInTris), 3),
+    );
+    return next;
+  }, [displayMesh, keepInTris, keepOutTris]));
+  const halfHeight = SAMPLE_CYLINDER_HEIGHT_MM / 2;
+  const topEdgeGeometry = useDisposable(useMemo(() => {
+    const next = new THREE.BufferGeometry();
+    next.setAttribute(
+      'position',
+      new THREE.BufferAttribute(
+        sampleCircularEdge(SAMPLE_CYLINDER_RADIUS_MM, halfHeight, radialSegments),
+        3,
+      ),
+    );
+    return next;
+  }, [halfHeight, radialSegments]));
+  const bottomEdgeGeometry = useDisposable(useMemo(() => {
+    const next = new THREE.BufferGeometry();
+    next.setAttribute(
+      'position',
+      new THREE.BufferAttribute(
+        sampleCircularEdge(SAMPLE_CYLINDER_RADIUS_MM, -halfHeight, radialSegments),
+        3,
+      ),
+    );
+    return next;
+  }, [halfHeight, radialSegments]));
+  const edgeMaterial = useDisposable(useMemo(() => new THREE.LineBasicMaterial({
+    color: PROCEDURAL_EDGE_COLOR,
+    depthTest: true,
+    depthWrite: false,
+    transparent: true,
+    opacity: 0.92,
+  }), []));
+  const topEdge = useMemo(
+    () => new THREE.LineLoop(topEdgeGeometry, edgeMaterial),
+    [edgeMaterial, topEdgeGeometry],
+  );
+  const bottomEdge = useMemo(
+    () => new THREE.LineLoop(bottomEdgeGeometry, edgeMaterial),
+    [bottomEdgeGeometry, edgeMaterial],
+  );
+
+  return (
+    <group>
+      <mesh geometry={surfaceGeometry}>
+        <meshPhongMaterial
+          vertexColors
+          side={THREE.DoubleSide}
+          transparent
+          opacity={0.5}
+          polygonOffset
+          polygonOffsetFactor={1}
+          polygonOffsetUnits={1}
+        />
+      </mesh>
+      <primitive object={topEdge} renderOrder={2} />
+      <primitive object={bottomEdge} renderOrder={2} />
+    </group>
+  );
+}
 
 export function OriginalMeshView({
   mesh,
@@ -183,7 +373,7 @@ export function OriginalMeshView({
   );
 }
 
-export function SampleMeshView({ shape, radius, keepOutTris, keepInTris }: {
+function GenericSampleMeshView({ shape, radius, keepOutTris, keepInTris }: {
   shape: SampleShape;
   radius: number;
   keepOutTris: Set<number>;
@@ -193,20 +383,10 @@ export function SampleMeshView({ shape, radius, keepOutTris, keepInTris }: {
     const mesh = generateSampleMesh(shape, radius);
     const next = new THREE.BufferGeometry();
     next.setAttribute('position', new THREE.BufferAttribute(mesh.positions, 3));
-    const colors = new Float32Array(mesh.positions.length);
-    for (let triangle = 0; triangle < mesh.triCount; triangle++) {
-      let red = 0.7;
-      let green = 0.7;
-      let blue = 0.75;
-      if (keepOutTris.has(triangle)) { red = 0.2; green = 0.6; blue = 1; }
-      if (keepInTris.has(triangle)) { red = 1; green = 0.4; blue = 0.2; }
-      for (let vertex = 0; vertex < 3; vertex++) {
-        colors[triangle * 9 + vertex * 3] = red;
-        colors[triangle * 9 + vertex * 3 + 1] = green;
-        colors[triangle * 9 + vertex * 3 + 2] = blue;
-      }
-    }
-    next.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    next.setAttribute(
+      'color',
+      new THREE.BufferAttribute(faceColors(mesh.triCount, keepOutTris, keepInTris), 3),
+    );
     next.computeVertexNormals();
     return next;
   }, [keepInTris, keepOutTris, radius, shape]));
@@ -216,6 +396,18 @@ export function SampleMeshView({ shape, radius, keepOutTris, keepInTris }: {
       <meshPhongMaterial vertexColors side={THREE.DoubleSide} transparent opacity={0.5} />
     </mesh>
   );
+}
+
+export function SampleMeshView(props: {
+  shape: SampleShape;
+  radius: number;
+  keepOutTris: Set<number>;
+  keepInTris: Set<number>;
+}) {
+  if (props.shape === 'cylinder') {
+    return <CylinderSampleView keepOutTris={props.keepOutTris} keepInTris={props.keepInTris} />;
+  }
+  return <GenericSampleMeshView {...props} />;
 }
 
 export function ResultMeshView({ result }: { result: MarchingCubesResult }) {
