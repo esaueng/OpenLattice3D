@@ -22,6 +22,34 @@ function toSoup(mesh: IndexedMesh): MarchingCubesResult {
   return { positions, normals: new Float32Array(mesh.triangleCount * 3), triCount: mesh.triangleCount };
 }
 
+function maxSphereRadialError(mesh: IndexedMesh, radius: number): number {
+  let maxError = 0;
+  const samples = [
+    [1 / 3, 1 / 3, 1 / 3],
+    [0.5, 0.5, 0],
+    [0.5, 0, 0.5],
+    [0, 0.5, 0.5],
+  ];
+  for (let triangle = 0; triangle < mesh.triangleCount; triangle++) {
+    const a = mesh.indices[triangle * 3];
+    const b = mesh.indices[triangle * 3 + 1];
+    const c = mesh.indices[triangle * 3 + 2];
+    for (const [wa, wb, wc] of samples) {
+      const x = wa * mesh.positions[a * 3]
+        + wb * mesh.positions[b * 3]
+        + wc * mesh.positions[c * 3];
+      const y = wa * mesh.positions[a * 3 + 1]
+        + wb * mesh.positions[b * 3 + 1]
+        + wc * mesh.positions[c * 3 + 1];
+      const z = wa * mesh.positions[a * 3 + 2]
+        + wb * mesh.positions[b * 3 + 2]
+        + wc * mesh.positions[c * 3 + 2];
+      maxError = Math.max(maxError, Math.abs(Math.hypot(x, y, z) - radius));
+    }
+  }
+  return maxError;
+}
+
 describe('decimation', () => {
   const solid = SOLIDS.sphere(25);
   const source = buildIndexedMesh(marchingCubes(solid.sdf, solid.bounds, 64, 0));
@@ -70,6 +98,18 @@ describe('decimation', () => {
     expect(tight.rejectedError).toBeGreaterThan(0);
     expect(tight.mesh.triangleCount).toBeGreaterThan(loose.mesh.triangleCount);
   });
+
+  it.each([0.2, 0.05])(
+    'keeps sampled sphere deviation within the %fmm source-plane bound',
+    (maxError) => {
+      const baseline = maxSphereRadialError(source, 25);
+      const result = decimateMesh(source, { targetRatio: 0.05, maxError });
+      const simplified = maxSphereRadialError(result.mesh, 25);
+
+      expect(result.rejectedError).toBeGreaterThan(0);
+      expect(simplified - baseline).toBeLessThanOrEqual(maxError);
+    },
+  );
 
   it('holds up on real lattice geometry, not just a smooth solid', () => {
     const sdf = buildSphereLattice(25, { ...DEFAULT_PARAMS, escapeHoles: false });
