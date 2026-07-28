@@ -35,6 +35,8 @@ export interface ValidationWorkerMessage {
   meshTriCount?: number;
   keepOutTris?: number[];
   keepInTris?: number[];
+  /** Set when the requested feature width is smaller than the sample grid. */
+  thinFilterSkipped?: string;
   surfaceSamplePositions?: Float32Array;
   surfaceSampleNormals?: Float32Array;
   surfaceSampleHoleScales?: Float32Array;
@@ -44,11 +46,6 @@ export interface ValidationWorkerResponse {
   type: 'progress' | 'result' | 'error';
   message?: string;
   validation?: ValidationResult;
-}
-
-function withThinSectionFilter(sdf: SdfFunction, filter: number): SdfFunction {
-  if (filter <= 0) return sdf;
-  return (x, y, z) => sdf(x, y, z) + filter;
 }
 
 function unpackSurfaceSamples(
@@ -146,6 +143,7 @@ function runProceduralValidation(
   if (msg.params.processPreset === 'FDM' && msg.params.variant === 'implicit_conformal') {
     warnings.push('FDM with open lattice exterior can be difficult to print');
   }
+  if (msg.thinFilterSkipped) warnings.push(msg.thinFilterSkipped);
 
   return {
     passed: outerDeviation.passed && minThickness.passed && manifold.passed && disconnected.passed,
@@ -180,7 +178,9 @@ self.onmessage = (event: MessageEvent<ValidationWorkerMessage>) => {
       const baseSdf = isSurfacePolygon && surfaceSamples.length > 0
         ? buildSurfaceHexLattice(objectSdf, msg.params, surfaceSamples)
         : latticeSdf(msg.params);
-      validation = runProceduralValidation(msg, withThinSectionFilter(baseSdf, msg.params.thinSectionFilter));
+      // Opening is applied to the sampled generation field. Replaying the old
+      // pointwise erosion here would validate geometry that was not produced.
+      validation = runProceduralValidation(msg, baseSdf);
     } else {
       const bvh = new MeshBVH(msg.meshPositions!, msg.meshNormals!, msg.meshTriCount!);
       const objectSdf = (x: number, y: number, z: number) => bvh.signedDistance([x, y, z] as Vec3);
@@ -194,11 +194,12 @@ self.onmessage = (event: MessageEvent<ValidationWorkerMessage>) => {
         });
       validation = runValidation(
         result,
-        withThinSectionFilter(baseSdf, msg.params.thinSectionFilter),
+        baseSdf,
         msg.params,
         bvh,
         null
       );
+      if (msg.thinFilterSkipped) validation.warnings.push(msg.thinFilterSkipped);
     }
 
     postMessage({ type: 'result', validation } as ValidationWorkerResponse);
