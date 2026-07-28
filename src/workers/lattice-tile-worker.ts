@@ -15,11 +15,6 @@ type WorkerPostMessage = (message: unknown, transfer: Transferable[]) => void;
 
 const postWorkerMessage = self.postMessage.bind(self) as WorkerPostMessage;
 
-function withThinSectionFilter(sdf: SdfFunction, filter: number): SdfFunction {
-  if (filter <= 0) return sdf;
-  return (x, y, z) => sdf(x, y, z) + filter;
-}
-
 function buildShapeSdf(msg: LatticeTileJob): SdfFunction {
   switch (msg.shape as SampleShape) {
     case 'sphere':
@@ -41,8 +36,14 @@ self.onmessage = (event: MessageEvent<LatticeTileJob>) => {
 
   try {
     const start = performance.now();
-    const sdf = withThinSectionFilter(buildShapeSdf(msg), msg.params.thinSectionFilter);
-    const result = marchingCubesRectangular(sdf, msg.bounds, msg.cells, 0);
+    // The host disables tiling whenever morphological opening is active,
+    // because the distance transform must see the complete volume.
+    const result = marchingCubesRectangular(
+      buildShapeSdf(msg),
+      msg.bounds,
+      msg.cells,
+      0,
+    );
     const response: LatticeTileResponse = {
       type: 'result',
       tileId: msg.tileId,
