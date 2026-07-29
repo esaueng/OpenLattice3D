@@ -237,7 +237,9 @@ function GizmoCameraReset({ view, signal }: { view: GizmoViewRequest | null; sig
     sampleShape: s.sampleShape,
     resultMesh: s.resultMesh,
     viewMode: s.viewMode,
+    setViewerCameraState: s.setViewerCameraState,
   })));
+  const setViewerCameraState = store.setViewerCameraState;
 
   useEffect(() => {
     if (!view) return;
@@ -263,7 +265,18 @@ function GizmoCameraReset({ view, signal }: { view: GizmoViewRequest | null; sig
     camera.updateMatrixWorld();
     if (camera instanceof THREE.PerspectiveCamera || camera instanceof THREE.OrthographicCamera) camera.updateProjectionMatrix();
 
-    return finishOrbitControlsAfterCameraReset(resetSession, center);
+    const cleanupControls = finishOrbitControlsAfterCameraReset(resetSession, center);
+    if (typeof window === 'undefined') return cleanupControls;
+
+    const frameId = window.requestAnimationFrame(() => {
+      const cameraState = captureViewerCameraState(camera, controls);
+      if (cameraState) setViewerCameraState(cameraState);
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      cleanupControls?.();
+    };
   }, [
     view,
     signal,
@@ -275,6 +288,7 @@ function GizmoCameraReset({ view, signal }: { view: GizmoViewRequest | null; sig
     store.sampleShape,
     store.resultMesh,
     store.viewMode,
+    setViewerCameraState,
   ]);
 
   return null;
@@ -822,9 +836,12 @@ function AutoFit() {
     sphereRadius: s.sphereRadius,
     sampleShape: s.sampleShape,
     viewportResetSignal: s.viewportResetSignal,
+    viewerCameraState: s.viewerCameraState,
   })));
 
   useEffect(() => {
+    if (isValidViewerCameraState(store.viewerCameraState)) return;
+
     const resetSession = prepareOrbitControlsForCameraReset(controls);
     const mesh = store.originalMesh;
     let bounds = new THREE.Box3().setFromCenterAndSize(
@@ -855,6 +872,7 @@ function AutoFit() {
     store.sphereRadius,
     store.sampleShape,
     store.viewportResetSignal,
+    store.viewerCameraState,
     camera,
     controls,
     canvasSize.width,
