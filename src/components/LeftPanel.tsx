@@ -15,6 +15,7 @@ import { parseProjectFile } from '../utils/project-file';
 import { isSheetType } from '../geometry/lattice';
 import { SAMPLE_SHAPE_INFO } from '../store/useStore';
 import type { LatticeGenerationControls } from '../hooks/useLatticeGeneration';
+import { boundedNumberInput } from '../utils/numeric-input';
 import { RightPanel } from './RightPanel';
 
 type LeftPanelProps = {
@@ -258,7 +259,9 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
                   max={100}
                   step={0.5}
                   value={store.brushRadius}
-                  onChange={(e) => store.setBrushRadius(Number.parseFloat(e.target.value) || 0)}
+                  onChange={(e) => store.setBrushRadius(
+                    boundedNumberInput(e.target.value, store.brushRadius, 0, 100),
+                  )}
                 />
               </div>
               <div className="info-block">Drag on the imported model to paint. Hold Alt to erase.</div>
@@ -275,7 +278,14 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
                 max={100}
                 step={0.5}
                 value={store.params.keepInDepth}
-                onChange={(e) => store.updateParams({ keepInDepth: Number.parseFloat(e.target.value) || 3 })}
+                onChange={(e) => store.updateParams({
+                  keepInDepth: boundedNumberInput(
+                    e.target.value,
+                    store.params.keepInDepth,
+                    0.1,
+                    100,
+                  ),
+                })}
               />
             </div>
           )}
@@ -343,7 +353,9 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
               title="Controls overall lattice spacing. Larger values create bigger cells."
               value={store.params.cellSize}
               min={2} max={50} step={0.5}
-              onChange={(e) => store.updateParams({ cellSize: parseFloat(e.target.value) || 8 })}
+              onChange={(e) => store.updateParams({
+                cellSize: boundedNumberInput(e.target.value, store.params.cellSize, 2, 50),
+              })}
             />
           </div>
 
@@ -380,7 +392,9 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
                 title="Depth of the generated lattice band from the outer surface."
                 value={store.params.surfaceDepth}
                 min={1} max={50} step={0.5}
-                onChange={(e) => store.updateParams({ surfaceDepth: parseFloat(e.target.value) || 8 })}
+                onChange={(e) => store.updateParams({
+                  surfaceDepth: boundedNumberInput(e.target.value, store.params.surfaceDepth, 1, 50),
+                })}
               />
             </div>
           )}
@@ -394,7 +408,9 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
                 title="Thickness of the outer shell retained around the lattice."
                 value={store.params.shellThickness}
                 min={0.3} max={10} step={0.1}
-                onChange={(e) => store.updateParams({ shellThickness: parseFloat(e.target.value) || 1.5 })}
+                onChange={(e) => store.updateParams({
+                  shellThickness: boundedNumberInput(e.target.value, store.params.shellThickness, 0.3, 10),
+                })}
               />
             </div>
           )}
@@ -433,7 +449,14 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
                       type="number"
                       value={store.params.escapeHoleDiameter}
                       min={0.5} max={50} step={0.5}
-                      onChange={(e) => store.updateParams({ escapeHoleDiameter: parseFloat(e.target.value) || 5 })}
+                      onChange={(e) => store.updateParams({
+                        escapeHoleDiameter: boundedNumberInput(
+                          e.target.value,
+                          store.params.escapeHoleDiameter,
+                          0.5,
+                          50,
+                        ),
+                      })}
                     />
                   </div>
                   <div className="row">
@@ -443,7 +466,14 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
                       type="number"
                       value={store.params.escapeHoleCount}
                       min={1} max={100} step={1}
-                      onChange={(e) => store.updateParams({ escapeHoleCount: Math.max(1, parseInt(e.target.value) || 1) })}
+                      onChange={(e) => store.updateParams({
+                        escapeHoleCount: Math.trunc(boundedNumberInput(
+                          e.target.value,
+                          store.params.escapeHoleCount,
+                          1,
+                          100,
+                        )),
+                      })}
                     />
                   </div>
                 </>
@@ -460,7 +490,9 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
                 title="Thickness of sheet-style TPMS surfaces."
                 value={store.params.wallThickness}
                 min={0.3} max={5} step={0.1}
-                onChange={(e) => store.updateParams({ wallThickness: parseFloat(e.target.value) || 1.0 })}
+                onChange={(e) => store.updateParams({
+                  wallThickness: boundedNumberInput(e.target.value, store.params.wallThickness, 0.3, 5),
+                })}
               />
             </div>
           ) : (
@@ -472,7 +504,9 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
                 title="Diameter of strut members for strut-based lattices."
                 value={store.params.strutDiameter}
                 min={0.3} max={5} step={0.1}
-                onChange={(e) => store.updateParams({ strutDiameter: parseFloat(e.target.value) || 1.0 })}
+                onChange={(e) => store.updateParams({
+                  strutDiameter: boundedNumberInput(e.target.value, store.params.strutDiameter, 0.3, 5),
+                })}
               />
             </div>
           )}
@@ -485,7 +519,9 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
               title="Minimum manufacturable feature size target used in validation."
               value={store.params.minFeatureSize}
               min={0.3} max={5} step={0.1}
-              onChange={(e) => store.updateParams({ minFeatureSize: parseFloat(e.target.value) || 0.8 })}
+              onChange={(e) => store.updateParams({
+                minFeatureSize: boundedNumberInput(e.target.value, store.params.minFeatureSize, 0.3, 5),
+              })}
             />
           </div>
 
@@ -497,7 +533,9 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
               title="Maximum allowed outer-surface deviation versus the source mesh."
               value={store.params.toleranceMm}
               min={0.05} max={2} step={0.05}
-              onChange={(e) => store.updateParams({ toleranceMm: parseFloat(e.target.value) || 0.2 })}
+              onChange={(e) => store.updateParams({
+                toleranceMm: boundedNumberInput(e.target.value, store.params.toleranceMm, 0.05, 2),
+              })}
             />
           </div>
 
