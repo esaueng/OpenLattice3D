@@ -40,14 +40,14 @@ type DemoTileState = {
   error?: string;
 };
 
-function DemoTileViewer({ tile, viewMode, clipPlane, selectedLatticeType, onSelectLatticeType }: {
+function DemoTileViewer({ tile, viewMode, clipPlane, placeholder, selectedLatticeType, onSelectLatticeType }: {
   tile: DemoTileState;
   viewMode: 'original' | 'lattice' | 'cross_section' | 'xray';
   clipPlane: ClipPlaneState;
+  placeholder: TriangleMesh;
   selectedLatticeType: LatticeType;
   onSelectLatticeType: (type: LatticeType) => void;
 }) {
-  const placeholder = useMemo(() => generateSampleMesh('sphere', DEMO_VIEW_TARGET_RADIUS), []);
   const placeholderGeometry = useDisposable(useMemo(() => {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(placeholder.positions, 3));
@@ -79,7 +79,7 @@ function DemoTileViewer({ tile, viewMode, clipPlane, selectedLatticeType, onSele
         <directionalLight position={[40, 40, 40]} intensity={0.8} />
         {showPlaceholder ? (
           <mesh geometry={placeholderGeometry}>
-            <meshPhongMaterial color="#6d7ea5" transparent opacity={0.45} side={THREE.DoubleSide} />
+            <meshPhongMaterial color="#6d7ea5" side={THREE.DoubleSide} />
           </mesh>
         ) : viewMode === 'cross_section' ? (
           <CrossSectionView result={tile.result!} clip={clipPlane} />
@@ -126,6 +126,14 @@ export function DemoGridView({ params, demoParamsByType, runId, viewMode, clipPl
     ? `mesh:${sourceMesh.triCount}:${sourceMesh.positions.length}:${sourceMesh.normals.length}`
     : `shape:${sampleShape ?? 'none'}:${sphereMode ? 1 : 0}:${sphereRadius}`,
   [sampleShape, sourceMesh, sphereMode, sphereRadius]);
+  const placeholder = useMemo(() => normalizeDemoResult(
+    sourceMesh ?? (
+      sphereMode && sampleShape
+        ? generateSampleMesh(sampleShape, sphereRadius)
+        : generateSampleMesh('sphere', DEMO_VIEW_TARGET_RADIUS)
+    ),
+    DEMO_VIEW_TARGET_RADIUS,
+  ), [sampleShape, sourceMesh, sphereMode, sphereRadius]);
 
   useEffect(() => { latestParamsRef.current = params; }, [params]);
   useEffect(() => { latestDemoParamsRef.current = demoParamsByType; }, [demoParamsByType]);
@@ -245,6 +253,7 @@ export function DemoGridView({ params, demoParamsByType, runId, viewMode, clipPl
           tile={tile}
           viewMode={viewMode}
           clipPlane={clipPlane}
+          placeholder={placeholder}
           selectedLatticeType={selectedLatticeType}
           onSelectLatticeType={onSelectLatticeType}
         />

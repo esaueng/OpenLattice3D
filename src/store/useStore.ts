@@ -415,8 +415,10 @@ export const useStore = create<AppState>((set) => ({
     meshFileName: fileName,
     sampleShape: null,
     sphereMode: false,
+    selectionMode: 'none',
     resultMesh: null,
     validation: null,
+    viewMode: 'original',
     keepOutTris: new Set(),
     keepInTris: new Set(),
     selectionUndo: [],
@@ -424,6 +426,7 @@ export const useStore = create<AppState>((set) => ({
     selectionStrokeStart: null,
     demoParamsByType: {},
     viewerCameraState: null,
+    demoModeActive: false,
   }),
 
   setMeshRepaired: (repaired) => set((s) => ({
@@ -438,8 +441,10 @@ export const useStore = create<AppState>((set) => ({
     originalMesh: null,
     meshInfo: null,
     meshFileName: SAMPLE_SHAPE_INFO[shape].fileName,
+    selectionMode: 'none',
     resultMesh: null,
     validation: null,
+    viewMode: 'original',
     keepOutTris: new Set(),
     keepInTris: new Set(),
     selectionUndo: [],
@@ -447,6 +452,7 @@ export const useStore = create<AppState>((set) => ({
     selectionStrokeStart: null,
     demoParamsByType: {},
     viewerCameraState: null,
+    demoModeActive: false,
     params: {
       ...DEFAULT_PARAMS,
       toleranceMm: 0.2,
@@ -465,8 +471,10 @@ export const useStore = create<AppState>((set) => ({
     originalMesh: null,
     meshInfo: null,
     meshFileName: `Sphere R=${radius}mm`,
+    selectionMode: 'none',
     resultMesh: null,
     validation: null,
+    viewMode: 'original',
     keepOutTris: new Set(),
     keepInTris: new Set(),
     selectionUndo: [],
@@ -474,6 +482,7 @@ export const useStore = create<AppState>((set) => ({
     selectionStrokeStart: null,
     demoParamsByType: {},
     viewerCameraState: null,
+    demoModeActive: false,
     params: {
       ...DEFAULT_PARAMS,
       toleranceMm: 0.2,
@@ -659,11 +668,17 @@ export const useStore = create<AppState>((set) => ({
 
   setViewerBackground: (color) => set({ viewerBackground: color }),
 
-  resetViewport: () => set((s) => ({ viewportResetSignal: s.viewportResetSignal + 1 })),
+  resetViewport: () => set((s) => ({
+    viewportResetSignal: s.viewportResetSignal + 1,
+    viewerCameraState: null,
+  })),
 
   setViewerCameraState: (cameraState) => set({ viewerCameraState: cameraState }),
 
-  setDemoModeActive: (active) => set({ demoModeActive: active }),
+  setDemoModeActive: (active) => set({
+    demoModeActive: active,
+    ...(active ? {} : { viewMode: 'original' as ViewMode }),
+  }),
 
   startDemoRun: () => set((s) => {
     const currentType = s.params.latticeType;
