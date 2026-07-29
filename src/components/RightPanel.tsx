@@ -2,6 +2,7 @@
 import { useStore } from '../store/useStore';
 import { useMemo } from 'react';
 import { massGrams, meshVolumeMm3, proceduralSolidVolumeMm3 } from '../geometry/mesh-stats';
+import { boundedNumberInput } from '../utils/numeric-input';
 
 export function RightPanel() {
   const validation = useStore((s) => s.validation);
@@ -117,7 +118,9 @@ export function RightPanel() {
               step={0.01}
               value={density}
               title="Enter a material density to enable mass estimation; zero disables it."
-              onChange={(event) => updateParams({ materialDensityGPerCm3: Math.max(0, Number(event.target.value) || 0) })}
+              onChange={(event) => updateParams({
+                materialDensityGPerCm3: boundedNumberInput(event.target.value, density, 0, 100),
+              })}
             />
           </div>
         </section>

@@ -91,3 +91,63 @@ describe('project restoration', () => {
     expect(state.selectionUndo).toEqual([]);
   });
 });
+
+describe('workspace transitions', () => {
+  beforeEach(() => {
+    useStore.getState().resetProject();
+  });
+
+  it('opens a newly selected sample in a clean original-model view', () => {
+    useStore.getState().setViewMode('xray');
+    useStore.getState().setSelectionMode('keep_in');
+    useStore.getState().setDemoModeActive(true);
+
+    useStore.getState().setSampleShape('cylinder');
+
+    const state = useStore.getState();
+    expect(state.viewMode).toBe('original');
+    expect(state.selectionMode).toBe('none');
+    expect(state.demoModeActive).toBe(false);
+    expect(state.resultMesh).toBeNull();
+  });
+
+  it('opens an imported mesh in a clean original-model view', () => {
+    const mesh = generateCubeMesh(10);
+    useStore.getState().setViewMode('lattice');
+    useStore.getState().setSelectionMode('keep_out');
+    useStore.getState().setDemoModeActive(true);
+
+    useStore.getState().setOriginalMesh(mesh, analyzeMesh(mesh), 'cube.stl');
+
+    const state = useStore.getState();
+    expect(state.viewMode).toBe('original');
+    expect(state.selectionMode).toBe('none');
+    expect(state.demoModeActive).toBe(false);
+  });
+
+  it('returns to the source model when multiview closes', () => {
+    useStore.getState().setSampleShape('cube');
+    useStore.getState().startDemoRun();
+    expect(useStore.getState().viewMode).toBe('lattice');
+
+    useStore.getState().setDemoModeActive(false);
+
+    expect(useStore.getState().viewMode).toBe('original');
+  });
+
+  it('clears a stale persisted camera when the viewport is reset', () => {
+    const beforeSignal = useStore.getState().viewportResetSignal;
+    useStore.getState().setViewerCameraState({
+      position: [10, 10, 10],
+      target: [0, 0, 0],
+      up: [0, 0, 1],
+      zoom: 1,
+      savedAt: Date.now(),
+    });
+
+    useStore.getState().resetViewport();
+
+    expect(useStore.getState().viewerCameraState).toBeNull();
+    expect(useStore.getState().viewportResetSignal).toBe(beforeSignal + 1);
+  });
+});
