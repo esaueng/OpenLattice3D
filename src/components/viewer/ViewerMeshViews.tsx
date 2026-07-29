@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFrame, useThree, type ThreeEvent } from '@react-three/fiber';
 import * as THREE from 'three';
+import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { TriangleMesh } from '../../geometry/stl-parser';
 import type { MarchingCubesResult } from '../../geometry/marching-cubes';
 import type { ClipPlaneState } from '../../store/useStore';
@@ -53,13 +54,18 @@ export function useDisposable<T extends { dispose: () => void }>(resource: T): T
   return resource;
 }
 
-export function generateSampleMesh(shape: SampleShape, radius: number): TriangleMesh {
+export function generateSampleMesh(
+  shape: SampleShape,
+  radius: number,
+  radialSegments?: number,
+  minorSegments?: number,
+): TriangleMesh {
   switch (shape) {
-    case 'sphere': return generateSphereMesh(radius, 32);
+    case 'sphere': return generateSphereMesh(radius, radialSegments ?? 32);
     case 'cube': return generateCubeMesh(30);
     case 'cylinder': return generateCylinderMesh(SAMPLE_CYLINDER_RADIUS_MM, SAMPLE_CYLINDER_HEIGHT_MM, 32);
-    case 'torus': return generateTorusMesh(20, 8, 32, 16);
-    case 'capsule': return generateCapsuleMesh(12, 30, 24);
+    case 'torus': return generateTorusMesh(20, 8, radialSegments ?? 32, minorSegments ?? 16);
+    case 'capsule': return generateCapsuleMesh(12, 30, radialSegments ?? 24);
   }
 }
 
@@ -264,8 +270,6 @@ function CylinderSampleView({
         <meshPhongMaterial
           vertexColors
           side={THREE.DoubleSide}
-          transparent
-          opacity={0.5}
           polygonOffset
           polygonOffsetFactor={1}
           polygonOffsetUnits={1}
@@ -379,21 +383,32 @@ function GenericSampleMeshView({ shape, radius, keepOutTris, keepInTris }: {
   keepOutTris: Set<number>;
   keepInTris: Set<number>;
 }) {
+  const projectedRadius = shape === 'torus' ? 28 : shape === 'capsule' ? 12 : radius;
+  const radialSegments = Math.min(useAdaptiveRadialSegments(projectedRadius), 128);
+  const minorSegments = Math.min(
+    useAdaptiveRadialSegments(shape === 'torus' ? 8 : projectedRadius),
+    64,
+  );
   const geometry = useDisposable(useMemo(() => {
-    const mesh = generateSampleMesh(shape, radius);
+    const mesh = generateSampleMesh(shape, radius, radialSegments, minorSegments);
     const next = new THREE.BufferGeometry();
     next.setAttribute('position', new THREE.BufferAttribute(mesh.positions, 3));
     next.setAttribute(
       'color',
       new THREE.BufferAttribute(faceColors(mesh.triCount, keepOutTris, keepInTris), 3),
     );
-    next.computeVertexNormals();
-    return next;
-  }, [keepInTris, keepOutTris, radius, shape]));
+    if (shape === 'cube') {
+      next.computeVertexNormals();
+      return next;
+    }
+    const smoothed = mergeVertices(next);
+    smoothed.computeVertexNormals();
+    return smoothed;
+  }, [keepInTris, keepOutTris, minorSegments, radialSegments, radius, shape]));
 
   return (
     <mesh geometry={geometry}>
-      <meshPhongMaterial vertexColors side={THREE.DoubleSide} transparent opacity={0.5} />
+      <meshPhongMaterial vertexColors side={THREE.DoubleSide} />
     </mesh>
   );
 }
