@@ -21,7 +21,7 @@ function AppBootShell() {
       <header className="topbar">
         <div className="brand" aria-label="Open Lattice 3D">
           <span className="brand-mark" aria-hidden="true">
-            <img src="/vite.svg" alt="" />
+            <img src="/favicon.svg" alt="" />
           </span>
           <span>OpenLattice3D</span>
           <span className="version-chip">beta</span>
@@ -111,7 +111,7 @@ function HydratedApp() {
       <header className="topbar">
         <div className="brand" aria-label="Open Lattice 3D">
           <span className="brand-mark" aria-hidden="true">
-            <img src="/vite.svg" alt="" />
+            <img src="/favicon.svg" alt="" />
           </span>
           <span>OpenLattice3D</span>
           <span className="version-chip">beta</span>
