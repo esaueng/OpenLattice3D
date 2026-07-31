@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">
+  <title>OpenLattice3D</title>
+  <rect width="48" height="48" rx="11" fill="#0b0f14"/>
+  <g transform="translate(4 4)" stroke-linecap="round" stroke-linejoin="round">
+    <!-- faint faces so the volume reads before the struts do -->
+    <path d="M20 20.1 5 11.4 20 2.7 35 11.4Z" fill="#bcd7f5" fill-opacity=".08"/>
+    <path d="M20 20.1 5 11.4 5 28.5 20 37.2Z" fill="#bcd7f5" fill-opacity=".05"/>
+    <path d="M20 20.1 35 11.4 35 28.5 20 37.2Z" fill="#bcd7f5" fill-opacity=".05"/>
+    <!-- body-centred struts: every visible corner ties to the centre node -->
+    <g fill="none" stroke="#bcd7f5" stroke-width="1" stroke-opacity=".6">
+      <path d="M20 19.95 20 2.7M20 19.95 5 11.4M20 19.95 35 11.4M20 19.95 5 28.5M20 19.95 35 28.5M20 19.95 20 37.2"/>
+      <path d="M20 19.95 20 20.1"/>
+    </g>
+    <!-- cube edges -->
+    <g fill="none" stroke="#e3efff" stroke-width="1.6">
+      <path d="M20 2.8 35 11.4v17.2L20 37.2 5 28.6V11.4Z"/>
+      <path d="M20 20.1 5 11.4M20 20.1 35 11.4M20 20.1 20 37.2"/>
+    </g>
+    <!-- corner nodes and the accent centre node -->
+    <g fill="#bcd7f5">
+      <circle cx="20" cy="2.8" r="1.4"/>
+      <circle cx="5" cy="11.4" r="1.4"/>
+      <circle cx="35" cy="11.4" r="1.4"/>
+      <circle cx="5" cy="28.5" r="1.4"/>
+      <circle cx="35" cy="28.5" r="1.4"/>
+      <circle cx="20" cy="37.2" r="1.4"/>
+      <circle cx="20" cy="20.1" r="1.4"/>
+    </g>
+    <circle cx="20" cy="19.95" r="3" fill="#4da3ff"/>
+  </g>
+</svg>
