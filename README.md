@@ -1,17 +1,34 @@
 # OpenLattice3D
 
-A web-based tool for generating 3D-printable lattice structures inside arbitrary meshes. Supports twelve lattice types — TPMS sheets (Gyroid, Schwarz P, Schwarz D, Neovius, IWP), strut lattices (BCC, Octet, Diamond, Hexagon, Triangle), and stochastic structures (Voronoi foam, Spinodal) — with SDF-based geometry processing and marching cubes mesh extraction. All computation runs client-side in Web Workers.
+A browser-based tool for generating 3D-printable lattice structures inside arbitrary meshes. It supports twelve lattice types — TPMS sheets (Gyroid, Schwarz P, Schwarz D, Neovius, IWP), strut lattices (BCC, Octet, Diamond, Hexagon, Triangle), and stochastic structures (Voronoi foam, Spinodal) — with SDF-based geometry processing and marching-cubes mesh extraction. All model processing runs locally in browser Web Workers; no model-upload service is required.
+
+**Live app:** [openlattice3d.com](https://openlattice3d.com) · **Health check:** [`GET /health`](https://openlattice3d.com/health)
+
+## Main Features
+
+- Import binary or ASCII STL meshes, or start from a printable procedural sample shape.
+- Generate twelve TPMS, strut, and stochastic lattice families with adjustable cell size, shell, feature, drainage-hole, and resolution parameters.
+- Keep work local: generation and validation run in browser Web Workers, and projects can be saved and restored as JSON.
+- Check printable-mesh properties including surface deviation, minimum thickness, manifoldness, watertightness, and connected components.
+- Export validated results as STL, 3MF, or OBJ, with optional tolerance-bounded mesh simplification.
+- Compare all twelve lattice types side by side before selecting one to export.
+
+## Requirements
+
+- Node.js 22 (the CI baseline uses Node 22)
+- npm 10 or newer
+- A modern desktop browser with WebGL support
 
 ## Quick Start
 
 ```bash
-npm install
+npm ci
 npm run dev
 ```
 
 Open http://127.0.0.1:5176 in your browser.
 
-## Development
+## Local Development
 
 ```bash
 npm run dev        # Vite dev server
@@ -21,17 +38,50 @@ npm test           # Vitest unit tests (geometry core)
 npm run build      # Typecheck + production build into dist/
 ```
 
+`npm run dev` binds only to `127.0.0.1`. Use the generated `dist/` directory
+with `npm run preview` to inspect the production bundle locally.
+
 ## Deploy to Cloudflare Workers
 
-This app can be deployed as a static Workers site using Wrangler assets.
+Production is a static Cloudflare Workers site. Cloudflare serves the Vite
+bundle from `dist/`; the small Worker in `worker/index.ts` provides the
+uncached `GET /health` response used by uptime monitors. The application has
+no configured runtime bindings or application secrets.
 
 ```bash
-npm install
+npm ci
 npm run build
 npx wrangler deploy
 ```
 
-The Worker serves files from `dist/` and falls back to `index.html` for client-side routing.
+Before deploying your own copy, change the Worker name and routes in
+`wrangler.jsonc`; do not reuse the public project domains. Authenticate
+Wrangler using your Cloudflare account (for example, `npx wrangler login`) and
+keep account credentials out of the repository. After deployment, verify both
+the app and the health endpoint:
+
+```bash
+curl --fail --show-error --silent https://YOUR_DOMAIN/
+curl --fail --show-error --silent https://YOUR_DOMAIN/health
+```
+
+## Self-Hosting
+
+This is a client-side application: build it with `npm ci && npm run build`,
+then serve the resulting `dist/` directory over HTTPS. For a non-Cloudflare
+host, configure all of the following:
+
+1. Rewrite unknown application routes to `index.html` so the single-page app can load.
+2. Send `Cross-Origin-Opener-Policy: same-origin` and
+   `Cross-Origin-Embedder-Policy: require-corp` headers for application assets.
+3. Provide `GET /health` as a `200` JSON response (for example,
+   `{"status":"ok"}`) with `Cache-Control: no-store`; do not rewrite this
+   request to `index.html`.
+
+The supplied `public/_headers` file configures the required cross-origin
+isolation headers on Cloudflare. Other hosts use their own equivalent header
+and rewrite configuration. Avoid third-party embedded assets unless they send
+headers compatible with the isolation policy described below.
 
 ### Cross-origin isolation
 
