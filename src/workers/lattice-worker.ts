@@ -29,6 +29,11 @@ import {
 } from './tiled-generation';
 import { estimateGenerationTimings, formatDuration } from './generation-estimate';
 import { removeDisconnectedFragments } from './mesh-cleanup';
+import {
+  addMeshTriangleArea,
+  surfaceSampleCount,
+  validateMeshPositions,
+} from '../geometry/mesh-limits';
 
 type SdfFunction = ((x: number, y: number, z: number) => number) & Partial<GridSdfSampler>;
 type WorkerPostMessage = (message: unknown, transfer: Transferable[]) => void;
@@ -234,6 +239,7 @@ function buildMeshSampler(
   triCount: number,
   keepOutTris: Set<number>
 ): MeshSampler | null {
+  validateMeshPositions(positions);
   const areas = new Float32Array(triCount);
   let totalArea = 0;
   for (let i = 0; i < triCount; i++) {
@@ -242,7 +248,7 @@ function buildMeshSampler(
     const a: Vec3 = [positions[o], positions[o + 1], positions[o + 2]];
     const b: Vec3 = [positions[o + 3], positions[o + 4], positions[o + 5]];
     const c: Vec3 = [positions[o + 6], positions[o + 7], positions[o + 8]];
-    totalArea += triangleArea(a, b, c);
+    totalArea = addMeshTriangleArea(totalArea, triangleArea(a, b, c));
     areas[i] = totalArea;
   }
   if (totalArea <= 1e-6) return null;
@@ -823,8 +829,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
           const useSharedMeshSamples = meshBufferKind === 'shared';
           const meshSampler = buildMeshSampler(positions, normals, triCount, keepOutSet);
           const totalArea = meshSampler?.totalArea ?? 0;
-          const spacingArea = params.cellSize * params.cellSize * 0.55;
-          const sampleCount = Math.max(60, Math.round(totalArea / spacingArea));
+          const sampleCount = surfaceSampleCount(totalArea, params.cellSize);
           if (meshSampler) {
             surfaceSamples = await generatePoissonSamplesParallel(
               (count) => ({
