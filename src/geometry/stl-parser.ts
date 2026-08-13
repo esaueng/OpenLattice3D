@@ -1,5 +1,6 @@
 // STL import/export: supports binary and ASCII STL
 import type { Vec3 } from './vec3';
+import { validateMeshPositions } from './mesh-limits';
 
 export interface TriangleMesh {
   positions: Float32Array;  // flat xyz, 3 floats per vertex, 9 per triangle
@@ -64,6 +65,7 @@ function parseBinarySTL(buffer: ArrayBuffer): TriangleMesh {
       positions[i * 9 + v * 3 + 2] = view.getFloat32(vOff + 8, true);
     }
   }
+  validateMeshPositions(positions);
   return { positions, normals, triCount };
 }
 
@@ -137,8 +139,10 @@ function parseASCIISTL(buffer: ArrayBuffer): TriangleMesh {
   }
 
   const triCount = normalValues.length / 3;
+  const positions = Float32Array.from(positionValues);
+  validateMeshPositions(positions);
   return {
-    positions: Float32Array.from(positionValues),
+    positions,
     normals: Float32Array.from(normalValues),
     triCount,
   };
