@@ -28,7 +28,6 @@ import {
   tileWorkerCount,
 } from './tiled-generation';
 import { estimateGenerationTimings, formatDuration } from './generation-estimate';
-import { removeDisconnectedFragments } from './mesh-cleanup';
 
 type SdfFunction = ((x: number, y: number, z: number) => number) & Partial<GridSdfSampler>;
 type WorkerPostMessage = (message: unknown, transfer: Transferable[]) => void;
@@ -901,15 +900,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
           if (cancelled) throw new Error('Cancelled');
           // Tiles are extracted open along their seams and merged here, so the
           // whole-surface repair belongs after the merge rather than per tile.
-          const cleanedTiles = removeDisconnectedFragments(rawTiledResult, 0.004);
-          const result = { ...cleanedTiles, ...closeBoundaryLoops(cleanedTiles).result };
-          if (result.removedTriangles > 0) {
-            postMessage({
-              type: 'progress',
-              progress: 0.9,
-              message: `Removed ${result.removedTriangles.toLocaleString()} disconnected fragment triangles`
-            } as WorkerResponse);
-          }
+          const result = closeBoundaryLoops(rawTiledResult).result;
           postMessage({
             type: 'progress',
             progress: 0.95,
@@ -1026,16 +1017,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         } as WorkerResponse);
       });
 
-      const cleaned = removeDisconnectedFragments(rawResult, 0.004);
-      // Fragment removal can reopen a closed surface, so repair after cleanup.
-      const result = { ...cleaned, ...closeBoundaryLoops(cleaned).result };
-      if (result.removedTriangles > 0) {
-        postMessage({
-          type: 'progress',
-          progress: 0.84,
-          message: `Removed ${result.removedTriangles.toLocaleString()} disconnected fragment triangles`
-        } as WorkerResponse);
-      }
+      const result = closeBoundaryLoops(rawResult).result;
 
       postMessage({ type: 'progress', progress: 0.95, message: 'Geometry ready' } as WorkerResponse);
 
