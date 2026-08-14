@@ -41,6 +41,10 @@ describe('parseSTL binary', () => {
     expect(() => parseSTL(makeBinarySTL([], 0))).toThrow(/no triangles/);
   });
 
+  it('rejects binary meshes with unreasonable coordinates', () => {
+    expect(() => parseSTL(makeBinarySTL([[[0, 0, 0], [1e20, 0, 0], [0, 1, 0]]]))).toThrow(/coordinate/);
+  });
+
   it('parses a binary STL whose header begins with "solid"', () => {
     const buffer = makeBinarySTL([UNIT_TRI]);
     new Uint8Array(buffer, 0, 5).set(new TextEncoder().encode('solid'));
