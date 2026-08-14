@@ -56,4 +56,23 @@ describe('OpenLattice3D project files', () => {
     if (restored.kind !== 'parameters') return;
     expect(restored.params).toEqual({ latticeType: 'bcc', cellSize: 9 });
   });
+
+  it('rejects project backgrounds that can load external CSS resources', () => {
+    const exported = createProjectFile({
+      params: DEFAULT_PARAMS,
+      source: { kind: 'sample', fileName: 'cube', shape: 'cube', sphereRadius: 25 },
+      keepOutTris: new Set(),
+      keepInTris: new Set(),
+      validation: null,
+      clipPlane: { axis: 'z', position: 0.5, flipped: false },
+      viewerBackground: '#000000',
+    });
+    (exported.viewer as Record<string, unknown>).background = 'url(https://attacker.example/pixel)';
+
+    const restored = parseProjectFile(exported);
+    expect(restored.kind).toBe('project');
+    if (restored.kind !== 'project') return;
+    expect(restored.viewerBackground).toBeUndefined();
+    expect(restored.warnings).toContain('Ignored invalid viewer background color');
+  });
 });
