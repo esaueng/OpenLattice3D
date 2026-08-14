@@ -28,6 +28,10 @@ import {
   tileWorkerCount,
 } from './tiled-generation';
 import { estimateGenerationTimings, formatDuration } from './generation-estimate';
+import {
+  addMeshTriangleArea,
+  validateMeshPositions,
+} from '../geometry/mesh-limits';
 import { surfaceSampleTargetCount } from './surface-sampling-limits';
 
 type SdfFunction = ((x: number, y: number, z: number) => number) & Partial<GridSdfSampler>;
@@ -215,6 +219,7 @@ function buildMeshSampler(
   triCount: number,
   keepOutTris: Set<number>
 ): MeshSampler | null {
+  validateMeshPositions(positions);
   const areas = new Float32Array(triCount);
   let totalArea = 0;
   for (let i = 0; i < triCount; i++) {
@@ -223,10 +228,7 @@ function buildMeshSampler(
     const a: Vec3 = [positions[o], positions[o + 1], positions[o + 2]];
     const b: Vec3 = [positions[o + 3], positions[o + 4], positions[o + 5]];
     const c: Vec3 = [positions[o + 6], positions[o + 7], positions[o + 8]];
-    const area = triangleArea(a, b, c);
-    if (!Number.isFinite(area)) throw new Error('Surface sampling rejected a mesh with non-finite triangle area');
-    totalArea += area;
-    if (!Number.isFinite(totalArea)) throw new Error('Surface sampling rejected a mesh with non-finite area');
+    totalArea = addMeshTriangleArea(totalArea, triangleArea(a, b, c));
     areas[i] = totalArea;
   }
   if (totalArea <= 1e-6) return null;
