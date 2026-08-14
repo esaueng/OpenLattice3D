@@ -22,18 +22,7 @@ type ShapeMessage = {
   minDistance: number;
 };
 
-type MeshMessage = {
-  mode: 'mesh';
-  positions: Float32Array;
-  normals: Float32Array;
-  bufferKind?: 'shared' | 'transfer';
-  triCount: number;
-  keepOutTris: number[];
-  targetCount: number;
-  minDistance: number;
-};
-
-type WorkerMessage = ShapeMessage | MeshMessage;
+type WorkerMessage = ShapeMessage;
 
 type WorkerResponse = {
   positions: Float32Array;
@@ -46,43 +35,8 @@ const postWorkerMessage = self.postMessage.bind(self) as WorkerPostMessage;
 
 function sampleResultTransferList(response: WorkerResponse): Transferable[] {
   // Surface sample outputs are generated inside this worker and transferred
-  // back to the lattice worker. Incoming mesh buffers are backend-owned copies.
+  // back to the lattice worker.
   return [response.positions.buffer, response.normals.buffer];
-}
-
-function triangleArea(a: Vec3, b: Vec3, c: Vec3): number {
-  const ab: Vec3 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
-  const ac: Vec3 = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
-  const cx = ab[1] * ac[2] - ab[2] * ac[1];
-  const cy = ab[2] * ac[0] - ab[0] * ac[2];
-  const cz = ab[0] * ac[1] - ab[1] * ac[0];
-  return 0.5 * Math.sqrt(cx * cx + cy * cy + cz * cz);
-}
-
-function pickTriangle(cumulativeAreas: Float32Array, totalArea: number): number {
-  const r = Math.random() * totalArea;
-  let lo = 0;
-  let hi = cumulativeAreas.length - 1;
-  while (lo < hi) {
-    const mid = Math.floor((lo + hi) / 2);
-    if (r <= cumulativeAreas[mid]) hi = mid;
-    else lo = mid + 1;
-  }
-  return lo;
-}
-
-function sampleTriangle(a: Vec3, b: Vec3, c: Vec3): Vec3 {
-  const r1 = Math.random();
-  const r2 = Math.random();
-  const sqrtR1 = Math.sqrt(r1);
-  const u = 1 - sqrtR1;
-  const v = sqrtR1 * (1 - r2);
-  const w = sqrtR1 * r2;
-  return [
-    a[0] * u + b[0] * v + c[0] * w,
-    a[1] * u + b[1] * v + c[1] * w,
-    a[2] * u + b[2] * v + c[2] * w,
-  ];
 }
 
 function sampleSurfacePointForShape(shape: SampleShape, params: ShapeSampleParams): SurfaceHexSample {
@@ -211,40 +165,10 @@ function generatePoissonSamples(
   return samples;
 }
 
-function meshSamplerFromMessage(msg: MeshMessage): (() => SurfaceHexSample) | null {
-  const keepOut = new Set(msg.keepOutTris);
-  const areas = new Float32Array(msg.triCount);
-  let totalArea = 0;
-  for (let i = 0; i < msg.triCount; i++) {
-    if (keepOut.has(i)) continue;
-    const o = i * 9;
-    const a: Vec3 = [msg.positions[o], msg.positions[o + 1], msg.positions[o + 2]];
-    const b: Vec3 = [msg.positions[o + 3], msg.positions[o + 4], msg.positions[o + 5]];
-    const c: Vec3 = [msg.positions[o + 6], msg.positions[o + 7], msg.positions[o + 8]];
-    totalArea += triangleArea(a, b, c);
-    areas[i] = totalArea;
-  }
-  if (totalArea <= 1e-6) return null;
-  return () => {
-    const triIndex = pickTriangle(areas, totalArea);
-    const o = triIndex * 9;
-    const a: Vec3 = [msg.positions[o], msg.positions[o + 1], msg.positions[o + 2]];
-    const b: Vec3 = [msg.positions[o + 3], msg.positions[o + 4], msg.positions[o + 5]];
-    const c: Vec3 = [msg.positions[o + 6], msg.positions[o + 7], msg.positions[o + 8]];
-    const pos = sampleTriangle(a, b, c);
-    const ni = triIndex * 3;
-    const normal = normalize([msg.normals[ni], msg.normals[ni + 1], msg.normals[ni + 2]]);
-    return { pos, normal };
-  };
-}
-
 self.onmessage = (ev: MessageEvent<WorkerMessage>) => {
   const msg = ev.data;
-  const sampler = msg.mode === 'shape'
-    ? () => sampleSurfacePointForShape(msg.shape, msg.params)
-    : meshSamplerFromMessage(msg);
-
-  const samples = sampler ? generatePoissonSamples(sampler, msg.targetCount, msg.minDistance) : [];
+  const sampler = () => sampleSurfacePointForShape(msg.shape, msg.params);
+  const samples = generatePoissonSamples(sampler, msg.targetCount, msg.minDistance);
   const outPos = new Float32Array(samples.length * 3);
   const outNrm = new Float32Array(samples.length * 3);
   for (let i = 0; i < samples.length; i++) {

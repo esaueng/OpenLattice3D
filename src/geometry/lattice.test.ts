@@ -5,6 +5,7 @@ import {
   buildLatticeEvaluator,
   buildSphereLattice,
   diamondStrutSDF,
+  hexagonPrismSDF,
   isSheetType,
   octetSDF,
   smoothMin,
@@ -128,6 +129,10 @@ describe('lattice field invariants', () => {
     const base = evaluate(...point);
     expect(evaluate(point[0] + L, point[1], point[2])).toBeCloseTo(base, 9);
     expect(evaluate(point[0], point[1] - L, point[2] + L)).toBeCloseTo(base, 9);
+  });
+
+  it('bounds the hex-cell search even when derived column indices overflow', () => {
+    expect(hexagonPrismSDF(Number.MAX_VALUE, 1, 0, 0.1, 1)).toBe(Infinity);
   });
 });
 
