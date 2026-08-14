@@ -375,9 +375,11 @@ function hexCellCenter(x: number, y: number, side: number): [number, number] {
   let bestY = 0;
   let bestDist = Infinity;
 
-  for (let row = approxRow - 1; row <= approxRow + 1; row++) {
+  for (let rowDelta = -1; rowDelta <= 1; rowDelta++) {
+    const row = approxRow + rowDelta;
     const rowOffset = (row % 2) * hexRadius;
-    for (let col = approxCol - 1; col <= approxCol + 1; col++) {
+    for (let colDelta = -1; colDelta <= 1; colDelta++) {
+      const col = approxCol + colDelta;
       const cx = col * hexWidth + rowOffset;
       const cy = row * verticalSpacing;
       const dx = x - cx;
@@ -395,8 +397,10 @@ function hexCellCenter(x: number, y: number, side: number): [number, number] {
 }
 
 export function hexagonPrismSDF(x: number, y: number, z: number, cellSize: number, strutDiameter: number): number {
+  if (![x, y, z, cellSize, strutDiameter].every(Number.isFinite) || cellSize <= 0) return Infinity;
   const r = strutDiameter / 2;
   const side = cellSize / SQRT3;
+  if (!Number.isFinite(x / side) || !Number.isFinite(y / side)) return Infinity;
   const [cx, cy] = hexCellCenter(x, y, side);
   const lx = x - cx;
   const ly = y - cy;

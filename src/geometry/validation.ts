@@ -117,8 +117,9 @@ function bisectCrossing(
 
 /**
  * Measure local wall thickness from the scalar-field gradient, not extracted
- * triangle winding. Both field crossings are bisection-refined, and the 1st
- * percentile drives pass/fail so one grazing cusp cannot dominate the result.
+ * triangle winding. Both field crossings are bisection-refined. The 1st
+ * percentile remains a representative measurement, while every measured ray
+ * must meet the required minimum for validation to pass.
  */
 export function checkMinThickness(
   sdf: (x: number, y: number, z: number) => number,
@@ -189,10 +190,11 @@ export function checkMinThickness(
     Math.floor(thicknesses.length * 0.01),
   );
   const minMeasured = thicknesses[percentileIndex];
+  const absoluteMin = thicknesses[0];
   return {
-    passed: minMeasured >= minRequired - 1e-3,
+    passed: absoluteMin >= minRequired - 1e-3,
     minMeasured,
-    absoluteMin: thicknesses[0],
+    absoluteMin,
     sampled: thicknesses.length,
   };
 }
