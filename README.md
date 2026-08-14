@@ -199,7 +199,7 @@ src/
     useLatticeGeneration.ts # Worker lifecycle for generation + validation
     useWorkspaceHotkeys.ts  # Keyboard shortcuts
   store/
-    useStore.ts             # Zustand global state + IndexedDB persistence
+    useStore.ts             # Zustand global state + preference-only persistence
   types/
     project.ts              # Data model, params, presets, param sanitization
   utils/
