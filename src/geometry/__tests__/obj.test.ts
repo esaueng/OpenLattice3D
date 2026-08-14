@@ -39,4 +39,15 @@ describe('OBJ export', () => {
   it('records the unit in a comment, since OBJ cannot declare one', () => {
     expect(text()).toContain('# units: millimeters');
   });
+
+  it('keeps untrusted source names inside a single comment record', () => {
+    const malicious = new TextDecoder().decode(buildObj(mesh, {
+      ...OPTIONS,
+      meshFileName: 'part.stl\nv 999 999 999\nmtllib https://attacker.example/file.mtl',
+    }));
+    const lines = malicious.split('\n');
+    expect(lines[1]).toBe('# source: part.stl\\nv 999 999 999\\nmtllib https://attacker.example/file.mtl');
+    expect(lines.filter((line) => line.startsWith('v '))).toHaveLength(buildIndexedMesh(mesh).vertexCount);
+    expect(lines).not.toContain('mtllib https://attacker.example/file.mtl');
+  });
 });
