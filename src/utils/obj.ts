@@ -7,6 +7,7 @@ import { buildIndexedMesh } from '../geometry/mesh-indexing';
 import type { IndexedMesh } from '../geometry/mesh-indexing';
 import type { MarchingCubesResult } from '../geometry/marching-cubes';
 import type { LatticeParams } from '../types/project';
+import { escapeControlCharacters } from './text-safety';
 
 function coord(value: number): string {
   return Number(value.toFixed(4)).toString();
@@ -37,7 +38,7 @@ export function buildObj(
   };
 
   write(`# OpenLattice3D\n`);
-  write(`# source: ${options.meshFileName || 'lattice'}\n`);
+  write(`# source: ${escapeControlCharacters(options.meshFileName || 'lattice')}\n`);
   write(`# lattice: ${options.params.latticeType}, cell ${options.params.cellSize}mm\n`);
   // OBJ has no unit declaration; state it in a comment so a reader at least has
   // a chance of noticing.

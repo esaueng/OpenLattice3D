@@ -1,11 +1,47 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { analyzeMesh, generateCubeMesh } from '../geometry/mesh-analysis';
 import { DEFAULT_PARAMS } from '../types/project';
-import { useStore } from './useStore';
+import { buildPersistedAppState, hydrateFromSnapshot, useStore } from './useStore';
 
 describe('persistence hydration', () => {
   it('releases the boot gate when browser storage is unavailable', async () => {
     await expect.poll(() => useStore.getState().persistenceHydrated).toBe(true);
+  });
+
+  it('persists preferences without source or generated mesh data', () => {
+    const mesh = generateCubeMesh(10);
+    useStore.getState().setOriginalMesh(mesh, analyzeMesh(mesh), 'private-part.stl');
+    useStore.getState().setResultMesh(mesh);
+
+    const snapshot = buildPersistedAppState(useStore.getState()) as unknown as Record<string, unknown>;
+    expect(snapshot).not.toHaveProperty('originalMesh');
+    expect(snapshot).not.toHaveProperty('resultMesh');
+    expect(snapshot).not.toHaveProperty('meshFileName');
+    expect(snapshot).not.toHaveProperty('logs');
+    expect(snapshot).toHaveProperty('params');
+    expect(snapshot).toHaveProperty('viewerBackground');
+  });
+
+  it('drops geometry and unsafe CSS from legacy IndexedDB snapshots', () => {
+    const mesh = generateCubeMesh(10);
+    const legacySnapshot = {
+      version: 1,
+      savedAt: Date.now(),
+      params: { ...DEFAULT_PARAMS, exportResolution: 1_000_000 },
+      originalMesh: mesh,
+      resultMesh: mesh,
+      meshFileName: 'private-part.stl',
+      logs: [{ time: Date.now(), level: 'info', message: 'private-part.stl' }],
+      viewerBackground: 'url(https://attacker.example/pixel)',
+    } as unknown as Parameters<typeof hydrateFromSnapshot>[0];
+
+    const hydrated = hydrateFromSnapshot(legacySnapshot);
+    expect(hydrated.originalMesh).toBeNull();
+    expect(hydrated.resultMesh).toBeNull();
+    expect(hydrated.meshFileName).toBe('');
+    expect(hydrated.logs).toEqual([]);
+    expect(hydrated.params?.exportResolution).toBe(DEFAULT_PARAMS.exportResolution);
+    expect(hydrated.viewerBackground).toBe('#000000');
   });
 });
 
@@ -149,5 +185,13 @@ describe('workspace transitions', () => {
 
     expect(useStore.getState().viewerCameraState).toBeNull();
     expect(useStore.getState().viewportResetSignal).toBe(beforeSignal + 1);
+  });
+
+  it('normalizes programmatic viewer background updates to local colors', () => {
+    useStore.getState().setViewerBackground('url(https://attacker.example/pixel)');
+    expect(useStore.getState().viewerBackground).toBe('#000000');
+
+    useStore.getState().setViewerBackground('#A1b2C3');
+    expect(useStore.getState().viewerBackground).toBe('#a1b2c3');
   });
 });

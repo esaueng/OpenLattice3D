@@ -34,4 +34,25 @@ describe('minimum-thickness validation against known solids', () => {
       expect(result.passed).toBe(thickness >= required - 1e-3);
     }
   });
+
+  it('fails when one measured ray is thinner than the requirement', () => {
+    const thicknesses = [0.1, ...Array.from({ length: 99 }, () => 1)];
+    const positions = new Float32Array(thicknesses.length * 9);
+    for (let index = 0; index < thicknesses.length; index++) {
+      const x = thicknesses[index] * 0.5;
+      const y = index === 0 ? -2 : 2;
+      positions.set([x, y, -1, x, y + 0.5, -1, x, y + 0.25, 1], index * 9);
+    }
+    const result: MarchingCubesResult = {
+      positions,
+      normals: new Float32Array(thicknesses.length * 3),
+      triCount: thicknesses.length,
+    };
+    const sdf = (x: number, y: number) => Math.abs(x) - (y < 0 ? 0.05 : 0.5);
+
+    const measured = checkMinThickness(sdf, result, 0.8, thicknesses.length);
+    expect(measured.minMeasured).toBeCloseTo(1, 5);
+    expect(measured.absoluteMin).toBeCloseTo(0.1, 5);
+    expect(measured.passed).toBe(false);
+  });
 });

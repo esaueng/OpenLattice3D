@@ -1,7 +1,7 @@
 // 3D Viewer component using react-three-fiber
 import { useRef, useMemo, useCallback, useEffect, useState, type KeyboardEvent } from 'react';
 import { Canvas, useThree, useFrame, type RootState, type ThreeEvent } from '@react-three/fiber';
-import { Billboard, GizmoHelper, Line, OrbitControls, Text } from '@react-three/drei';
+import { Billboard, GizmoHelper, Line, OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../store/useStore';
@@ -405,31 +405,25 @@ function AxisCap({
         <circleGeometry args={[VIEWER_AXIS_LABEL_BADGE_RADIUS, 36]} />
         <meshBasicMaterial color={VIEWER_AXIS_LABEL_BADGE_COLOR} depthTest={false} toneMapped={false} />
       </mesh>
-      <Text
-        anchorX="center"
-        anchorY="middle"
+      <GizmoTextLabel
         color={VIEWER_AXIS_LABEL_COLOR}
         fontSize={VIEWER_AXIS_LABEL_FONT_SIZE}
         fontWeight={VIEWER_AXIS_LABEL_FONT_WEIGHT}
-        letterSpacing={0}
         outlineColor={VIEWER_AXIS_LABEL_OUTLINE_COLOR}
         outlineWidth={VIEWER_AXIS_LABEL_OUTLINE_WIDTH}
         position={[0, 0, 0.01]}
       >
         {label}
-      </Text>
-      <Text
-        anchorX="center"
-        anchorY="middle"
+      </GizmoTextLabel>
+      <GizmoTextLabel
         color="#d7e3ee"
         fontSize={0.105}
-        letterSpacing={0}
         outlineColor={VIEWER_AXIS_LABEL_OUTLINE_COLOR}
         outlineWidth={0.01}
         position={[0, -0.095, 0.011]}
       >
         +
-      </Text>
+      </GizmoTextLabel>
     </Billboard>
   );
 }
@@ -704,37 +698,70 @@ function GizmoTextLabel({
   children,
   color,
   fontSize,
+  fontWeight = 700,
   depthTest = false,
   opacity = 1,
+  outlineColor = '#07111d',
+  outlineWidth = 0.014,
   position = [0, 0, 0.01],
 }: {
   children: string;
   color: string;
   fontSize: number;
+  fontWeight?: number;
   depthTest?: boolean;
   opacity?: number;
+  outlineColor?: string;
+  outlineWidth?: number;
   position?: [number, number, number];
 }) {
+  const texture = useMemo(() => {
+    const canvas = document.createElement('canvas');
+    const fontPixels = 88;
+    const horizontalPadding = 24;
+    const font = `${fontWeight} ${fontPixels}px system-ui, -apple-system, BlinkMacSystemFont, sans-serif`;
+    const measuringContext = canvas.getContext('2d');
+    if (measuringContext) measuringContext.font = font;
+    const measuredWidth = measuringContext?.measureText(children).width ?? fontPixels;
+    canvas.width = Math.max(128, Math.ceil(measuredWidth + horizontalPadding * 2));
+    canvas.height = 128;
+    const context = canvas.getContext('2d');
+    if (context) {
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      context.font = font;
+      context.textAlign = 'center';
+      context.textBaseline = 'middle';
+      context.lineJoin = 'round';
+      context.strokeStyle = outlineColor;
+      context.lineWidth = Math.max(2, (outlineWidth / Math.max(fontSize, 0.001)) * fontPixels);
+      context.strokeText(children, canvas.width / 2, canvas.height / 2);
+      context.fillStyle = color;
+      context.fillText(children, canvas.width / 2, canvas.height / 2);
+    }
+    const nextTexture = new THREE.CanvasTexture(canvas);
+    nextTexture.colorSpace = THREE.SRGBColorSpace;
+    nextTexture.minFilter = THREE.LinearFilter;
+    return nextTexture;
+  }, [children, color, fontSize, fontWeight, outlineColor, outlineWidth]);
+  useEffect(() => () => texture.dispose(), [texture]);
+  const width = fontSize * (texture.image.width / texture.image.height);
+
   return (
-    <Text
-      anchorX="center"
-      anchorY="middle"
-      color={color}
-      fillOpacity={opacity}
-      fontSize={fontSize}
+    <sprite
       frustumCulled={false}
-      letterSpacing={0}
-      material-depthTest={depthTest}
-      material-side={THREE.DoubleSide}
-      material-toneMapped={false}
-      outlineColor="#07111d"
-      outlineOpacity={opacity}
-      outlineWidth={0.014}
       position={position}
       renderOrder={5}
+      scale={[width, fontSize, 1]}
     >
-      {children}
-    </Text>
+      <spriteMaterial
+        map={texture}
+        depthTest={depthTest}
+        depthWrite={false}
+        opacity={opacity}
+        toneMapped={false}
+        transparent
+      />
+    </sprite>
   );
 }
 
@@ -1043,7 +1070,7 @@ export function Viewer3D() {
 
   if (demoModeActive) {
     return (
-      <div style={{ width: '100%', height: '100%', background: viewerBackground }}>
+      <div style={{ width: '100%', height: '100%', backgroundColor: viewerBackground }}>
         <DemoGridView
           key={viewportResetSignal}
           params={params}
@@ -1065,7 +1092,7 @@ export function Viewer3D() {
   }
 
   return (
-    <div style={{ position: 'relative', width: '100%', height: '100%', background: viewerBackground }}>
+    <div style={{ position: 'relative', width: '100%', height: '100%', backgroundColor: viewerBackground }}>
       <div className="viewer-view-presets" role="group" aria-label="Camera view presets">
         <button type="button" className="btn btn-small" title="Front view" onClick={() => requestView('y')}>Front</button>
         <button type="button" className="btn btn-small" title="Top view" onClick={() => requestView('z')}>Top</button>

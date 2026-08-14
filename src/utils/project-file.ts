@@ -9,6 +9,7 @@ import {
   type ValidationResult,
 } from '../types/project';
 import type { ClipPlaneState } from '../store/useStore';
+import { parseViewerBackground } from './viewer-color';
 
 const PROJECT_SCHEMA = 'openlattice3d-project';
 const PROJECT_VERSION = 2;
@@ -170,6 +171,10 @@ export function parseProjectFile(data: unknown): ParsedProjectFile {
   const viewer = typeof root.viewer === 'object' && root.viewer !== null
     ? root.viewer as Record<string, unknown>
     : {};
+  const viewerBackground = parseViewerBackground(viewer.background);
+  if (viewer.background !== undefined && !viewerBackground) {
+    warnings.push('Ignored invalid viewer background color');
+  }
 
   if (source.kind === 'mesh') {
     if (source.encoding !== 'base64-binary-stl' || typeof source.data !== 'string') {
@@ -195,7 +200,7 @@ export function parseProjectFile(data: unknown): ParsedProjectFile {
       keepOutTris: masksMatch ? validIndices(selection.keepOut, mesh.triCount) : [],
       keepInTris: masksMatch ? validIndices(selection.keepIn, mesh.triCount) : [],
       clipPlane: parseClipPlane(viewer.clipPlane),
-      viewerBackground: typeof viewer.background === 'string' ? viewer.background : undefined,
+      viewerBackground,
       warnings,
     };
   }
@@ -214,7 +219,7 @@ export function parseProjectFile(data: unknown): ParsedProjectFile {
       keepOutTris: [],
       keepInTris: [],
       clipPlane: parseClipPlane(viewer.clipPlane),
-      viewerBackground: typeof viewer.background === 'string' ? viewer.background : undefined,
+      viewerBackground,
       warnings,
     };
   }

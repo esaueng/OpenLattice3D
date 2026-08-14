@@ -15,6 +15,7 @@ import {
   useDisposable,
   XRayView,
 } from './ViewerMeshViews';
+import { demoGridResolution, demoGridWorkerLimit } from './demo-grid-limits';
 
 const DEMO_VIEW_TARGET_RADIUS = 8;
 const DEMO_TILE_ITEMS: Array<{ type: LatticeType; label: string }> = [
@@ -38,6 +39,13 @@ type DemoTileState = {
   status: 'pending' | 'running' | 'done' | 'error';
   result: MarchingCubesResult | null;
   error?: string;
+};
+
+type DemoTileJob = {
+  type: LatticeType;
+  localParams: LatticeParams;
+  signature: string;
+  token: number;
 };
 
 function DemoTileViewer({ tile, viewMode, clipPlane, placeholder, selectedLatticeType, onSelectLatticeType }: {
@@ -114,6 +122,8 @@ export function DemoGridView({ params, demoParamsByType, runId, viewMode, clipPl
 }) {
   const [tiles, setTiles] = useState<DemoTileState[]>(() => DEMO_TILE_ITEMS.map((item) => ({ ...item, status: 'pending', result: null })));
   const workersRef = useRef<Map<LatticeType, Worker>>(new Map());
+  const queuedJobsRef = useRef<Map<LatticeType, DemoTileJob>>(new Map());
+  const drainQueueRef = useRef<() => void>(() => undefined);
   const tokensRef = useRef<Partial<Record<LatticeType, number>>>({});
   const completedSignatureRef = useRef<Partial<Record<LatticeType, string>>>({});
   const runningSignatureRef = useRef<Partial<Record<LatticeType, string>>>({});
@@ -139,9 +149,11 @@ export function DemoGridView({ params, demoParamsByType, runId, viewMode, clipPl
   useEffect(() => { latestDemoParamsRef.current = demoParamsByType; }, [demoParamsByType]);
 
   const stopWorker = useCallback((type: LatticeType) => {
+    queuedJobsRef.current.delete(type);
     workersRef.current.get(type)?.terminate();
     workersRef.current.delete(type);
     runningSignatureRef.current[type] = undefined;
+    tokensRef.current[type] = (tokensRef.current[type] ?? 0) + 1;
   }, []);
   const signatureFor = useCallback((type: LatticeType, localParams: LatticeParams) => JSON.stringify({
     type,
@@ -150,6 +162,94 @@ export function DemoGridView({ params, demoParamsByType, runId, viewMode, clipPl
     keepIn: keepInKey,
     params: localParams,
   }), [keepInKey, keepOutKey, sourceKey]);
+
+  const workerLimit = demoGridWorkerLimit(
+    Boolean(sourceMesh),
+    globalThis.navigator?.hardwareConcurrency ?? 2,
+  );
+
+  const startJob = useCallback((job: DemoTileJob) => {
+    const { type, localParams, signature, token } = job;
+    if (tokensRef.current[type] !== token) return;
+    const worker = new Worker(new URL('../../workers/lattice-worker.ts', import.meta.url), { type: 'module' });
+    workersRef.current.set(type, worker);
+    setTiles((current) => current.map((tile) => tile.type === type
+      ? { ...tile, status: 'running', error: undefined }
+      : tile));
+    const message: WorkerMessage = {
+      type: 'generate',
+      params: localParams,
+      sphereMode,
+      sampleShape,
+      sphereRadius,
+      resolution: demoGridResolution(localParams.exportResolution),
+      keepOutTris: Array.from(keepOutTris),
+      keepInTris: Array.from(keepInTris),
+    };
+    if (sourceMesh) {
+      message.meshPositions = sourceMesh.positions;
+      message.meshNormals = sourceMesh.normals;
+      message.meshTriCount = sourceMesh.triCount;
+    }
+
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      if (workersRef.current.get(type) === worker) workersRef.current.delete(type);
+      if (tokensRef.current[type] === token && runningSignatureRef.current[type] === signature) {
+        runningSignatureRef.current[type] = undefined;
+      }
+      worker.terminate();
+      drainQueueRef.current();
+    };
+    worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
+      if (tokensRef.current[type] !== token) {
+        finish();
+        return;
+      }
+      const response = event.data;
+      if (response.type === 'result') {
+        completedSignatureRef.current[type] = signature;
+        setTiles((current) => current.map((tile) => tile.type === type ? {
+          ...tile,
+          status: 'done',
+          result: normalizeDemoResult({ positions: response.positions!, normals: response.normals!, triCount: response.triCount! }, DEMO_VIEW_TARGET_RADIUS),
+          error: undefined,
+        } : tile));
+        finish();
+      } else if (response.type === 'error') {
+        setTiles((current) => current.map((tile) => tile.type === type
+          ? { ...tile, status: 'error', error: response.message }
+          : tile));
+        finish();
+      }
+    };
+    worker.onerror = () => {
+      if (tokensRef.current[type] === token) {
+        setTiles((current) => current.map((tile) => tile.type === type
+          ? { ...tile, status: 'error', error: 'Worker failed' }
+          : tile));
+      }
+      finish();
+    };
+    worker.postMessage(message);
+  }, [keepInTris, keepOutTris, sampleShape, sourceMesh, sphereMode, sphereRadius]);
+
+  const drainQueue = useCallback(() => {
+    while (workersRef.current.size < workerLimit) {
+      const next = queuedJobsRef.current.entries().next();
+      if (next.done) break;
+      const [type, job] = next.value;
+      queuedJobsRef.current.delete(type);
+      startJob(job);
+    }
+  }, [startJob, workerLimit]);
+
+  useEffect(() => {
+    drainQueueRef.current = drainQueue;
+    drainQueue();
+  }, [drainQueue]);
 
   const generateTiles = useCallback((types: LatticeType[], baseParams: LatticeParams, force = false) => {
     for (const type of types) {
@@ -166,49 +266,14 @@ export function DemoGridView({ params, demoParamsByType, runId, viewMode, clipPl
       stopWorker(type);
       const token = (tokensRef.current[type] ?? 0) + 1;
       tokensRef.current[type] = token;
-      const worker = new Worker(new URL('../../workers/lattice-worker.ts', import.meta.url), { type: 'module' });
-      workersRef.current.set(type, worker);
       runningSignatureRef.current[type] = signature;
-      const message: WorkerMessage = {
-        type: 'generate',
-        params: localParams,
-        sphereMode,
-        sampleShape,
-        sphereRadius,
-        resolution: Math.round(24 + localParams.exportResolution * 24),
-        keepOutTris: Array.from(keepOutTris),
-        keepInTris: Array.from(keepInTris),
-      };
-      if (sourceMesh) {
-        message.meshPositions = sourceMesh.positions;
-        message.meshNormals = sourceMesh.normals;
-        message.meshTriCount = sourceMesh.triCount;
-      }
-      setTiles((current) => current.map((tile) => tile.type === type ? { ...tile, status: 'running', error: undefined } : tile));
-      worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
-        if (tokensRef.current[type] !== token) return;
-        const response = event.data;
-        if (response.type === 'result') {
-          runningSignatureRef.current[type] = undefined;
-          completedSignatureRef.current[type] = signature;
-          setTiles((current) => current.map((tile) => tile.type === type ? {
-            ...tile,
-            status: 'done',
-            result: normalizeDemoResult({ positions: response.positions!, normals: response.normals!, triCount: response.triCount! }, DEMO_VIEW_TARGET_RADIUS),
-            error: undefined,
-          } : tile));
-          worker.terminate();
-          workersRef.current.delete(type);
-        } else if (response.type === 'error') {
-          runningSignatureRef.current[type] = undefined;
-          setTiles((current) => current.map((tile) => tile.type === type ? { ...tile, status: 'error', error: response.message } : tile));
-          worker.terminate();
-          workersRef.current.delete(type);
-        }
-      };
-      worker.postMessage(message);
+      queuedJobsRef.current.set(type, { type, localParams, signature, token });
+      setTiles((current) => current.map((tile) => tile.type === type
+        ? { ...tile, status: 'pending', error: undefined }
+        : tile));
     }
-  }, [keepInTris, keepOutTris, sampleShape, signatureFor, sourceMesh, sphereMode, sphereRadius, stopWorker]);
+    drainQueueRef.current();
+  }, [signatureFor, stopWorker]);
 
   useEffect(() => {
     const allTypes = DEMO_TILE_ITEMS.map((item) => item.type);
@@ -241,6 +306,8 @@ export function DemoGridView({ params, demoParamsByType, runId, viewMode, clipPl
   }, [generateTiles, params, selectedLatticeType, sourceMesh, sphereMode]);
 
   useEffect(() => () => {
+    queuedJobsRef.current.clear();
+    drainQueueRef.current = () => undefined;
     for (const worker of workersRef.current.values()) worker.terminate();
     workersRef.current.clear();
   }, []);

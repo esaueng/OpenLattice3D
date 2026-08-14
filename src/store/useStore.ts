@@ -1,9 +1,10 @@
-// Global app state using Zustand with IndexedDB persistence
+// Global app state using Zustand with preference-only persistence
 import { create } from 'zustand';
 import type { LatticeParams, MeshInfo, ValidationResult, ProcessPreset, LatticeType, GenerationVariant, SelectionMode, SampleShape } from '../types/project';
-import { DEFAULT_PARAMS, PROCESS_DEFAULTS } from '../types/project';
+import { DEFAULT_PARAMS, PROCESS_DEFAULTS, sanitizeLatticeParams } from '../types/project';
 import type { TriangleMesh } from '../geometry/stl-parser';
 import type { MarchingCubesResult } from '../geometry/marching-cubes';
+import { DEFAULT_VIEWER_BACKGROUND, normalizeViewerBackground } from '../utils/viewer-color';
 
 export type ViewMode = 'original' | 'lattice' | 'cross_section' | 'xray';
 
@@ -37,7 +38,6 @@ const DB_NAME = 'openlattice3d-state';
 const DB_VERSION = 1;
 const DB_STORE = 'snapshots';
 const DB_STATE_KEY = 'app-state-v1';
-const MAX_PERSISTED_LOGS = 250;
 
 interface PersistedState {
   params: LatticeParams;
@@ -97,20 +97,76 @@ function selectionsMatch(a: SelectionSnapshot, b: SelectionSnapshot): boolean {
 interface PersistedAppState extends PersistedState {
   version: number;
   savedAt: number;
-  originalMesh: TriangleMesh | null;
-  meshInfo: MeshInfo | null;
-  meshRepaired: boolean;
-  meshFileName: string;
-  selectionMode: SelectionMode;
-  keepOutTris: number[];
-  keepInTris: number[];
-  demoParamsByType: DemoParamsByType;
-  resultMesh: MarchingCubesResult | null;
-  validation: ValidationResult | null;
   viewerCameraState: ViewerCameraState | null;
-  demoModeActive: boolean;
-  demoRunId: number;
-  logs: LogEntry[];
+}
+
+const SAMPLE_SHAPES: readonly SampleShape[] = ['sphere', 'cube', 'cylinder', 'torus', 'capsule'];
+const VIEW_MODES: readonly ViewMode[] = ['original', 'lattice', 'cross_section', 'xray'];
+
+function finiteVector3(value: unknown): ViewerVector3 | null {
+  if (!Array.isArray(value) || value.length !== 3) return null;
+  if (!value.every((entry) => typeof entry === 'number' && Number.isFinite(entry))) return null;
+  return [value[0], value[1], value[2]];
+}
+
+function normalizeViewerCameraState(value: unknown): ViewerCameraState | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const candidate = value as Partial<ViewerCameraState>;
+  const position = finiteVector3(candidate.position);
+  const target = finiteVector3(candidate.target);
+  const up = finiteVector3(candidate.up);
+  if (!position || !target || !up) return null;
+  if (typeof candidate.zoom !== 'number' || !Number.isFinite(candidate.zoom) || candidate.zoom <= 0) return null;
+  if (typeof candidate.savedAt !== 'number' || !Number.isFinite(candidate.savedAt)) return null;
+  return { position, target, up, zoom: candidate.zoom, savedAt: candidate.savedAt };
+}
+
+function normalizePersistedState(value: unknown): PersistedState {
+  const candidate = typeof value === 'object' && value !== null
+    ? value as Partial<PersistedState>
+    : {};
+  const sanitizedParams = sanitizeLatticeParams(candidate.params).params;
+  const sampleShape = SAMPLE_SHAPES.includes(candidate.sampleShape as SampleShape)
+    ? candidate.sampleShape as SampleShape
+    : null;
+  const sphereRadius = typeof candidate.sphereRadius === 'number'
+    && Number.isFinite(candidate.sphereRadius)
+    && candidate.sphereRadius > 0
+    && candidate.sphereRadius <= 500
+    ? candidate.sphereRadius
+    : 25;
+  const viewMode = VIEW_MODES.includes(candidate.viewMode as ViewMode)
+    ? candidate.viewMode as ViewMode
+    : 'original';
+  const clipCandidate = candidate.clipPlane;
+  const clipPlane: ClipPlaneState = clipCandidate
+    && ['x', 'y', 'z'].includes(clipCandidate.axis)
+    && typeof clipCandidate.position === 'number'
+    && Number.isFinite(clipCandidate.position)
+    && typeof clipCandidate.flipped === 'boolean'
+    ? {
+        axis: clipCandidate.axis,
+        position: Math.max(0, Math.min(1, clipCandidate.position)),
+        flipped: clipCandidate.flipped,
+      }
+    : { axis: 'z', position: 0.5, flipped: false };
+  const brushRadius = typeof candidate.brushRadius === 'number'
+    && Number.isFinite(candidate.brushRadius)
+    && candidate.brushRadius >= 0
+    && candidate.brushRadius <= 1_000
+    ? candidate.brushRadius
+    : 0;
+
+  return {
+    params: { ...DEFAULT_PARAMS, ...sanitizedParams },
+    sampleShape,
+    sphereMode: candidate.sphereMode === true && sampleShape !== null,
+    sphereRadius,
+    viewMode,
+    clipPlane,
+    viewerBackground: normalizeViewerBackground(candidate.viewerBackground),
+    brushRadius,
+  };
 }
 
 function canUseBrowserStorage() {
@@ -129,12 +185,12 @@ function canUseIndexedDb() {
   }
 }
 
-function loadLegacyPersistedState(): Partial<PersistedState> | null {
+function loadLegacyPersistedState(): PersistedState | null {
   try {
     if (!canUseBrowserStorage()) return null;
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
-    return JSON.parse(raw) as Partial<PersistedState>;
+    return normalizePersistedState(JSON.parse(raw));
   } catch {
     return null;
   }
@@ -399,14 +455,13 @@ export const useStore = create<AppState>((set) => ({
   validation: null,
   viewMode: persisted?.viewMode ?? 'original',
   clipPlane: persisted?.clipPlane ?? { axis: 'z', position: 0.5, flipped: false },
-  viewerBackground: persisted?.viewerBackground ?? '#000000',
+  viewerBackground: persisted?.viewerBackground ?? DEFAULT_VIEWER_BACKGROUND,
   viewportResetSignal: 0,
   viewerCameraState: null,
   demoModeActive: false,
   demoRunId: 0,
   logs: [],
-  // IndexedDB is asynchronous, so the UI must not render the empty workspace
-  // until we know whether a saved workspace needs to be restored.
+  // IndexedDB is asynchronous, so the UI waits for saved preferences before rendering.
   persistenceHydrated: false,
 
   setOriginalMesh: (mesh, info, fileName) => set({
@@ -666,7 +721,7 @@ export const useStore = create<AppState>((set) => ({
 
   setClipPlane: (partial) => set((s) => ({ clipPlane: { ...s.clipPlane, ...partial } })),
 
-  setViewerBackground: (color) => set({ viewerBackground: color }),
+  setViewerBackground: (color) => set({ viewerBackground: normalizeViewerBackground(color) }),
 
   resetViewport: () => set((s) => ({
     viewportResetSignal: s.viewportResetSignal + 1,
@@ -746,7 +801,7 @@ export const useStore = create<AppState>((set) => ({
     validation: null,
     viewMode: 'original',
     clipPlane: project.clipPlane ?? { axis: 'z', position: 0.5, flipped: false },
-    viewerBackground: project.viewerBackground ?? '#000000',
+    viewerBackground: normalizeViewerBackground(project.viewerBackground),
     viewerCameraState: null,
     demoModeActive: false,
     demoRunId: 0,
@@ -781,7 +836,7 @@ export const useStore = create<AppState>((set) => ({
       progressMessage: '',
       viewMode: 'original',
       clipPlane: { axis: 'z', position: 0.5, flipped: false },
-      viewerBackground: '#000000',
+      viewerBackground: DEFAULT_VIEWER_BACKGROUND,
       viewportResetSignal: 0,
       viewerCameraState: null,
       logs: [],
@@ -804,58 +859,46 @@ function persistedSubset(state: AppState): PersistedState {
   };
 }
 
-function buildPersistedAppState(state: AppState): PersistedAppState {
+export function buildPersistedAppState(state: AppState): PersistedAppState {
   return {
-    version: 1,
+    version: 2,
     savedAt: Date.now(),
     ...persistedSubset(state),
-    originalMesh: state.originalMesh,
-    meshInfo: state.meshInfo,
-    meshRepaired: state.meshRepaired,
-    meshFileName: state.meshFileName,
-    selectionMode: state.selectionMode,
-    keepOutTris: Array.from(state.keepOutTris),
-    keepInTris: Array.from(state.keepInTris),
-    demoParamsByType: state.demoParamsByType,
-    resultMesh: state.resultMesh,
-    validation: state.validation,
     viewerCameraState: state.viewerCameraState,
-    demoModeActive: state.demoModeActive,
-    demoRunId: state.demoRunId,
-    logs: state.logs.slice(-MAX_PERSISTED_LOGS),
   };
 }
 
-function hydrateFromSnapshot(snapshot: Partial<PersistedAppState>): Partial<AppState> {
+export function hydrateFromSnapshot(snapshot: Partial<PersistedAppState>): Partial<AppState> {
+  const persistedState = normalizePersistedState(snapshot);
   return {
-    originalMesh: snapshot.originalMesh ?? null,
-    meshInfo: snapshot.meshInfo ?? null,
-    meshRepaired: snapshot.meshRepaired ?? false,
-    meshFileName: snapshot.meshFileName ?? (snapshot.sampleShape ? SAMPLE_SHAPE_INFO[snapshot.sampleShape].fileName : ''),
-    sampleShape: snapshot.sampleShape ?? null,
-    sphereMode: snapshot.sphereMode ?? false,
-    sphereRadius: snapshot.sphereRadius ?? 25,
-    selectionMode: snapshot.selectionMode ?? 'none',
-    keepOutTris: new Set(snapshot.keepOutTris ?? []),
-    keepInTris: new Set(snapshot.keepInTris ?? []),
-    brushRadius: snapshot.brushRadius ?? 0,
+    originalMesh: null,
+    meshInfo: null,
+    meshRepaired: false,
+    meshFileName: persistedState.sampleShape ? SAMPLE_SHAPE_INFO[persistedState.sampleShape].fileName : '',
+    sampleShape: persistedState.sampleShape,
+    sphereMode: persistedState.sphereMode,
+    sphereRadius: persistedState.sphereRadius,
+    selectionMode: 'none',
+    keepOutTris: new Set(),
+    keepInTris: new Set(),
+    brushRadius: persistedState.brushRadius,
     selectionUndo: [],
     selectionRedo: [],
     selectionStrokeStart: null,
-    params: snapshot.params ? { ...DEFAULT_PARAMS, ...snapshot.params } : { ...DEFAULT_PARAMS },
-    demoParamsByType: snapshot.demoParamsByType ?? {},
+    params: persistedState.params,
+    demoParamsByType: {},
     generating: false,
     progress: 0,
     progressMessage: '',
-    resultMesh: snapshot.resultMesh ?? null,
-    validation: snapshot.validation ?? null,
-    viewMode: snapshot.viewMode ?? 'original',
-    clipPlane: snapshot.clipPlane ?? { axis: 'z', position: 0.5, flipped: false },
-    viewerBackground: snapshot.viewerBackground ?? '#000000',
-    viewerCameraState: snapshot.viewerCameraState ?? null,
-    demoModeActive: snapshot.demoModeActive ?? false,
-    demoRunId: snapshot.demoRunId ?? 0,
-    logs: snapshot.logs ?? [],
+    resultMesh: null,
+    validation: null,
+    viewMode: persistedState.viewMode,
+    clipPlane: persistedState.clipPlane,
+    viewerBackground: persistedState.viewerBackground,
+    viewerCameraState: normalizeViewerCameraState(snapshot.viewerCameraState),
+    demoModeActive: false,
+    demoRunId: 0,
+    logs: [],
   };
 }
 
@@ -864,9 +907,7 @@ let persistTimer: ReturnType<typeof setTimeout> | null = null;
 
 function schedulePersistence() {
   if (!persistenceReady || typeof window === 'undefined') return;
-  // Skip while generating: progress updates fire rapidly and each snapshot
-  // structured-clones the full mesh buffers into IndexedDB. The final state
-  // is persisted by the store update that clears `generating`.
+  // Skip rapid progress updates; the final state is saved when generation ends.
   if (useStore.getState().generating) return;
 
   if (persistTimer) window.clearTimeout(persistTimer);
@@ -882,7 +923,12 @@ function schedulePersistence() {
 async function hydratePersistence() {
   try {
     const snapshot = await loadPersistedAppState();
-    if (snapshot) useStore.setState(hydrateFromSnapshot(snapshot));
+    if (snapshot) {
+      useStore.setState(hydrateFromSnapshot(snapshot));
+      // Overwrite legacy snapshots before rendering so old mesh buffers and logs
+      // do not remain in IndexedDB after upgrading to the minimized schema.
+      await savePersistedAppState(buildPersistedAppState(useStore.getState()));
+    }
   } catch {
     // Storage-disabled/private contexts must fall back to a usable new project.
   } finally {
