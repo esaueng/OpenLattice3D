@@ -28,12 +28,11 @@ import {
   tileWorkerCount,
 } from './tiled-generation';
 import { estimateGenerationTimings, formatDuration } from './generation-estimate';
-import { removeDisconnectedFragments } from './mesh-cleanup';
 import {
   addMeshTriangleArea,
-  surfaceSampleCount,
   validateMeshPositions,
 } from '../geometry/mesh-limits';
+import { surfaceSampleTargetCount } from './surface-sampling-limits';
 
 type SdfFunction = ((x: number, y: number, z: number) => number) & Partial<GridSdfSampler>;
 type WorkerPostMessage = (message: unknown, transfer: Transferable[]) => void;
@@ -51,14 +50,6 @@ function generatedResultTransferList(response: WorkerResponse): Transferable[] {
   if (response.surfaceSampleNormals) transfers.push(response.surfaceSampleNormals.buffer);
   if (response.surfaceSampleHoleScales) transfers.push(response.surfaceSampleHoleScales.buffer);
   return transfers;
-}
-
-function surfaceSampleWorkerTransferList(payload: ShapeSampleWorkerMessage | MeshSampleWorkerMessage): Transferable[] {
-  if (payload.mode !== 'mesh') return [];
-  if (payload.bufferKind === 'shared') return [];
-  // Mesh sample workers receive copies made in this worker with .slice() below.
-  // Transferring those copies does not detach UI-owned imported mesh buffers.
-  return [payload.positions.buffer, payload.normals.buffer];
 }
 
 function isSharedFloat32Array(value: Float32Array): boolean {
@@ -144,19 +135,8 @@ type ShapeSampleWorkerMessage = {
   minDistance: number;
 };
 
-type MeshSampleWorkerMessage = {
-  mode: 'mesh';
-  positions: Float32Array;
-  normals: Float32Array;
-  bufferKind: 'shared' | 'transfer';
-  triCount: number;
-  keepOutTris: number[];
-  targetCount: number;
-  minDistance: number;
-};
-
 async function generatePoissonSamplesParallel(
-  msgFactory: (targetCount: number) => ShapeSampleWorkerMessage | MeshSampleWorkerMessage,
+  msgFactory: (targetCount: number) => ShapeSampleWorkerMessage,
   targetCount: number,
   minDistance: number,
   maxWorkers = Math.max(1, Math.min(4, (self.navigator?.hardwareConcurrency ?? 2) - 1))
@@ -176,7 +156,7 @@ async function generatePoissonSamplesParallel(
       worker.onmessage = (ev: MessageEvent<SurfaceSampleWorkerResponse>) => resolve(ev.data);
       worker.onerror = (err) => reject(err);
       const payload = msgFactory(count);
-      worker.postMessage(payload, surfaceSampleWorkerTransferList(payload));
+      worker.postMessage(payload);
     }).finally(() => worker.terminate());
 
     const samples: SurfaceHexSample[] = [];
@@ -738,8 +718,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
               default: return 1000;
             }
           })();
-          const spacingArea = params.cellSize * params.cellSize * 0.55;
-          const sampleCount = Math.max(60, Math.round(areaEstimate / spacingArea));
+          const sampleCount = surfaceSampleTargetCount(areaEstimate, params.cellSize);
           if (shape === 'sphere') {
             surfaceSamples = buildFibonacciSphereSamples(sphereRadius ?? 25, sampleCount);
           } else {
@@ -826,28 +805,11 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
           const positions = msg.meshPositions!;
           const normals = msg.meshNormals!;
           const triCount = msg.meshTriCount!;
-          const useSharedMeshSamples = meshBufferKind === 'shared';
           const meshSampler = buildMeshSampler(positions, normals, triCount, keepOutSet);
           const totalArea = meshSampler?.totalArea ?? 0;
-          const sampleCount = surfaceSampleCount(totalArea, params.cellSize);
+          const sampleCount = surfaceSampleTargetCount(totalArea, params.cellSize);
           if (meshSampler) {
-            surfaceSamples = await generatePoissonSamplesParallel(
-              (count) => ({
-                mode: 'mesh',
-                positions: useSharedMeshSamples ? positions : positions.slice(),
-                normals: useSharedMeshSamples ? normals : normals.slice(),
-                bufferKind: useSharedMeshSamples ? 'shared' : 'transfer',
-                triCount,
-                keepOutTris: Array.from(keepOutSet),
-                targetCount: count,
-                minDistance: params.cellSize * 0.75,
-              }),
-              sampleCount,
-              params.cellSize * 0.75
-            );
-            if (surfaceSamples.length < Math.floor(sampleCount * 0.8)) {
-              surfaceSamples = generatePoissonSamples(meshSampler.sample, sampleCount, params.cellSize * 0.75);
-            }
+            surfaceSamples = generatePoissonSamples(meshSampler.sample, sampleCount, params.cellSize * 0.75);
           }
           const target: SurfaceSamplerTarget = {
             samples: surfaceSamples,
@@ -906,15 +868,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
           if (cancelled) throw new Error('Cancelled');
           // Tiles are extracted open along their seams and merged here, so the
           // whole-surface repair belongs after the merge rather than per tile.
-          const cleanedTiles = removeDisconnectedFragments(rawTiledResult, 0.004);
-          const result = { ...cleanedTiles, ...closeBoundaryLoops(cleanedTiles).result };
-          if (result.removedTriangles > 0) {
-            postMessage({
-              type: 'progress',
-              progress: 0.9,
-              message: `Removed ${result.removedTriangles.toLocaleString()} disconnected fragment triangles`
-            } as WorkerResponse);
-          }
+          const result = closeBoundaryLoops(rawTiledResult).result;
           postMessage({
             type: 'progress',
             progress: 0.95,
@@ -1031,16 +985,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         } as WorkerResponse);
       });
 
-      const cleaned = removeDisconnectedFragments(rawResult, 0.004);
-      // Fragment removal can reopen a closed surface, so repair after cleanup.
-      const result = { ...cleaned, ...closeBoundaryLoops(cleaned).result };
-      if (result.removedTriangles > 0) {
-        postMessage({
-          type: 'progress',
-          progress: 0.84,
-          message: `Removed ${result.removedTriangles.toLocaleString()} disconnected fragment triangles`
-        } as WorkerResponse);
-      }
+      const result = closeBoundaryLoops(rawResult).result;
 
       postMessage({ type: 'progress', progress: 0.95, message: 'Geometry ready' } as WorkerResponse);
 
