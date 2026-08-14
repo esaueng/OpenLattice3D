@@ -5,6 +5,7 @@ import { ViewerControls } from './components/ViewerControls';
 import { ExportControls } from './components/ExportControls';
 import { useStore, type LogEntry } from './store/useStore';
 import { registerNotificationServiceWorker } from './utils/notifications';
+import { escapeControlCharacters } from './utils/text-safety';
 import { useLatticeGeneration } from './hooks/useLatticeGeneration';
 import { useWorkspaceHotkeys } from './hooks/useWorkspaceHotkeys';
 import './App.css';
@@ -57,15 +58,15 @@ function AppBootShell() {
 
         <section className="viewer-shell boot-viewer-shell" aria-label="3D lattice viewer">
           <div className="boot-viewer-state" role="status" aria-live="polite">
-            <strong>Checking for a saved workspace…</strong>
-            <span>Your model will appear here when restore is complete.</span>
+            <strong>Checking saved preferences…</strong>
+            <span>Your viewer settings will be ready in a moment.</span>
           </div>
         </section>
       </main>
 
       <footer className="statusbar">
         <div className="statusbar-group" aria-label="Workspace restore status">
-          <span className="statusbar-segment">Storage: Restoring</span>
+          <span className="statusbar-segment">Preferences: Loading</span>
         </div>
       </footer>
     </div>
@@ -381,7 +382,7 @@ function BottomLogDrawer({ logs, onClearLogs }: { logs: LogEntry[]; onClearLogs:
 
 function formatLogEntry(entry: LogEntry) {
   const level = entry.level === 'error' ? 'ERR' : entry.level === 'warn' ? 'WARN' : 'INFO';
-  return `${new Date(entry.time).toLocaleTimeString([], { hour12: false })} ${level.padEnd(4, ' ')} ${entry.message}`;
+  return `${new Date(entry.time).toLocaleTimeString([], { hour12: false })} ${level.padEnd(4, ' ')} ${escapeControlCharacters(entry.message)}`;
 }
 
 export default App;

@@ -70,6 +70,9 @@ binary STL, fingerprints the decoded positions before applying selection masks,
 and restores validated parameters plus viewer and validation state. Legacy
 parameter-only JSON remains readable. STL and 3MF exports contain only generated
 geometry; 3MF uses millimetre model units and indexed triangle resources.
+Automatic browser persistence is limited to parameters and viewer preferences;
+source and generated mesh buffers remain in memory unless the user exports a
+project JSON file.
 
 ## Correctness contracts
 
