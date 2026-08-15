@@ -171,7 +171,7 @@ function HydratedApp() {
         <div className="status-links" aria-label="Project links">
           <a
             className="status-link donate-link"
-            href="https://ko-fi.com/petergn"
+            href="https://ko-fi.com/esau"
             target="_blank"
             rel="noreferrer"
             title="Support OpenLattice3D on Ko-fi"
