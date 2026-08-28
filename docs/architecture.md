@@ -11,7 +11,7 @@ positive outside, and are extracted at iso-value zero.
 2. `useStore` owns the source, sanitized lattice parameters, selection masks,
    viewer state, and undo/redo history.
 3. `useLatticeGeneration` starts `lattice-worker`, reports progress, and rejects
-   stale run results after cancellation or replacement.
+   malformed or stale run results after failure, cancellation, or replacement.
 4. The worker builds a signed-distance evaluator, samples it, extracts triangles
    with marching cubes, and removes disconnected artifacts.
 5. `validation-worker` checks deviation, minimum thickness, manifoldness, and
@@ -67,12 +67,22 @@ orchestrator.
 
 Project JSON uses a versioned schema. It embeds imported source geometry as a
 binary STL, fingerprints the decoded positions before applying selection masks,
-and restores validated parameters plus viewer and validation state. Legacy
-parameter-only JSON remains readable. STL and 3MF exports contain only generated
-geometry; 3MF uses millimetre model units and indexed triangle resources.
+and restores validated parameters plus viewer and validation state. Schema v3 adds
+the versioned deterministic generation seed; v2 projects migrate to compatibility
+seed `0`, and legacy parameter-only JSON remains readable. STL and 3MF exports
+contain only generated geometry; 3MF uses millimetre model units and indexed
+triangle resources. Metadata-capable mesh exports record the generation seed.
 Automatic browser persistence is limited to parameters and viewer preferences;
 source and generated mesh buffers remain in memory unless the user exports a
 project JSON file.
+
+Generation randomness uses a versioned Mulberry32 stream with FNV-1a-derived
+logical substreams. Stochastic lattice fields are coordinate-hashed from the root
+seed, surface-sampling jobs use fixed stream identities, and tile results merge by
+tile ID. Physical worker count and completion order therefore do not change output.
+The guarantee is scoped to the same project data, application version, resolution,
+backend, and JavaScript numeric runtime; the seed and algorithm version make future
+algorithm migrations explicit rather than silently changing saved projects.
 
 ## Correctness contracts
 

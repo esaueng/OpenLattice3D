@@ -1,4 +1,5 @@
 import type { MarchingCubesResult } from './marching-cubes';
+import { formatGenerationSeed } from './deterministic-random';
 
 const encoder = new TextEncoder();
 
@@ -110,7 +111,7 @@ function numberText(value: number): string {
   return Number(value.toPrecision(9)).toString();
 }
 
-export function build3MFModelXml(result: MarchingCubesResult): string {
+export function build3MFModelXml(result: MarchingCubesResult, generationSeed?: number): string {
   const vertexIndex = new Map<string, number>();
   const vertices: string[] = [];
   const triangles: string[] = [];
@@ -133,10 +134,13 @@ export function build3MFModelXml(result: MarchingCubesResult): string {
     triangles.push(`<triangle v1="${v1}" v2="${v2}" v3="${v3}"/>`);
   }
 
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"><resources><object id="1" type="model"><mesh><vertices>${vertices.join('')}</vertices><triangles>${triangles.join('')}</triangles></mesh></object></resources><build><item objectid="1"/></build></model>`;
+  const metadata = generationSeed === undefined
+    ? ''
+    : `<metadata name="OpenLattice3D.GenerationSeed">${formatGenerationSeed(generationSeed)}</metadata>`;
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">${metadata}<resources><object id="1" type="model"><mesh><vertices>${vertices.join('')}</vertices><triangles>${triangles.join('')}</triangles></mesh></object></resources><build><item objectid="1"/></build></model>`;
 }
 
-export function create3MF(result: MarchingCubesResult): Uint8Array {
+export function create3MF(result: MarchingCubesResult, generationSeed?: number): Uint8Array {
   if (result.positions.length < result.triCount * 9) {
     throw new Error('3MF export position buffer is smaller than triCount requires');
   }
@@ -145,6 +149,6 @@ export function create3MF(result: MarchingCubesResult): Uint8Array {
   return createStoredZip([
     { name: '[Content_Types].xml', data: encoder.encode(contentTypes) },
     { name: '_rels/.rels', data: encoder.encode(relationships) },
-    { name: '3D/3dmodel.model', data: encoder.encode(build3MFModelXml(result)) },
+    { name: '3D/3dmodel.model', data: encoder.encode(build3MFModelXml(result, generationSeed)) },
   ]);
 }

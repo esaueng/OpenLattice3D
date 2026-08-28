@@ -5,6 +5,11 @@ import { DEFAULT_PARAMS, PROCESS_DEFAULTS, sanitizeLatticeParams } from '../type
 import type { TriangleMesh } from '../geometry/stl-parser';
 import type { MarchingCubesResult } from '../geometry/marching-cubes';
 import { DEFAULT_VIEWER_BACKGROUND, normalizeViewerBackground } from '../utils/viewer-color';
+import {
+  createReseedValue,
+  DEFAULT_GENERATION_SEED,
+  normalizeGenerationSeed,
+} from '../geometry/deterministic-random';
 
 export type ViewMode = 'original' | 'lattice' | 'cross_section' | 'xray';
 
@@ -41,6 +46,7 @@ const DB_STATE_KEY = 'app-state-v1';
 
 interface PersistedState {
   params: LatticeParams;
+  generationSeed: number;
   sampleShape: SampleShape | null;
   sphereMode: boolean;
   sphereRadius: number;
@@ -61,6 +67,7 @@ const MAX_SELECTION_HISTORY = 100;
 
 export interface ProjectRestoreState {
   params: LatticeParams;
+  generationSeed: number;
   originalMesh: TriangleMesh | null;
   meshInfo: MeshInfo | null;
   meshFileName: string;
@@ -159,6 +166,7 @@ function normalizePersistedState(value: unknown): PersistedState {
 
   return {
     params: { ...DEFAULT_PARAMS, ...sanitizedParams },
+    generationSeed: normalizeGenerationSeed(candidate.generationSeed),
     sampleShape,
     sphereMode: candidate.sphereMode === true && sampleShape !== null,
     sphereRadius,
@@ -358,12 +366,14 @@ interface AppState {
 
   // Params
   params: LatticeParams;
+  generationSeed: number;
   demoParamsByType: DemoParamsByType;
 
   // Generation
   generating: boolean;
   progress: number;
   progressMessage: string;
+  generationError: string | null;
   resultMesh: MarchingCubesResult | null;
 
   // Validation
@@ -401,11 +411,13 @@ interface AppState {
   undoSelection: () => void;
   redoSelection: () => void;
   updateParams: (partial: Partial<LatticeParams>) => void;
+  reseedGeneration: () => void;
   setProcessPreset: (preset: ProcessPreset) => void;
   setLatticeType: (type: LatticeType) => void;
   setVariant: (variant: GenerationVariant) => void;
   setGenerating: (generating: boolean) => void;
   setProgress: (progress: number, message: string) => void;
+  setGenerationError: (message: string | null) => void;
   setResultMesh: (result: MarchingCubesResult | null) => void;
   setValidation: (validation: ValidationResult | null) => void;
   setViewMode: (mode: ViewMode) => void;
@@ -447,10 +459,12 @@ export const useStore = create<AppState>((set) => ({
   selectionRedo: [],
   selectionStrokeStart: null,
   params: persisted?.params ? { ...DEFAULT_PARAMS, ...persisted.params } : { ...DEFAULT_PARAMS },
+  generationSeed: persisted?.generationSeed ?? DEFAULT_GENERATION_SEED,
   demoParamsByType: {},
   generating: false,
   progress: 0,
   progressMessage: '',
+  generationError: null,
   resultMesh: null,
   validation: null,
   viewMode: persisted?.viewMode ?? 'original',
@@ -473,6 +487,7 @@ export const useStore = create<AppState>((set) => ({
     selectionMode: 'none',
     resultMesh: null,
     validation: null,
+    generationError: null,
     viewMode: 'original',
     keepOutTris: new Set(),
     keepInTris: new Set(),
@@ -499,6 +514,7 @@ export const useStore = create<AppState>((set) => ({
     selectionMode: 'none',
     resultMesh: null,
     validation: null,
+    generationError: null,
     viewMode: 'original',
     keepOutTris: new Set(),
     keepInTris: new Set(),
@@ -529,6 +545,7 @@ export const useStore = create<AppState>((set) => ({
     selectionMode: 'none',
     resultMesh: null,
     validation: null,
+    generationError: null,
     viewMode: 'original',
     keepOutTris: new Set(),
     keepInTris: new Set(),
@@ -657,6 +674,13 @@ export const useStore = create<AppState>((set) => ({
     };
   }),
 
+  reseedGeneration: () => set((state) => ({
+    generationSeed: createReseedValue(state.generationSeed),
+    resultMesh: null,
+    validation: null,
+    generationError: null,
+  })),
+
   setProcessPreset: (preset) => set((s) => {
     const nextParams = { ...s.params, processPreset: preset, ...PROCESS_DEFAULTS[preset] };
     if (!s.demoModeActive) return { params: nextParams };
@@ -706,6 +730,8 @@ export const useStore = create<AppState>((set) => ({
   setGenerating: (generating) => set({ generating }),
 
   setProgress: (progress, message) => set({ progress, progressMessage: message }),
+
+  setGenerationError: (message) => set({ generationError: message }),
 
   setResultMesh: (result) => set((s) => {
     if (!result) return { resultMesh: null, viewMode: 'original' };
@@ -793,10 +819,12 @@ export const useStore = create<AppState>((set) => ({
     selectionRedo: [],
     selectionStrokeStart: null,
     params: { ...project.params },
+    generationSeed: normalizeGenerationSeed(project.generationSeed),
     demoParamsByType: {},
     generating: false,
     progress: 0,
     progressMessage: '',
+    generationError: null,
     resultMesh: null,
     validation: null,
     viewMode: 'original',
@@ -830,10 +858,12 @@ export const useStore = create<AppState>((set) => ({
       selectionRedo: [],
       selectionStrokeStart: null,
       params: { ...DEFAULT_PARAMS },
+      generationSeed: DEFAULT_GENERATION_SEED,
       demoParamsByType: {},
       generating: false,
       progress: 0,
       progressMessage: '',
+      generationError: null,
       viewMode: 'original',
       clipPlane: { axis: 'z', position: 0.5, flipped: false },
       viewerBackground: DEFAULT_VIEWER_BACKGROUND,
@@ -849,6 +879,7 @@ export const useStore = create<AppState>((set) => ({
 function persistedSubset(state: AppState): PersistedState {
   return {
     params: state.params,
+    generationSeed: state.generationSeed,
     sampleShape: state.sampleShape,
     sphereMode: state.sphereMode,
     sphereRadius: state.sphereRadius,
@@ -861,7 +892,7 @@ function persistedSubset(state: AppState): PersistedState {
 
 export function buildPersistedAppState(state: AppState): PersistedAppState {
   return {
-    version: 2,
+    version: 3,
     savedAt: Date.now(),
     ...persistedSubset(state),
     viewerCameraState: state.viewerCameraState,
@@ -886,10 +917,12 @@ export function hydrateFromSnapshot(snapshot: Partial<PersistedAppState>): Parti
     selectionRedo: [],
     selectionStrokeStart: null,
     params: persistedState.params,
+    generationSeed: persistedState.generationSeed,
     demoParamsByType: {},
     generating: false,
     progress: 0,
     progressMessage: '',
+    generationError: null,
     resultMesh: null,
     validation: null,
     viewMode: persistedState.viewMode,

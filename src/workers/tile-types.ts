@@ -6,6 +6,7 @@ export interface LatticeTileJob {
   type: 'tile';
   tileId: number;
   params: LatticeParams;
+  generationSeed: number;
   shape: SampleShape;
   sphereRadius: number;
   bounds: { min: Vec3; max: Vec3 };

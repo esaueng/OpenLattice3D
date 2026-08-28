@@ -17,7 +17,7 @@ import {
 } from '../geometry/escape-holes';
 import type { LatticeParams, ValidationResult, SampleShape } from '../types/project';
 import type { Vec3 } from '../geometry/vec3';
-import { add, sub, dot, cross, length, scale, normalize } from '../geometry/vec3';
+import { add, sub, dot, length, scale, normalize } from '../geometry/vec3';
 import type { SurfaceHexSample } from '../geometry/lattice';
 import type { TileBackend } from './tile-types';
 import {
@@ -28,11 +28,20 @@ import {
   tileWorkerCount,
 } from './tiled-generation';
 import { estimateGenerationTimings, formatDuration } from './generation-estimate';
-import {
-  addMeshTriangleArea,
-  validateMeshPositions,
-} from '../geometry/mesh-limits';
 import { surfaceSampleTargetCount } from './surface-sampling-limits';
+import {
+  buildMeshSampler,
+  buildSurfaceSampleJobs,
+  generatePoissonSamples,
+  generateShapeSurfaceSamples,
+  sampleSurfacePointForShape,
+  type ShapeSampleParams,
+} from './surface-sampling';
+import {
+  createDeterministicRandom,
+  normalizeGenerationSeed,
+} from '../geometry/deterministic-random';
+import { createProgressReporter } from './progress-reporter';
 
 type SdfFunction = ((x: number, y: number, z: number) => number) & Partial<GridSdfSampler>;
 type WorkerPostMessage = (message: unknown, transfer: Transferable[]) => void;
@@ -93,6 +102,7 @@ export interface WorkerMessage {
   keepOutTris?: number[];
   keepInTris?: number[];
   demoMode?: boolean;
+  generationSeed?: number;
 }
 
 export interface WorkerResponse {
@@ -109,11 +119,13 @@ export interface WorkerResponse {
   /** Set when the requested feature width is smaller than the sample grid. */
   thinFilterSkipped?: string;
   backend?: TileBackend;
+  transient?: boolean;
 }
 
 let cancelled = false;
 
 type SurfaceSampleWorkerResponse = {
+  streamId: number;
   positions: Float32Array;
   normals: Float32Array;
 };
@@ -121,133 +133,83 @@ type SurfaceSampleWorkerResponse = {
 type ShapeSampleWorkerMessage = {
   mode: 'shape';
   shape: SampleShape;
-  params: {
-    radius?: number;
-    halfSize?: number;
-    cylRadius?: number;
-    cylHalfHeight?: number;
-    torusMajor?: number;
-    torusTube?: number;
-    capRadius?: number;
-    capHalfHeight?: number;
-  };
+  params: ShapeSampleParams;
   targetCount: number;
   minDistance: number;
+  streamSeed: number;
+  streamId: number;
 };
 
 async function generatePoissonSamplesParallel(
-  msgFactory: (targetCount: number) => ShapeSampleWorkerMessage,
+  shape: SampleShape,
+  params: ShapeSampleParams,
   targetCount: number,
   minDistance: number,
+  generationSeed: number,
   maxWorkers = Math.max(1, Math.min(4, (self.navigator?.hardwareConcurrency ?? 2) - 1))
 ): Promise<SurfaceHexSample[]> {
-  const workerCount = Math.max(1, Math.min(maxWorkers, targetCount >= 240 ? 4 : 2));
-  if (workerCount <= 1) {
-    return [];
-  }
+  const jobs = buildSurfaceSampleJobs(generationSeed, shape, targetCount);
+  const results: SurfaceHexSample[][] = Array.from({ length: jobs.length }, () => []);
+  let nextJob = 0;
 
-  const perWorker = Math.ceil(targetCount / workerCount);
-  const jobs = Array.from({ length: workerCount }, async (_, i) => {
-    const count = Math.min(perWorker, Math.max(0, targetCount - i * perWorker));
-    if (count <= 0) return [] as SurfaceHexSample[];
+  const runJob = async () => {
+    while (nextJob < jobs.length) {
+      const job = jobs[nextJob++];
+      if (maxWorkers <= 1) {
+        results[job.streamId] = generateShapeSurfaceSamples(
+          shape,
+          params,
+          job.targetCount,
+          minDistance,
+          job.streamSeed,
+        );
+        continue;
+      }
 
-    const worker = new Worker(new URL('./surface-sample-worker.ts', import.meta.url), { type: 'module' });
-    const response = await new Promise<SurfaceSampleWorkerResponse>((resolve, reject) => {
-      worker.onmessage = (ev: MessageEvent<SurfaceSampleWorkerResponse>) => resolve(ev.data);
-      worker.onerror = (err) => reject(err);
-      const payload = msgFactory(count);
-      worker.postMessage(payload);
-    }).finally(() => worker.terminate());
-
-    const samples: SurfaceHexSample[] = [];
-    for (let j = 0; j < response.positions.length; j += 3) {
-      samples.push({
-        pos: [response.positions[j], response.positions[j + 1], response.positions[j + 2]],
-        normal: normalize([response.normals[j], response.normals[j + 1], response.normals[j + 2]]),
-      });
+      const worker = new Worker(new URL('./surface-sample-worker.ts', import.meta.url), { type: 'module' });
+      const response = await new Promise<SurfaceSampleWorkerResponse>((resolve, reject) => {
+        worker.onmessage = (event: MessageEvent<SurfaceSampleWorkerResponse>) => resolve(event.data);
+        worker.onerror = () => reject(new Error('Surface sampling worker failed'));
+        worker.onmessageerror = () => reject(new Error('Surface sampling worker returned an unreadable response'));
+        const payload: ShapeSampleWorkerMessage = {
+          mode: 'shape',
+          shape,
+          params,
+          targetCount: job.targetCount,
+          minDistance,
+          streamSeed: job.streamSeed,
+          streamId: job.streamId,
+        };
+        worker.postMessage(payload);
+      }).finally(() => worker.terminate());
+      if (
+        response.streamId !== job.streamId
+        || !(response.positions instanceof Float32Array)
+        || !(response.normals instanceof Float32Array)
+        || response.positions.length !== response.normals.length
+        || response.positions.length % 3 !== 0
+      ) {
+        throw new Error('Surface sampling worker returned a malformed response');
+      }
+      const samples: SurfaceHexSample[] = [];
+      for (let j = 0; j < response.positions.length; j += 3) {
+        samples.push({
+          pos: [response.positions[j], response.positions[j + 1], response.positions[j + 2]],
+          normal: normalize([response.normals[j], response.normals[j + 1], response.normals[j + 2]]),
+        });
+      }
+      results[job.streamId] = samples;
     }
-    return samples;
-  });
+  };
 
-  const all = (await Promise.all(jobs)).flat();
-  // Trim to requested size if workers overshoot.
-  return all.slice(0, targetCount);
+  const physicalWorkers = Math.min(Math.max(1, maxWorkers), jobs.length);
+  await Promise.all(Array.from({ length: physicalWorkers }, () => runJob()));
+  return results.flat().slice(0, targetCount);
 }
 type SurfaceSamplerTarget = {
   samples: SurfaceHexSample[];
   project: (p: Vec3) => { pos: Vec3; normal: Vec3 };
 };
-
-function triangleArea(a: Vec3, b: Vec3, c: Vec3): number {
-  return 0.5 * length(cross(sub(b, a), sub(c, a)));
-}
-
-function pickTriangle(cumulativeAreas: Float32Array, totalArea: number): number {
-  const r = Math.random() * totalArea;
-  let lo = 0;
-  let hi = cumulativeAreas.length - 1;
-  while (lo < hi) {
-    const mid = Math.floor((lo + hi) / 2);
-    if (r <= cumulativeAreas[mid]) hi = mid;
-    else lo = mid + 1;
-  }
-  return lo;
-}
-
-function sampleTriangle(a: Vec3, b: Vec3, c: Vec3): Vec3 {
-  const r1 = Math.random();
-  const r2 = Math.random();
-  const sqrtR1 = Math.sqrt(r1);
-  const u = 1 - sqrtR1;
-  const v = sqrtR1 * (1 - r2);
-  const w = sqrtR1 * r2;
-  return [
-    a[0] * u + b[0] * v + c[0] * w,
-    a[1] * u + b[1] * v + c[1] * w,
-    a[2] * u + b[2] * v + c[2] * w,
-  ];
-}
-
-type MeshSampler = {
-  sample: () => SurfaceHexSample;
-  totalArea: number;
-};
-
-function buildMeshSampler(
-  positions: Float32Array,
-  normals: Float32Array,
-  triCount: number,
-  keepOutTris: Set<number>
-): MeshSampler | null {
-  validateMeshPositions(positions);
-  const areas = new Float32Array(triCount);
-  let totalArea = 0;
-  for (let i = 0; i < triCount; i++) {
-    if (keepOutTris.has(i)) continue;
-    const o = i * 9;
-    const a: Vec3 = [positions[o], positions[o + 1], positions[o + 2]];
-    const b: Vec3 = [positions[o + 3], positions[o + 4], positions[o + 5]];
-    const c: Vec3 = [positions[o + 6], positions[o + 7], positions[o + 8]];
-    totalArea = addMeshTriangleArea(totalArea, triangleArea(a, b, c));
-    areas[i] = totalArea;
-  }
-  if (totalArea <= 1e-6) return null;
-  return {
-    totalArea,
-    sample: () => {
-      const triIndex = pickTriangle(areas, totalArea);
-      const o = triIndex * 9;
-      const a: Vec3 = [positions[o], positions[o + 1], positions[o + 2]];
-      const b: Vec3 = [positions[o + 3], positions[o + 4], positions[o + 5]];
-      const c: Vec3 = [positions[o + 6], positions[o + 7], positions[o + 8]];
-      const pos = sampleTriangle(a, b, c);
-      const ni = triIndex * 3;
-      const normal = normalize([normals[ni], normals[ni + 1], normals[ni + 2]]);
-      return { pos, normal };
-    },
-  };
-}
-
 
 function estimateNormal(
   sdf: (x: number, y: number, z: number) => number,
@@ -273,111 +235,6 @@ function projectToSurfaceSdf(
   return { pos: projected, normal: n2 };
 }
 
-function sampleSurfacePointForShape(
-  shape: SampleShape,
-  params: { radius?: number; halfSize?: number; cylRadius?: number; cylHalfHeight?: number; torusMajor?: number; torusTube?: number; capRadius?: number; capHalfHeight?: number }
-): SurfaceHexSample {
-  if (shape === 'sphere') {
-    const r = params.radius ?? 25;
-    const u = Math.random();
-    const v = Math.random();
-    const theta = 2 * Math.PI * u;
-    const phi = Math.acos(2 * v - 1);
-    const x = r * Math.sin(phi) * Math.cos(theta);
-    const y = r * Math.sin(phi) * Math.sin(theta);
-    const z = r * Math.cos(phi);
-    const pos: Vec3 = [x, y, z];
-    return { pos, normal: normalize(pos) };
-  }
-  if (shape === 'cube') {
-    const h = params.halfSize ?? 15;
-    const faceArea = 4 * h * h;
-    const totalArea = faceArea * 6;
-    const r = Math.random() * totalArea;
-    const face = Math.floor(r / faceArea);
-    const u = (Math.random() * 2 - 1) * h;
-    const v = (Math.random() * 2 - 1) * h;
-    let pos: Vec3;
-    let normal: Vec3;
-    switch (face) {
-      case 0:
-        pos = [h, u, v]; normal = [1, 0, 0]; break;
-      case 1:
-        pos = [-h, u, v]; normal = [-1, 0, 0]; break;
-      case 2:
-        pos = [u, h, v]; normal = [0, 1, 0]; break;
-      case 3:
-        pos = [u, -h, v]; normal = [0, -1, 0]; break;
-      case 4:
-        pos = [u, v, h]; normal = [0, 0, 1]; break;
-      default:
-        pos = [u, v, -h]; normal = [0, 0, -1]; break;
-    }
-    return { pos, normal };
-  }
-  if (shape === 'cylinder') {
-    const r = params.cylRadius ?? 15;
-    const h = params.cylHalfHeight ?? 20;
-    const sideArea = 2 * Math.PI * r * (2 * h);
-    const capArea = Math.PI * r * r;
-    const totalArea = sideArea + 2 * capArea;
-    const pick = Math.random() * totalArea;
-    if (pick < sideArea) {
-      const theta = Math.random() * 2 * Math.PI;
-      const z = (Math.random() * 2 - 1) * h;
-      const x = r * Math.cos(theta);
-      const y = r * Math.sin(theta);
-      return { pos: [x, y, z], normal: normalize([x, y, 0]) };
-    }
-    const theta = Math.random() * 2 * Math.PI;
-    const rr = Math.sqrt(Math.random()) * r;
-    const x = rr * Math.cos(theta);
-    const y = rr * Math.sin(theta);
-    const top = pick < sideArea + capArea;
-    return { pos: [x, y, top ? h : -h], normal: [0, 0, top ? 1 : -1] };
-  }
-  if (shape === 'torus') {
-    const major = params.torusMajor ?? 20;
-    const tube = params.torusTube ?? 8;
-    const u = Math.random() * 2 * Math.PI;
-    const v = Math.random() * 2 * Math.PI;
-    const cx = (major + tube * Math.cos(v));
-    const x = cx * Math.cos(u);
-    const y = cx * Math.sin(u);
-    const z = tube * Math.sin(v);
-    const normal = normalize([Math.cos(u) * Math.cos(v), Math.sin(u) * Math.cos(v), Math.sin(v)]);
-    return { pos: [x, y, z], normal };
-  }
-  if (shape === 'capsule') {
-    const r = params.capRadius ?? 12;
-    const h = params.capHalfHeight ?? 15;
-    const cylArea = 2 * Math.PI * r * (2 * h);
-    const sphereArea = 4 * Math.PI * r * r;
-    const totalArea = cylArea + sphereArea;
-    const pick = Math.random() * totalArea;
-    if (pick < cylArea) {
-      const theta = Math.random() * 2 * Math.PI;
-      const z = (Math.random() * 2 - 1) * h;
-      const x = r * Math.cos(theta);
-      const y = r * Math.sin(theta);
-      return { pos: [x, y, z], normal: normalize([x, y, 0]) };
-    }
-    const u = Math.random();
-    const v = Math.random();
-    const theta = 2 * Math.PI * u;
-    const phi = Math.acos(2 * v - 1);
-    const sx = r * Math.sin(phi) * Math.cos(theta);
-    const sy = r * Math.sin(phi) * Math.sin(theta);
-    const sz = r * Math.cos(phi);
-    const top = Math.random() > 0.5;
-    const centerZ = top ? h : -h;
-    const pos: Vec3 = [sx, sy, sz + centerZ];
-    const normal = normalize([sx, sy, sz]);
-    return { pos, normal };
-  }
-  return { pos: [0, 0, 0], normal: [0, 0, 1] };
-}
-
 function buildFibonacciSphereSamples(radius: number, count: number): SurfaceHexSample[] {
   const samples: SurfaceHexSample[] = [];
   const goldenAngle = Math.PI * (3 - Math.sqrt(5));
@@ -390,60 +247,6 @@ function buildFibonacciSphereSamples(radius: number, count: number): SurfaceHexS
     const y = Math.sin(theta) * ring;
     const pos: Vec3 = [x * radius, y * radius, z * radius];
     samples.push({ pos, normal: normalize(pos) });
-  }
-  return samples;
-}
-
-function generatePoissonSamples(
-  sampler: () => SurfaceHexSample,
-  targetCount: number,
-  minDistance: number
-): SurfaceHexSample[] {
-  const samples: SurfaceHexSample[] = [];
-  let currentMin = minDistance;
-  let attempts = 0;
-  while (samples.length < targetCount && attempts < 6) {
-    const grid = new Map<string, SurfaceHexSample[]>();
-    for (const s of samples) {
-      const key = `${Math.floor(s.pos[0] / currentMin)},${Math.floor(s.pos[1] / currentMin)},${Math.floor(s.pos[2] / currentMin)}`;
-      const bucket = grid.get(key);
-      if (bucket) bucket.push(s);
-      else grid.set(key, [s]);
-    }
-    const batchCount = Math.max(targetCount * 3, 200);
-    for (let i = 0; i < batchCount && samples.length < targetCount; i++) {
-      const cand = sampler();
-      const cx = Math.floor(cand.pos[0] / currentMin);
-      const cy = Math.floor(cand.pos[1] / currentMin);
-      const cz = Math.floor(cand.pos[2] / currentMin);
-      let ok = true;
-      for (let dx = -1; dx <= 1 && ok; dx++) {
-        for (let dy = -1; dy <= 1 && ok; dy++) {
-          for (let dz = -1; dz <= 1 && ok; dz++) {
-            const key = `${cx + dx},${cy + dy},${cz + dz}`;
-            const bucket = grid.get(key);
-            if (!bucket) continue;
-            for (const other of bucket) {
-              if (length(sub(cand.pos, other.pos)) < currentMin) {
-                ok = false;
-                break;
-              }
-            }
-          }
-        }
-      }
-      if (ok) {
-        samples.push(cand);
-        const key = `${cx},${cy},${cz}`;
-        const bucket = grid.get(key);
-        if (bucket) bucket.push(cand);
-        else grid.set(key, [cand]);
-      }
-    }
-    if (samples.length < targetCount) {
-      currentMin *= 0.85;
-      attempts += 1;
-    }
   }
   return samples;
 }
@@ -564,7 +367,9 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
   if (msg.type === 'generate') {
     try {
       const generationStart = performance.now();
+      const progressReporter = createProgressReporter((response) => postMessage(response));
       const params = msg.params!;
+      const generationSeed = normalizeGenerationSeed(msg.generationSeed);
       const thinFilterActive = params.thinSectionFilter > 0;
       // Morphological opening must run before escape-hole subtraction so it
       // cannot silently change the requested hole diameter.
@@ -613,7 +418,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
           const cx = (col - (cols - 1) / 2) * spacing;
           const cz = (row - (rows - 1) / 2) * spacing;
           const localParams: LatticeParams = { ...baseParams, latticeType };
-          const sphereSdf = buildSphereLattice(demoRadius, localParams);
+          const sphereSdf = buildSphereLattice(demoRadius, localParams, generationSeed);
           return {
             cx,
             cz,
@@ -653,7 +458,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
             const R = sphereRadius;
             bounds = { min: [-(R+pad), -(R+pad), -(R+pad)], max: [R+pad, R+pad, R+pad] };
             objectSdf = (x, y, z) => Math.sqrt(x * x + y * y + z * z) - R;
-            sdf = isSurfacePolygon ? objectSdf : buildSphereLattice(R, fieldParams);
+            sdf = isSurfacePolygon ? objectSdf : buildSphereLattice(R, fieldParams, generationSeed);
             break;
           }
           case 'cube': {
@@ -667,7 +472,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
               const inside = Math.min(Math.max(dx, dy, dz), 0);
               return outside + inside;
             };
-            sdf = isSurfacePolygon ? objectSdf : buildCubeLattice(h, fieldParams);
+            sdf = isSurfacePolygon ? objectSdf : buildCubeLattice(h, fieldParams, generationSeed);
             break;
           }
           case 'cylinder': {
@@ -680,7 +485,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
               const inside = Math.min(Math.max(dRadial, dAxial), 0);
               return outside + inside;
             };
-            sdf = isSurfacePolygon ? objectSdf : buildCylinderLattice(cr, ch, fieldParams);
+            sdf = isSurfacePolygon ? objectSdf : buildCylinderLattice(cr, ch, fieldParams, generationSeed);
             break;
           }
           case 'torus': {
@@ -691,7 +496,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
               const qx = Math.sqrt(x * x + y * y) - mR;
               return Math.sqrt(qx * qx + z * z) - tR;
             };
-            sdf = isSurfacePolygon ? objectSdf : buildTorusLattice(mR, tR, fieldParams);
+            sdf = isSurfacePolygon ? objectSdf : buildTorusLattice(mR, tR, fieldParams, generationSeed);
             break;
           }
           case 'capsule': {
@@ -702,7 +507,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
               const cz = Math.max(-capHH, Math.min(capHH, z));
               return Math.sqrt(x * x + y * y + (z - cz) * (z - cz)) - capR;
             };
-            sdf = isSurfacePolygon ? objectSdf : buildCapsuleLattice(capR, capHH, fieldParams);
+            sdf = isSurfacePolygon ? objectSdf : buildCapsuleLattice(capR, capHH, fieldParams, generationSeed);
             break;
           }
         }
@@ -732,17 +537,19 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
               capRadius: 12,
               capHalfHeight: 15,
             };
-            const fallbackSampler = () => sampleSurfacePointForShape(shape, samplerParams);
+            const fallbackRandom = createDeterministicRandom(
+              generationSeed,
+              'surface-sampling',
+              shape,
+              'fallback',
+            );
+            const fallbackSampler = () => sampleSurfacePointForShape(shape, samplerParams, fallbackRandom);
             surfaceSamples = await generatePoissonSamplesParallel(
-              (count) => ({
-                mode: 'shape',
-                shape,
-                params: samplerParams,
-                targetCount: count,
-                minDistance: params.cellSize * 0.75,
-              }),
+              shape,
+              samplerParams,
               sampleCount,
-              params.cellSize * 0.75
+              params.cellSize * 0.75,
+              generationSeed,
             );
             if (surfaceSamples.length < Math.floor(sampleCount * 0.8)) {
               surfaceSamples = generatePoissonSamples(fallbackSampler, sampleCount, params.cellSize * 0.75);
@@ -791,6 +598,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         sdf = buildCombinedSDF({
           bvh,
           params: fieldParams,
+          generationSeed,
           keepOutTris: keepOutSet,
           keepInTris: keepInSet,
         });
@@ -805,7 +613,13 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
           const positions = msg.meshPositions!;
           const normals = msg.meshNormals!;
           const triCount = msg.meshTriCount!;
-          const meshSampler = buildMeshSampler(positions, normals, triCount, keepOutSet);
+          const meshSampler = buildMeshSampler(
+            positions,
+            normals,
+            triCount,
+            keepOutSet,
+            createDeterministicRandom(generationSeed, 'surface-sampling', 'mesh'),
+          );
           const totalArea = meshSampler?.totalArea ?? 0;
           const sampleCount = surfaceSampleTargetCount(totalArea, params.cellSize);
           if (meshSampler) {
@@ -852,16 +666,16 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
           } as WorkerResponse);
           const { result: rawTiledResult, stats: tileStats } = await runTiledGeneration(
             params,
+            generationSeed,
             shape,
             sphereRadius ?? msg.sphereRadius ?? 25,
             bounds,
             resolution,
             (completed, total, timingMs, stats) => {
-              postMessage({
-                type: 'progress',
-                progress: 0.12 + (completed / Math.max(1, total)) * 0.76,
-                message: `cpu-tiled: ${completed}/${total} tiles processed, ${stats.tilesSkipped}/${stats.tilesTotal} skipped (${Math.round(timingMs)}ms worker time)`
-              } as WorkerResponse);
+              progressReporter.report(
+                0.12 + (completed / Math.max(1, total)) * 0.76,
+                `cpu-tiled: ${completed}/${total} tiles processed, ${stats.tilesSkipped}/${stats.tilesTotal} skipped (${Math.round(timingMs)}ms worker time)`,
+              );
             },
             () => cancelled,
           );
@@ -920,11 +734,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         const percent = Math.floor(fraction * 100);
         if (percent < 100 && percent < lastSamplingPercent + 5) return;
         lastSamplingPercent = percent;
-        postMessage({
-          type: 'progress',
-          progress: 0.12 + fraction * 0.3,
-          message: `Sampling field: ${percent}%`,
-        } as WorkerResponse);
+        progressReporter.report(0.12 + fraction * 0.3, `Sampling field: ${percent}%`);
       });
 
       if (thinFilterActive) {
@@ -978,11 +788,10 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
           preSecondsActual + smoothedMarchSeconds - elapsedSeconds
         );
         estimateLabel = formatDuration(remainingSeconds);
-        postMessage({
-          type: 'progress',
-          progress: overallProgress,
-          message: `Marching cubes: ${percent}% (~${estimateLabel} remaining)`
-        } as WorkerResponse);
+        progressReporter.report(
+          overallProgress,
+          `Marching cubes: ${percent}% (~${estimateLabel} remaining)`,
+        );
       });
 
       const result = closeBoundaryLoops(rawResult).result;

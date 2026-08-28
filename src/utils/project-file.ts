@@ -10,9 +10,17 @@ import {
 } from '../types/project';
 import type { ClipPlaneState } from '../store/useStore';
 import { parseViewerBackground } from './viewer-color';
+import {
+  DEFAULT_GENERATION_SEED,
+  GENERATION_PRNG,
+  GENERATION_SEED_VERSION,
+  isGenerationSeed,
+  normalizeGenerationSeed,
+} from '../geometry/deterministic-random';
 
 const PROJECT_SCHEMA = 'openlattice3d-project';
-const PROJECT_VERSION = 2;
+const PROJECT_VERSION = 3;
+const LEGACY_PROJECT_VERSION = 2;
 const SAMPLE_SHAPES: readonly SampleShape[] = ['sphere', 'cube', 'cylinder', 'torus', 'capsule'];
 
 export type ProjectSource =
@@ -21,6 +29,7 @@ export type ProjectSource =
 
 export interface ProjectExportInput {
   params: LatticeParams;
+  generationSeed: number;
   source: ProjectSource;
   keepOutTris: Set<number>;
   keepInTris: Set<number>;
@@ -32,6 +41,7 @@ export interface ProjectExportInput {
 export interface RestoredProjectFile {
   kind: 'project';
   params: LatticeParams;
+  generationSeed: number;
   originalMesh: TriangleMesh | null;
   meshInfo: MeshInfo | null;
   meshFileName: string;
@@ -112,6 +122,11 @@ export function createProjectFile(input: ProjectExportInput): Record<string, unk
     units: 'millimeter',
     source,
     parameters: input.params,
+    reproducibility: {
+      prng: GENERATION_PRNG,
+      seedVersion: GENERATION_SEED_VERSION,
+      seed: normalizeGenerationSeed(input.generationSeed),
+    },
     selectionMask: {
       meshFingerprint: input.source.kind === 'mesh' ? meshFingerprint(input.source.mesh) : null,
       keepOut: Array.from(input.keepOutTris),
@@ -156,11 +171,33 @@ export function parseProjectFile(data: unknown): ParsedProjectFile {
     ? [`Ignored invalid parameter value(s): ${sanitized.rejected.join(', ')}`]
     : [];
 
-  if (root.schema !== PROJECT_SCHEMA || root.version !== PROJECT_VERSION) {
+  const projectVersion = root.version;
+  if (
+    root.schema !== PROJECT_SCHEMA
+    || (projectVersion !== PROJECT_VERSION && projectVersion !== LEGACY_PROJECT_VERSION)
+  ) {
     return { kind: 'parameters', params: sanitized.params, accepted: sanitized.accepted, warnings };
   }
   if (sanitized.accepted.length === 0) throw new Error('Project contains no valid lattice parameters');
   if (root.units !== 'millimeter') throw new Error(`Unsupported project units: ${String(root.units)}`);
+
+  let generationSeed = DEFAULT_GENERATION_SEED;
+  if (projectVersion === LEGACY_PROJECT_VERSION) {
+    warnings.push(`Migrated legacy project to deterministic seed ${DEFAULT_GENERATION_SEED}`);
+  } else {
+    const reproducibility = typeof root.reproducibility === 'object' && root.reproducibility !== null
+      ? root.reproducibility as Record<string, unknown>
+      : null;
+    if (
+      !reproducibility
+      || reproducibility.prng !== GENERATION_PRNG
+      || reproducibility.seedVersion !== GENERATION_SEED_VERSION
+      || !isGenerationSeed(reproducibility.seed)
+    ) {
+      throw new Error('Project reproducibility metadata is missing or unsupported');
+    }
+    generationSeed = reproducibility.seed;
+  }
 
   const source = root.source as Record<string, unknown> | null;
   if (!source || typeof source !== 'object') throw new Error('Project source is missing');
@@ -192,6 +229,7 @@ export function parseProjectFile(data: unknown): ParsedProjectFile {
     return {
       kind: 'project',
       params,
+      generationSeed,
       originalMesh: mesh,
       meshInfo: analyzeMesh(mesh),
       meshFileName: typeof source.fileName === 'string' ? source.fileName : 'restored-model.stl',
@@ -209,6 +247,7 @@ export function parseProjectFile(data: unknown): ParsedProjectFile {
     return {
       kind: 'project',
       params,
+      generationSeed,
       originalMesh: null,
       meshInfo: null,
       meshFileName: typeof source.fileName === 'string' ? source.fileName : String(source.shape),
