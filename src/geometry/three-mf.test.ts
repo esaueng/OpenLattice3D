@@ -12,6 +12,12 @@ describe('3MF export', () => {
     expect(xml.match(/<triangle /g)).toHaveLength(12);
   });
 
+  it('embeds reproducibility metadata when a seed is supplied', () => {
+    expect(build3MFModelXml(cube, 0x1234abcd)).toContain(
+      '<metadata name="OpenLattice3D.GenerationSeed">v1:0x1234abcd</metadata>',
+    );
+  });
+
   it('packages required 3MF parts in a ZIP container', () => {
     const packageBytes = create3MF(cube);
     const view = new DataView(packageBytes.buffer, packageBytes.byteOffset, packageBytes.byteLength);

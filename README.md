@@ -161,6 +161,13 @@ After generation, the validation panel shows:
 - **Export OBJ**: indexed Wavefront OBJ geometry (the format does not declare units)
 - **Export Project JSON**: a resumable project with its source geometry and workspace state
 
+Every project carries a versioned 32-bit generation seed. Repeated generation with the same
+project, seed, application version, parameters, and resolution is byte-deterministic even when
+tile completion order or the worker-pool size changes. Use **Reseed** for an intentional new
+stochastic result; generation never draws from ambient randomness. Project JSON preserves the
+seed and PRNG version, while STL, 3MF, and OBJ exports include the seed in their available
+metadata fields.
+
 Mesh exports can optionally reduce triangle count while keeping simplification
 error within the configured geometric tolerance.
 
@@ -229,7 +236,9 @@ single-worker paths; see [the backend decision](./docs/performance/backend-decis
 Unit tests cover STL parsing (including malformed and shipped-asset round trips), marching
 cubes, BVH distances, all lattice SDFs and TPMS thickness calibration, topology stress cases,
 escape-hole subtraction, watertight repair, tolerance-bounded simplification, morphology,
-3MF/OBJ packaging, project restoration, state history, and parameter sanitization.
+3MF/OBJ packaging, project restoration and seed migration, repeatable geometry hashes,
+worker-count independence, worker failure/cancellation races, state history, and parameter
+sanitization.
 
 ```bash
 npm test

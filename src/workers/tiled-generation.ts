@@ -11,7 +11,21 @@ import type {
 export const TILE_SIZE = 32;
 export const ENABLE_SPARSE_TILE_SKIPPING = true;
 const MAX_TILE_WORKERS = 8;
-let activeTileWorkers: Worker[] = [];
+
+export interface TileWorkerLike {
+  onmessage: ((event: { data: unknown }) => void) | null;
+  onerror: ((event: unknown) => void) | null;
+  onmessageerror: ((event: unknown) => void) | null;
+  postMessage(message: LatticeTileJob): void;
+  terminate(): void;
+}
+
+export interface TiledGenerationOptions {
+  workerCount?: number;
+  createWorker?: () => TileWorkerLike;
+}
+
+let activeTileWorkers: TileWorkerLike[] = [];
 
 export function terminateTileWorkers(): void {
   for (const worker of activeTileWorkers) worker.terminate();
@@ -19,7 +33,7 @@ export function terminateTileWorkers(): void {
 }
 
 export function tileWorkerCount(): number {
-  return Math.max(1, Math.min(MAX_TILE_WORKERS, (self.navigator?.hardwareConcurrency || 4) - 1));
+  return Math.max(1, Math.min(MAX_TILE_WORKERS, (globalThis.navigator?.hardwareConcurrency || 4) - 1));
 }
 
 function objectSdfForShape(shape: SampleShape, sphereRadius: number): (x: number, y: number, z: number) => number {
@@ -104,6 +118,7 @@ function classifySparseTile(
 
 function buildTileJobs(
   params: LatticeParams,
+  generationSeed: number,
   shape: SampleShape,
   sphereRadius: number,
   bounds: { min: Vec3; max: Vec3 },
@@ -141,6 +156,7 @@ function buildTileJobs(
           type: 'tile',
           tileId: tileId++,
           params,
+          generationSeed,
           shape,
           sphereRadius,
           cells: [cellsX, cellsY, cellsZ],
@@ -175,37 +191,54 @@ function mergeTileResults(results: LatticeTileResult[]): MarchingCubesResult {
 
 export function runTiledGeneration(
   params: LatticeParams,
+  generationSeed: number,
   shape: SampleShape,
   sphereRadius: number,
   bounds: { min: Vec3; max: Vec3 },
   resolution: number,
   onProgress: (completed: number, total: number, timingMs: number, stats: TileSkipStats) => void,
   isCancelled: () => boolean,
+  options: TiledGenerationOptions = {},
 ): Promise<{ result: MarchingCubesResult; stats: TileSkipStats }> {
-  const { jobs, stats } = buildTileJobs(params, shape, sphereRadius, bounds, resolution);
+  const { jobs, stats } = buildTileJobs(params, generationSeed, shape, sphereRadius, bounds, resolution);
   if (jobs.length === 0) {
     return Promise.resolve({
       result: { positions: new Float32Array(0), normals: new Float32Array(0), triCount: 0 },
       stats,
     });
   }
-  const workerCount = Math.min(tileWorkerCount(), jobs.length);
+  const workerCount = Math.min(
+    Math.max(1, options.workerCount ?? tileWorkerCount()),
+    jobs.length,
+  );
   const results: LatticeTileResult[] = [];
   let nextJob = 0;
   let completed = 0;
   let timingMs = 0;
 
   return new Promise<{ result: MarchingCubesResult; stats: TileSkipStats }>((resolve, reject) => {
+    let settled = false;
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      terminateTileWorkers();
+      reject(error);
+    };
     const finish = () => {
+      if (settled) return;
+      settled = true;
       terminateTileWorkers();
       resolve({ result: mergeTileResults(results), stats });
     };
     const startWorker = () => {
-      const worker = new Worker(new URL('./lattice-tile-worker.ts', import.meta.url), { type: 'module' });
+      const worker = options.createWorker?.()
+        ?? new Worker(new URL('./lattice-tile-worker.ts', import.meta.url), { type: 'module' }) as unknown as TileWorkerLike;
       activeTileWorkers.push(worker);
+      let inFlightTileId: number | null = null;
       const postNext = () => {
+        if (settled) return;
         if (isCancelled()) {
-          reject(new Error('Cancelled'));
+          fail(new Error('Cancelled'));
           return;
         }
         const job = jobs[nextJob++];
@@ -213,29 +246,59 @@ export function runTiledGeneration(
           if (completed === jobs.length) finish();
           return;
         }
-        worker.postMessage(job);
+        inFlightTileId = job.tileId;
+        try {
+          worker.postMessage(job);
+        } catch (error) {
+          const detail = error instanceof Error && error.message ? `: ${error.message}` : '';
+          fail(new Error(`Could not start tile worker job${detail}`));
+        }
       };
-      worker.onmessage = (event: MessageEvent<LatticeTileResponse>) => {
-        const response = event.data;
+      worker.onmessage = (event) => {
+        if (settled) return;
+        const response = event.data as LatticeTileResponse;
+        if (
+          typeof response !== 'object'
+          || response === null
+          || (response.type !== 'result' && response.type !== 'error')
+          || response.tileId !== inFlightTileId
+        ) {
+          fail(new Error('Tile worker returned a malformed response'));
+          return;
+        }
         if (response.type === 'error') {
-          reject(new Error(response.message));
+          fail(new Error(response.message));
+          return;
+        }
+        if (
+          !(response.positions instanceof Float32Array)
+          || !(response.normals instanceof Float32Array)
+          || !Number.isInteger(response.triCount)
+          || response.triCount < 0
+          || response.positions.length < response.triCount * 9
+          || response.normals.length < response.triCount * 3
+          || !Number.isFinite(response.timing?.totalMs)
+        ) {
+          fail(new Error('Tile worker returned a malformed response'));
           return;
         }
         results[response.tileId] = response;
+        inFlightTileId = null;
         completed++;
         timingMs += response.timing.totalMs;
         onProgress(completed, jobs.length, timingMs, stats);
         if (completed === jobs.length) finish();
         else postNext();
       };
-      worker.onerror = () => reject(new Error('Tile worker failed'));
+      worker.onerror = () => fail(new Error('Tile worker failed'));
+      worker.onmessageerror = () => fail(new Error('Tile worker returned an unreadable response'));
       postNext();
     };
     try {
       for (let i = 0; i < workerCount; i++) startWorker();
     } catch (error) {
       terminateTileWorkers();
-      reject(error instanceof Error ? error : new Error('Tile worker creation failed'));
+      fail(error instanceof Error ? error : new Error('Tile worker creation failed'));
     }
   }).finally(() => terminateTileWorkers());
 }

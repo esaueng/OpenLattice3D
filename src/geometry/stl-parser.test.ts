@@ -107,6 +107,17 @@ describe('export round trip', () => {
     expect(Array.from(mesh.normals)).toEqual(Array.from(normals));
   });
 
+  it('accepts a bounded reproducibility header', () => {
+    const buffer = exportBinarySTL(
+      new Float32Array([0, 0, 0, 2, 0, 0, 0, 3, 0]),
+      new Float32Array([0, 0, 1]),
+      1,
+      'OpenLattice3D seed-v1:0x1234abcd',
+    );
+    const header = new TextDecoder().decode(new Uint8Array(buffer, 0, 80));
+    expect(header).toContain('seed-v1:0x1234abcd');
+  });
+
   it.each(['sphere-25mm.stl', 'cube-30mm.stl'])('round-trips the shipped %s asset', (assetName) => {
     const source = readFileSync(new URL(`../../public/assets/${assetName}`, import.meta.url));
     const sourceBuffer = source.buffer.slice(source.byteOffset, source.byteOffset + source.byteLength) as ArrayBuffer;

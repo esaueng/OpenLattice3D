@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useStore } from '../store/useStore';
-import type { WorkerMessage, WorkerResponse } from '../workers/lattice-worker';
+import type { WorkerMessage } from '../workers/lattice-worker';
 import type { ValidationWorkerMessage, ValidationWorkerResponse } from '../workers/validation-worker';
 import { requestNotificationPermission, sendNotification } from '../utils/notifications';
 import {
@@ -11,6 +11,11 @@ import {
 } from '../utils/browser-features';
 import { isSheetType } from '../geometry/lattice';
 import type { SampleShape } from '../types/project';
+import {
+  GenerationWorkerController,
+  type GenerationResultResponse,
+  type GenerationWorkerLike,
+} from './generation-worker-controller';
 
 function proceduralMaxSpan(shape: SampleShape | null, sphereRadius: number): number {
   switch (shape) {
@@ -54,7 +59,8 @@ export type LatticeGenerationControls = {
 };
 
 export function useLatticeGeneration(): LatticeGenerationControls {
-  const workerRef = useRef<Worker | null>(null);
+  const [workerController] = useState(() => new GenerationWorkerController());
+  const generationRunRef = useRef(0);
   const validationWorkerRef = useRef<Worker | null>(null);
 
   const canGenerate = useCallback(() => {
@@ -79,6 +85,7 @@ export function useLatticeGeneration(): LatticeGenerationControls {
     void requestNotificationPermission();
     store.setGenerating(true);
     store.setProgress(0, 'Starting...');
+    store.setGenerationError(null);
     store.addLog('Starting lattice generation...');
     const browserFeatures = getBrowserFeatureFlags();
     const browserFeatureSummary = formatBrowserFeatureFlags(browserFeatures);
@@ -88,21 +95,30 @@ export function useLatticeGeneration(): LatticeGenerationControls {
     store.setValidation(null);
     store.setDemoModeActive(false);
 
-    if (workerRef.current) {
-      workerRef.current.terminate();
-    }
+    const runId = ++generationRunRef.current;
     if (validationWorkerRef.current) {
       validationWorkerRef.current.terminate();
       validationWorkerRef.current = null;
     }
 
-    const worker = new Worker(
-      new URL('../workers/lattice-worker.ts', import.meta.url),
-      { type: 'module' }
-    );
-    workerRef.current = worker;
-
+    let worker: Worker;
+    try {
+      worker = new Worker(
+        new URL('../workers/lattice-worker.ts', import.meta.url),
+        { type: 'module' }
+      );
+    } catch (error) {
+      const detail = error instanceof Error && error.message ? `: ${error.message}` : '';
+      const message = `Could not create generation worker${detail}`;
+      store.addLog(message, 'error');
+      store.setGenerating(false);
+      store.setDemoModeActive(false);
+      store.setProgress(0, 'Generation failed');
+      store.setGenerationError(message);
+      return;
+    }
     const generationStartedAt = performance.now();
+    const generationSeed = store.generationSeed;
     const resolution = Math.round(24 + store.params.exportResolution * 24);
     const maxSpan = store.meshInfo
       ? Math.max(
@@ -122,6 +138,7 @@ export function useLatticeGeneration(): LatticeGenerationControls {
     const msg: WorkerMessage = {
       type: 'generate',
       params: store.params,
+      generationSeed,
       sphereMode: store.sphereMode,
       sphereRadius: store.sphereRadius,
       sampleShape: store.sampleShape,
@@ -146,8 +163,8 @@ export function useLatticeGeneration(): LatticeGenerationControls {
 
     const transferList = buildGenerationTransferList(msg);
 
-    const startValidation = (resp: WorkerResponse) => {
-      if (!resp.positions || !resp.normals || resp.triCount === undefined) return;
+    const startValidation = (resp: GenerationResultResponse) => {
+      if (generationRunRef.current !== runId) return;
       const latest = useStore.getState();
       if (validationWorkerRef.current) {
         validationWorkerRef.current.terminate();
@@ -165,6 +182,7 @@ export function useLatticeGeneration(): LatticeGenerationControls {
         normals: new Float32Array(resp.normals),
         triCount: resp.triCount,
         params: latest.params,
+        generationSeed,
         sphereMode: latest.sphereMode,
         sphereRadius: latest.sphereRadius,
         sampleShape: latest.sampleShape,
@@ -183,6 +201,7 @@ export function useLatticeGeneration(): LatticeGenerationControls {
       }
 
       validationWorker.onmessage = (event: MessageEvent<ValidationWorkerResponse>) => {
+        if (generationRunRef.current !== runId || validationWorkerRef.current !== validationWorker) return;
         const current = useStore.getState();
         const validationResp = event.data;
         if (validationResp.type === 'progress') {
@@ -199,66 +218,74 @@ export function useLatticeGeneration(): LatticeGenerationControls {
         }
       };
       validationWorker.onerror = () => {
+        if (generationRunRef.current !== runId || validationWorkerRef.current !== validationWorker) return;
         const current = useStore.getState();
         current.addLog('Validation worker failed', 'error');
         validationWorker.terminate();
         if (validationWorkerRef.current === validationWorker) validationWorkerRef.current = null;
       };
+      validationWorker.onmessageerror = () => {
+        if (generationRunRef.current !== runId || validationWorkerRef.current !== validationWorker) return;
+        const current = useStore.getState();
+        current.addLog('Validation worker returned an unreadable response', 'error');
+        validationWorker.terminate();
+        validationWorkerRef.current = null;
+      };
 
       validationWorker.postMessage(validationMsg, buildValidationTransferList(validationMsg));
     };
 
-    worker.onmessage = (e: MessageEvent<WorkerResponse>) => {
-      const current = useStore.getState();
-      const resp = e.data;
-      if (resp.type === 'progress') {
-        current.setProgress(resp.progress || 0, resp.message || '');
-        if (resp.message) current.addLog(resp.message);
-      } else if (resp.type === 'result') {
+    workerController.start(worker as unknown as GenerationWorkerLike, {
+      onProgress: (resp) => {
+        const current = useStore.getState();
+        current.setProgress(resp.progress, resp.message);
+        if (resp.message && !resp.transient) current.addLog(resp.message);
+      },
+      onResult: (resp) => {
+        const current = useStore.getState();
         current.setResultMesh({
-          positions: resp.positions!,
-          normals: resp.normals!,
-          triCount: resp.triCount!,
+          positions: resp.positions,
+          normals: resp.normals,
+          triCount: resp.triCount,
         });
         current.setGenerating(false);
         current.setProgress(1, 'Complete');
+        current.setGenerationError(null);
         current.setDemoModeActive(false);
         current.addLog(`Generation complete (${resp.backend || 'cpu-single'}): ${resp.triCount} triangles`);
         startValidation(resp);
         const elapsedMs = performance.now() - generationStartedAt;
-        void notifyGenerationComplete(resp.triCount || 0, elapsedMs);
-        worker.terminate();
-        if (workerRef.current === worker) workerRef.current = null;
-      } else if (resp.type === 'error') {
-        current.addLog(`Error: ${resp.message}`, 'error');
+        void notifyGenerationComplete(resp.triCount, elapsedMs);
+      },
+      onFailure: (message) => {
+        const current = useStore.getState();
+        current.addLog(message, 'error');
         current.setGenerating(false);
         current.setDemoModeActive(false);
-        worker.terminate();
-        if (workerRef.current === worker) workerRef.current = null;
-      }
-    };
+        current.setProgress(0, 'Generation failed');
+        current.setGenerationError(message);
+      },
+    });
 
-    worker.postMessage(msg, transferList);
-  }, [canGenerate, notifyGenerationComplete]);
+    workerController.post(msg, transferList);
+  }, [canGenerate, notifyGenerationComplete, workerController]);
 
   const cancelGeneration = useCallback(() => {
-    if (workerRef.current) {
-      const worker = workerRef.current;
-      worker.postMessage({ type: 'cancel' } satisfies WorkerMessage);
-      window.setTimeout(() => worker.terminate(), 50);
-      workerRef.current = null;
-    }
+    generationRunRef.current++;
+    workerController.cancel({ type: 'cancel' } satisfies WorkerMessage);
     const store = useStore.getState();
     store.setGenerating(false);
     store.setDemoModeActive(false);
     store.setProgress(0, 'Cancelled');
+    store.setGenerationError(null);
     store.addLog('Generation cancelled', 'warn');
-  }, []);
+  }, [workerController]);
 
   useEffect(() => () => {
-    workerRef.current?.terminate();
+    generationRunRef.current++;
+    workerController.dispose();
     validationWorkerRef.current?.terminate();
-  }, []);
+  }, [workerController]);
 
   return { startGeneration, cancelGeneration, canGenerate };
 }

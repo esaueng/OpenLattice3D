@@ -105,9 +105,10 @@ function DemoTileViewer({ tile, viewMode, clipPlane, placeholder, selectedLattic
   );
 }
 
-export function DemoGridView({ params, demoParamsByType, runId, viewMode, clipPlane, selectedLatticeType, onSelectLatticeType, sourceMesh, sphereMode, sphereRadius, sampleShape, keepOutTris, keepInTris }: {
+export function DemoGridView({ params, demoParamsByType, generationSeed, runId, viewMode, clipPlane, selectedLatticeType, onSelectLatticeType, sourceMesh, sphereMode, sphereRadius, sampleShape, keepOutTris, keepInTris }: {
   params: LatticeParams;
   demoParamsByType: Partial<Record<LatticeType, LatticeParams>>;
+  generationSeed: number;
   runId: number;
   viewMode: 'original' | 'lattice' | 'cross_section' | 'xray';
   clipPlane: ClipPlaneState;
@@ -161,7 +162,8 @@ export function DemoGridView({ params, demoParamsByType, runId, viewMode, clipPl
     keepOut: keepOutKey,
     keepIn: keepInKey,
     params: localParams,
-  }), [keepInKey, keepOutKey, sourceKey]);
+    generationSeed,
+  }), [generationSeed, keepInKey, keepOutKey, sourceKey]);
 
   const workerLimit = demoGridWorkerLimit(
     Boolean(sourceMesh),
@@ -179,6 +181,7 @@ export function DemoGridView({ params, demoParamsByType, runId, viewMode, clipPl
     const message: WorkerMessage = {
       type: 'generate',
       params: localParams,
+      generationSeed,
       sphereMode,
       sampleShape,
       sphereRadius,
@@ -234,7 +237,7 @@ export function DemoGridView({ params, demoParamsByType, runId, viewMode, clipPl
       finish();
     };
     worker.postMessage(message);
-  }, [keepInTris, keepOutTris, sampleShape, sourceMesh, sphereMode, sphereRadius]);
+  }, [generationSeed, keepInTris, keepOutTris, sampleShape, sourceMesh, sphereMode, sphereRadius]);
 
   const drainQueue = useCallback(() => {
     while (workersRef.current.size < workerLimit) {

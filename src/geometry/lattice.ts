@@ -8,6 +8,11 @@ import type { GridSdfSampler } from './marching-cubes';
 import type { LatticeParams, LatticeType } from '../types/project';
 import type { BoundingBox } from '../types/project';
 import { withEscapeHoles } from './escape-holes';
+import {
+  DEFAULT_GENERATION_SEED,
+  deriveGenerationSeed,
+  normalizeGenerationSeed,
+} from './deterministic-random';
 
 const TWO_PI = 2 * Math.PI;
 const SQRT3 = Math.sqrt(3);
@@ -204,7 +209,14 @@ export function diamondStrutSDF(x: number, y: number, z: number, cellSize: numbe
 // ═══════════════════════════════════════════════════════════
 
 /** Voronoi foam: F2-F1 technique with hashed cell sites */
-export function voronoiSDF(x: number, y: number, z: number, cellSize: number, strutDiameter: number): number {
+export function voronoiSDF(
+  x: number,
+  y: number,
+  z: number,
+  cellSize: number,
+  strutDiameter: number,
+  generationSeed = DEFAULT_GENERATION_SEED,
+): number {
   const r = strutDiameter / 2;
   const invL = 1 / cellSize;
   const ix = Math.floor(x * invL);
@@ -218,9 +230,9 @@ export function voronoiSDF(x: number, y: number, z: number, cellSize: number, st
     for (let dy = -1; dy <= 1; dy++) {
       for (let dx = -1; dx <= 1; dx++) {
         const cx = ix + dx, cy = iy + dy, cz = iz + dz;
-        const jx = hash3f(cx, cy, cz, 0);
-        const jy = hash3f(cx, cy, cz, 1);
-        const jz = hash3f(cx, cy, cz, 2);
+        const jx = hash3f(cx, cy, cz, 0, generationSeed);
+        const jy = hash3f(cx, cy, cz, 1, generationSeed);
+        const jz = hash3f(cx, cy, cz, 2, generationSeed);
         const sx = (cx + jx) * cellSize;
         const sy = (cy + jy) * cellSize;
         const sz = (cz + jz) * cellSize;
@@ -430,16 +442,20 @@ export function trianglePrismSDF(x: number, y: number, z: number, cellSize: numb
 // ═══════════════════════════════════════════════════════════
 
 /** Deterministic float hash for 3-int input + component selector. Returns [0.1, 0.9]. */
-function hash3f(x: number, y: number, z: number, comp: number): number {
+function hash3f(x: number, y: number, z: number, comp: number, generationSeed: number): number {
   let h = x * 374761393 + y * 668265263 + z * 1274126177 + comp * 1911520717;
+  const seed = normalizeGenerationSeed(generationSeed);
+  if (seed !== DEFAULT_GENERATION_SEED) h += Math.imul(seed, -1640531527);
   h = (h ^ (h >> 13)) * 1274126177;
   h = h ^ (h >> 16);
   return ((h & 0x7fffffff) / 0x7fffffff) * 0.8 + 0.1;
 }
 
 /** Deterministic float hash from (index, component). Returns [0, 1). */
-function hashF(index: number, comp: number): number {
+function hashF(index: number, comp: number, generationSeed: number): number {
   let h = index * 1597334677 + comp * 3812015801;
+  const seed = normalizeGenerationSeed(generationSeed);
+  if (seed !== DEFAULT_GENERATION_SEED) h += Math.imul(seed, -1640531527);
   h = (h ^ (h >> 13)) * 2654435761;
   h = h ^ (h >> 16);
   return (h & 0x7fffffff) / 0x7fffffff;
@@ -480,8 +496,15 @@ function sheetDistance(fieldValue: number, gx: number, gy: number, gz: number, k
 // Sheet fields are converted from dimensionless implicit values to a local
 // distance in millimetres using the analytic gradient. Strut fields already
 // return a geometric distance in millimetres.
-export function buildLatticeEvaluator(params: LatticeParams): (x: number, y: number, z: number) => number {
+export function buildLatticeEvaluator(
+  params: LatticeParams,
+  generationSeed = DEFAULT_GENERATION_SEED,
+): (x: number, y: number, z: number) => number {
   const { latticeType, cellSize, wallThickness, strutDiameter } = params;
+  const normalizedSeed = normalizeGenerationSeed(generationSeed);
+  const fieldSeed = normalizedSeed === DEFAULT_GENERATION_SEED
+    ? DEFAULT_GENERATION_SEED
+    : deriveGenerationSeed(normalizedSeed, 'lattice-field', latticeType);
   switch (latticeType) {
     // Gyroid: sin(kx)cos(ky) + sin(ky)cos(kz) + sin(kz)cos(kx)
     case 'gyroid': {
@@ -548,14 +571,14 @@ export function buildLatticeEvaluator(params: LatticeParams): (x: number, y: num
     case 'spinodal': {
       const k0 = TWO_PI / cellSize;
       const waves = Array.from({ length: N_WAVES }, (_, i) => {
-        const phi = TWO_PI * hashF(i, 0);
-        const cosTheta = 1 - 2 * hashF(i, 1);
+        const phi = TWO_PI * hashF(i, 0, fieldSeed);
+        const cosTheta = 1 - 2 * hashF(i, 1, fieldSeed);
         const sinTheta = Math.sqrt(1 - cosTheta * cosTheta);
         return {
           kx: k0 * sinTheta * Math.cos(phi),
           ky: k0 * sinTheta * Math.sin(phi),
           kz: k0 * cosTheta,
-          phase: TWO_PI * hashF(i, 2),
+          phase: TWO_PI * hashF(i, 2, fieldSeed),
         };
       });
       return (x, y, z) => {
@@ -592,7 +615,7 @@ export function buildLatticeEvaluator(params: LatticeParams): (x: number, y: num
     case 'triangle':
       return (x, y, z) => trianglePrismSDF(x, y, z, cellSize, strutDiameter);
     case 'voronoi':
-      return (x, y, z) => voronoiSDF(x, y, z, cellSize, strutDiameter);
+      return (x, y, z) => voronoiSDF(x, y, z, cellSize, strutDiameter, fieldSeed);
   }
 }
 
@@ -803,6 +826,7 @@ function attachTpmsGridSampler(
 export interface LatticeSdfOptions {
   bvh: MeshBVH;
   params: LatticeParams;
+  generationSeed?: number;
   keepOutTris?: Set<number>;
   keepInTris?: Set<number>;
 }
@@ -949,7 +973,7 @@ export function buildCombinedSDF(opts: LatticeSdfOptions): SdfFunction {
   const { bvh, params } = opts;
   const { shellThickness, noShell, surfaceOnly, surfaceDepth, cellSize, wallThickness, strutDiameter, variant, latticeType, gradientEnabled, gradientStrength } = params;
   const blendK = Math.min(wallThickness, strutDiameter) * 0.3;
-  const latticeFn = buildLatticeEvaluator(params);
+  const latticeFn = buildLatticeEvaluator(params, opts.generationSeed);
   const sdf = (x: number, y: number, z: number) => bvh.signedDistance([x, y, z]);
   const applyConstraints = buildConstraintApplier(
     bvh,
@@ -1037,10 +1061,11 @@ export function buildAnalyticLattice(
   objectSdf: (x: number, y: number, z: number) => number,
   params: LatticeParams,
   bounds: BoundingBox | null = null,
+  generationSeed = DEFAULT_GENERATION_SEED,
 ): SdfFunction {
   const { shellThickness, noShell, surfaceOnly, surfaceDepth, cellSize, wallThickness, strutDiameter, variant, latticeType, gradientEnabled, gradientStrength } = params;
   const blendK = Math.min(wallThickness, strutDiameter) * 0.3;
-  const latticeFn = buildLatticeEvaluator(params);
+  const latticeFn = buildLatticeEvaluator(params, generationSeed);
 
   const result: SdfFunction = (x, y, z) => {
     const dObj = objectSdf(x, y, z);
@@ -1076,18 +1101,21 @@ export function buildAnalyticLattice(
 
 export function buildSphereLattice(
   radius: number,
-  params: LatticeParams
+  params: LatticeParams,
+  generationSeed = DEFAULT_GENERATION_SEED,
 ): SdfFunction {
   return buildAnalyticLattice(
     (x, y, z) => Math.sqrt(x*x + y*y + z*z) - radius,
     params,
     { min: [-radius, -radius, -radius], max: [radius, radius, radius] },
+    generationSeed,
   );
 }
 
 export function buildCubeLattice(
   halfSize: number,
   params: LatticeParams,
+  generationSeed = DEFAULT_GENERATION_SEED,
 ): SdfFunction {
   return buildAnalyticLattice((x, y, z) => {
     const dx = Math.abs(x) - halfSize;
@@ -1096,13 +1124,14 @@ export function buildCubeLattice(
     const outside = Math.sqrt(Math.max(dx,0)**2 + Math.max(dy,0)**2 + Math.max(dz,0)**2);
     const inside = Math.min(Math.max(dx, dy, dz), 0);
     return outside + inside;
-  }, params, { min: [-halfSize, -halfSize, -halfSize], max: [halfSize, halfSize, halfSize] });
+  }, params, { min: [-halfSize, -halfSize, -halfSize], max: [halfSize, halfSize, halfSize] }, generationSeed);
 }
 
 export function buildCylinderLattice(
   radius: number,
   halfHeight: number,
   params: LatticeParams,
+  generationSeed = DEFAULT_GENERATION_SEED,
 ): SdfFunction {
   return buildAnalyticLattice((x, y, z) => {
     const dRadial = Math.sqrt(x*x + y*y) - radius;
@@ -1110,13 +1139,14 @@ export function buildCylinderLattice(
     const outside = Math.sqrt(Math.max(dRadial,0)**2 + Math.max(dAxial,0)**2);
     const inside = Math.min(Math.max(dRadial, dAxial), 0);
     return outside + inside;
-  }, params, { min: [-radius, -radius, -halfHeight], max: [radius, radius, halfHeight] });
+  }, params, { min: [-radius, -radius, -halfHeight], max: [radius, radius, halfHeight] }, generationSeed);
 }
 
 export function buildTorusLattice(
   majorRadius: number,
   tubeRadius: number,
   params: LatticeParams,
+  generationSeed = DEFAULT_GENERATION_SEED,
 ): SdfFunction {
   return buildAnalyticLattice((x, y, z) => {
     const qx = Math.sqrt(x*x + y*y) - majorRadius;
@@ -1124,13 +1154,14 @@ export function buildTorusLattice(
   }, params, {
     min: [-(majorRadius + tubeRadius), -(majorRadius + tubeRadius), -tubeRadius],
     max: [majorRadius + tubeRadius, majorRadius + tubeRadius, tubeRadius],
-  });
+  }, generationSeed);
 }
 
 export function buildCapsuleLattice(
   radius: number,
   halfHeight: number,
   params: LatticeParams,
+  generationSeed = DEFAULT_GENERATION_SEED,
 ): SdfFunction {
   return buildAnalyticLattice((x, y, z) => {
     // Clamp z to the cylinder body, then measure distance to that clamped point.
@@ -1139,5 +1170,5 @@ export function buildCapsuleLattice(
   }, params, {
     min: [-radius, -radius, -(halfHeight + radius)],
     max: [radius, radius, halfHeight + radius],
-  });
+  }, generationSeed);
 }

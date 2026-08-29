@@ -40,6 +40,11 @@ describe('OBJ export', () => {
     expect(text()).toContain('# units: millimeters');
   });
 
+  it('records the deterministic generation seed when provided', () => {
+    const seeded = new TextDecoder().decode(buildObj(mesh, { ...OPTIONS, generationSeed: 0x1234abcd }));
+    expect(seeded).toContain('# generation-seed: v1:0x1234abcd');
+  });
+
   it('keeps untrusted source names inside a single comment record', () => {
     const malicious = new TextDecoder().decode(buildObj(mesh, {
       ...OPTIONS,

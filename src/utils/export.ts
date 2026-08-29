@@ -6,12 +6,15 @@ import { decimateMesh } from '../geometry/decimate';
 import { create3MF } from '../geometry/three-mf';
 import { createProjectFile, type ProjectExportInput } from './project-file';
 import { buildObj, type ObjOptions } from './obj';
+import { formatGenerationSeed } from '../geometry/deterministic-random';
 
 export interface MeshExportOptions {
   /** Fraction of triangles to keep. */
   simplifyRatio?: number;
   /** Largest deviation a collapse may introduce, in millimetres. */
   maxError?: number;
+  /** Reproducibility seed embedded in metadata-capable exports. */
+  generationSeed?: number;
 }
 
 function saveBlob(blob: Blob, filename: string): void {
@@ -89,6 +92,9 @@ export function downloadSTL(
     source.positions,
     source.normals,
     source.triCount,
+    options.generationSeed === undefined
+      ? 'OpenLattice3D Export'
+      : `OpenLattice3D seed-${formatGenerationSeed(options.generationSeed)}`,
   );
   saveBlob(new Blob([buffer], { type: 'application/octet-stream' }), filename);
 }
@@ -98,7 +104,7 @@ export function download3MF(
   filename: string = 'lattice-design.3mf',
   options: MeshExportOptions = {},
 ) {
-  const bytes = create3MF(preparedSoup(result, options));
+  const bytes = create3MF(preparedSoup(result, options), options.generationSeed);
   const buffer = new ArrayBuffer(bytes.byteLength);
   new Uint8Array(buffer).set(bytes);
   saveBlob(new Blob([buffer], { type: 'model/3mf' }), filename);
@@ -110,7 +116,10 @@ export function downloadOBJ(
   filename: string = 'lattice-design.obj',
   options: MeshExportOptions = {},
 ) {
-  const bytes = buildObj(prepareMesh(result, options), objOptions);
+  const bytes = buildObj(prepareMesh(result, options), {
+    ...objOptions,
+    generationSeed: options.generationSeed,
+  });
   saveBlob(new Blob([bytes as BlobPart], { type: 'model/obj' }), filename);
 }
 

@@ -8,6 +8,7 @@ import type { IndexedMesh } from '../geometry/mesh-indexing';
 import type { MarchingCubesResult } from '../geometry/marching-cubes';
 import type { LatticeParams } from '../types/project';
 import { escapeControlCharacters } from './text-safety';
+import { formatGenerationSeed } from '../geometry/deterministic-random';
 
 function coord(value: number): string {
   return Number(value.toFixed(4)).toString();
@@ -16,6 +17,7 @@ function coord(value: number): string {
 export interface ObjOptions {
   meshFileName: string;
   params: LatticeParams;
+  generationSeed?: number;
 }
 
 export function buildObj(
@@ -40,6 +42,9 @@ export function buildObj(
   write(`# OpenLattice3D\n`);
   write(`# source: ${escapeControlCharacters(options.meshFileName || 'lattice')}\n`);
   write(`# lattice: ${options.params.latticeType}, cell ${options.params.cellSize}mm\n`);
+  if (options.generationSeed !== undefined) {
+    write(`# generation-seed: ${formatGenerationSeed(options.generationSeed)}\n`);
+  }
   // OBJ has no unit declaration; state it in a comment so a reader at least has
   // a chance of noticing.
   write(`# units: millimeters\n`);

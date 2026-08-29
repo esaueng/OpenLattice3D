@@ -18,15 +18,15 @@ const postWorkerMessage = self.postMessage.bind(self) as WorkerPostMessage;
 function buildShapeSdf(msg: LatticeTileJob): SdfFunction {
   switch (msg.shape as SampleShape) {
     case 'sphere':
-      return buildSphereLattice(msg.sphereRadius || 25, msg.params);
+      return buildSphereLattice(msg.sphereRadius || 25, msg.params, msg.generationSeed);
     case 'cube':
-      return buildCubeLattice(15, msg.params);
+      return buildCubeLattice(15, msg.params, msg.generationSeed);
     case 'cylinder':
-      return buildCylinderLattice(15, 20, msg.params);
+      return buildCylinderLattice(15, 20, msg.params, msg.generationSeed);
     case 'torus':
-      return buildTorusLattice(20, 8, msg.params);
+      return buildTorusLattice(20, 8, msg.params, msg.generationSeed);
     case 'capsule':
-      return buildCapsuleLattice(12, 15, msg.params);
+      return buildCapsuleLattice(12, 15, msg.params, msg.generationSeed);
   }
 }
 

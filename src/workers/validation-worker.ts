@@ -27,6 +27,7 @@ export interface ValidationWorkerMessage {
   normals: Float32Array;
   triCount: number;
   params: LatticeParams;
+  generationSeed: number;
   sphereMode: boolean;
   sphereRadius: number;
   sampleShape: SampleShape | null;
@@ -65,7 +66,7 @@ function unpackSurfaceSamples(
   return samples;
 }
 
-function shapeObjectSdf(shape: SampleShape, sphereRadius: number): {
+function shapeObjectSdf(shape: SampleShape, sphereRadius: number, generationSeed: number): {
   objectSdf: SdfFunction;
   latticeSdf: (params: LatticeParams) => SdfFunction;
   sphereRadius: number | null;
@@ -75,7 +76,7 @@ function shapeObjectSdf(shape: SampleShape, sphereRadius: number): {
       const r = sphereRadius || 25;
       return {
         objectSdf: (x, y, z) => Math.sqrt(x * x + y * y + z * z) - r,
-        latticeSdf: (params) => buildSphereLattice(r, params),
+        latticeSdf: (params) => buildSphereLattice(r, params, generationSeed),
         sphereRadius: r,
       };
     }
@@ -89,7 +90,7 @@ function shapeObjectSdf(shape: SampleShape, sphereRadius: number): {
         const inside = Math.min(Math.max(dx, dy, dz), 0);
         return outside + inside;
       };
-      return { objectSdf, latticeSdf: (params) => buildCubeLattice(h, params), sphereRadius: null };
+      return { objectSdf, latticeSdf: (params) => buildCubeLattice(h, params, generationSeed), sphereRadius: null };
     }
     case 'cylinder': {
       const cr = 15;
@@ -101,7 +102,7 @@ function shapeObjectSdf(shape: SampleShape, sphereRadius: number): {
         const inside = Math.min(Math.max(dRadial, dAxial), 0);
         return outside + inside;
       };
-      return { objectSdf, latticeSdf: (params) => buildCylinderLattice(cr, ch, params), sphereRadius: null };
+      return { objectSdf, latticeSdf: (params) => buildCylinderLattice(cr, ch, params, generationSeed), sphereRadius: null };
     }
     case 'torus': {
       const major = 20;
@@ -110,7 +111,7 @@ function shapeObjectSdf(shape: SampleShape, sphereRadius: number): {
         const qx = Math.sqrt(x * x + y * y) - major;
         return Math.sqrt(qx * qx + z * z) - tube;
       };
-      return { objectSdf, latticeSdf: (params) => buildTorusLattice(major, tube, params), sphereRadius: null };
+      return { objectSdf, latticeSdf: (params) => buildTorusLattice(major, tube, params, generationSeed), sphereRadius: null };
     }
     case 'capsule': {
       const r = 12;
@@ -119,7 +120,7 @@ function shapeObjectSdf(shape: SampleShape, sphereRadius: number): {
         const cz = Math.max(-halfHeight, Math.min(halfHeight, z));
         return Math.sqrt(x * x + y * y + (z - cz) * (z - cz)) - r;
       };
-      return { objectSdf, latticeSdf: (params) => buildCapsuleLattice(r, halfHeight, params), sphereRadius: null };
+      return { objectSdf, latticeSdf: (params) => buildCapsuleLattice(r, halfHeight, params, generationSeed), sphereRadius: null };
     }
   }
 }
@@ -174,7 +175,7 @@ self.onmessage = (event: MessageEvent<ValidationWorkerMessage>) => {
 
     let validation: ValidationResult;
     if (shape) {
-      const { objectSdf, latticeSdf } = shapeObjectSdf(shape, msg.sphereRadius);
+      const { objectSdf, latticeSdf } = shapeObjectSdf(shape, msg.sphereRadius, msg.generationSeed);
       const baseSdf = isSurfacePolygon && surfaceSamples.length > 0
         ? buildSurfaceHexLattice(objectSdf, msg.params, surfaceSamples)
         : latticeSdf(msg.params);
@@ -189,6 +190,7 @@ self.onmessage = (event: MessageEvent<ValidationWorkerMessage>) => {
         : buildCombinedSDF({
           bvh,
           params: msg.params,
+          generationSeed: msg.generationSeed,
           keepOutTris: new Set(msg.keepOutTris || []),
           keepInTris: new Set(msg.keepInTris || []),
         });
