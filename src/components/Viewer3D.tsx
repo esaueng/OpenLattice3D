@@ -1021,7 +1021,7 @@ export function Viewer3D() {
     originalMesh, sphereMode, sphereRadius, sampleShape, viewMode, clipPlane,
     keepOutTris, keepInTris, selectionMode, resultMesh, brushRadius,
     paintTriangles, beginSelectionStroke, endSelectionStroke, viewerBackground, demoModeActive,
-    demoRunId, params, demoParamsByType, setLatticeType, viewportResetSignal,
+    demoRunId, params, generationSeed, demoParamsByType, setLatticeType, viewportResetSignal,
   } = useStore(useShallow((s) => ({
     originalMesh: s.originalMesh,
     sphereMode: s.sphereMode,
@@ -1041,6 +1041,7 @@ export function Viewer3D() {
     demoModeActive: s.demoModeActive,
     demoRunId: s.demoRunId,
     params: s.params,
+    generationSeed: s.generationSeed,
     demoParamsByType: s.demoParamsByType,
     setLatticeType: s.setLatticeType,
     viewportResetSignal: s.viewportResetSignal,
@@ -1074,6 +1075,7 @@ export function Viewer3D() {
         <DemoGridView
           key={viewportResetSignal}
           params={params}
+          generationSeed={generationSeed}
           demoParamsByType={demoParamsByType}
           runId={demoRunId}
           viewMode={viewMode}

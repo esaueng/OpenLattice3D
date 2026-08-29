@@ -149,12 +149,17 @@ function parseASCIISTL(buffer: ArrayBuffer): TriangleMesh {
 }
 
 /** Export binary STL from flat position + normal arrays */
-export function exportBinarySTL(positions: Float32Array, normals: Float32Array, triCount: number): ArrayBuffer {
+export function exportBinarySTL(
+  positions: Float32Array,
+  normals: Float32Array,
+  triCount: number,
+  header = 'OpenLattice3D Export',
+): ArrayBuffer {
   const bufSize = BINARY_HEADER_BYTES + triCount * BINARY_TRIANGLE_BYTES;
   const buffer = new ArrayBuffer(bufSize);
   const view = new DataView(buffer);
   // header - 80 bytes
-  const headerBytes = new TextEncoder().encode('OpenLattice3D Export');
+  const headerBytes = new TextEncoder().encode(header).subarray(0, 80);
   new Uint8Array(buffer, 0, headerBytes.length).set(headerBytes);
   view.setUint32(80, triCount, true);
 

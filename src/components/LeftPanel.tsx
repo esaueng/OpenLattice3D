@@ -17,6 +17,7 @@ import { SAMPLE_SHAPE_INFO } from '../store/useStore';
 import type { LatticeGenerationControls } from '../hooks/useLatticeGeneration';
 import { boundedNumberInput } from '../utils/numeric-input';
 import { RightPanel } from './RightPanel';
+import { formatGenerationSeed } from '../geometry/deterministic-random';
 
 type LeftPanelProps = {
   generationControls: LatticeGenerationControls;
@@ -136,6 +137,11 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
       store.setDemoModeActive(false);
       store.addLog('Multiview hidden');
     }
+  }, [store]);
+
+  const handleReseed = useCallback(() => {
+    store.reseedGeneration();
+    store.addLog(`Generation reseeded to ${formatGenerationSeed(useStore.getState().generationSeed)}`);
   }, [store]);
 
   const hasModel = store.originalMesh || store.sphereMode;
@@ -585,6 +591,22 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
       {hasModel && (
         <section className="panel-section">
           <h3>Generate</h3>
+          <div className="row" style={{ gap: '6px', flexWrap: 'wrap' }}>
+            <span title="Persisted deterministic generation seed">
+              Seed {formatGenerationSeed(store.generationSeed)}
+            </span>
+            <button
+              className="btn btn-small"
+              title="Choose a new explicit seed and invalidate the current generated result."
+              onClick={handleReseed}
+              disabled={store.generating}
+            >
+              Reseed
+            </button>
+          </div>
+          {store.generationError && (
+            <div className="warning" role="alert">{store.generationError}</div>
+          )}
           {!store.generating ? (
             <button
               className={`btn btn-primary btn-large ${generateDisabledByMultiview ? 'btn-generate-muted' : ''}`}

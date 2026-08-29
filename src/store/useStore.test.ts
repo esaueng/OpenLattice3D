@@ -19,6 +19,7 @@ describe('persistence hydration', () => {
     expect(snapshot).not.toHaveProperty('meshFileName');
     expect(snapshot).not.toHaveProperty('logs');
     expect(snapshot).toHaveProperty('params');
+    expect(snapshot).toHaveProperty('generationSeed');
     expect(snapshot).toHaveProperty('viewerBackground');
   });
 
@@ -41,6 +42,7 @@ describe('persistence hydration', () => {
     expect(hydrated.meshFileName).toBe('');
     expect(hydrated.logs).toEqual([]);
     expect(hydrated.params?.exportResolution).toBe(DEFAULT_PARAMS.exportResolution);
+    expect(hydrated.generationSeed).toBe(0);
     expect(hydrated.viewerBackground).toBe('#000000');
   });
 });
@@ -109,6 +111,7 @@ describe('project restoration', () => {
     const mesh = generateCubeMesh(10);
     useStore.getState().restoreProject({
       params: { ...DEFAULT_PARAMS, latticeType: 'bcc' },
+      generationSeed: 123,
       originalMesh: mesh,
       meshInfo: analyzeMesh(mesh),
       meshFileName: 'restored.stl',
@@ -120,6 +123,7 @@ describe('project restoration', () => {
     const state = useStore.getState();
     expect(state.meshFileName).toBe('restored.stl');
     expect(state.params.latticeType).toBe('bcc');
+    expect(state.generationSeed).toBe(123);
     expect(Array.from(state.keepOutTris)).toEqual([1, 2]);
     expect(Array.from(state.keepInTris)).toEqual([3]);
     expect(state.resultMesh).toBeNull();

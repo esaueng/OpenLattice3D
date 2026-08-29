@@ -29,6 +29,7 @@ export function ExportControls() {
     sphereRadius,
     clipPlane,
     viewerBackground,
+    generationSeed,
   } = useStore(useShallow((s) => ({
     validation: s.validation,
     resultMesh: s.resultMesh,
@@ -41,6 +42,7 @@ export function ExportControls() {
     sphereRadius: s.sphereRadius,
     clipPlane: s.clipPlane,
     viewerBackground: s.viewerBackground,
+    generationSeed: s.generationSeed,
   })));
   const [simplifyRatio, setSimplifyRatio] = useState(1);
   const [busy, setBusy] = useState(false);
@@ -56,6 +58,7 @@ export function ExportControls() {
   const meshOptions = {
     simplifyRatio,
     maxError: params.toleranceMm,
+    generationSeed,
   };
   const estimatedTriangles = resultMesh ? Math.round(resultMesh.triCount * simplifyRatio) : 0;
   const runExport = async (task: () => void) => {
@@ -142,6 +145,7 @@ export function ExportControls() {
           title="Export the source model, current parameters, face constraints, and viewer settings to a project JSON file."
           onClick={() => downloadProjectJSON({
             params,
+            generationSeed,
             source,
             keepOutTris,
             keepInTris,
