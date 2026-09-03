@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useStore, type ViewMode } from '../store/useStore';
+import { canSelectView, useStore, type ViewMode } from '../store/useStore';
 import type { LatticeGenerationControls } from './useLatticeGeneration';
 
 const VIEW_HOTKEYS: Record<string, ViewMode> = {
@@ -22,13 +22,6 @@ function isEditableTarget(target: EventTarget | null): boolean {
   if (target instanceof HTMLTextAreaElement) return true;
   if (target instanceof HTMLSelectElement) return true;
   return Boolean(target.closest('[contenteditable="true"]'));
-}
-
-function canSelectView(mode: ViewMode): boolean {
-  const store = useStore.getState();
-  if (store.demoModeActive) return true;
-  if (mode === 'original') return Boolean(store.originalMesh || store.sphereMode);
-  return Boolean(store.resultMesh);
 }
 
 export function useWorkspaceHotkeys({ startGeneration, canGenerate }: LatticeGenerationControls) {
@@ -69,7 +62,7 @@ export function useWorkspaceHotkeys({ startGeneration, canGenerate }: LatticeGen
       }
 
       const viewMode = VIEW_HOTKEYS[key];
-      if (!viewMode || !canSelectView(viewMode)) return;
+      if (!viewMode || !canSelectView(store, viewMode)) return;
 
       event.preventDefault();
       store.setViewMode(viewMode);

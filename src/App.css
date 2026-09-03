@@ -3,8 +3,11 @@
 :root {
   --color-bg: #0b0f14;
   --color-surface: #111821;
-  --color-surface-2: #17202b;
-  --color-surface-hover: #1b2430;
+  /* Control rest and control hover are separate roles: raising one to make
+     resting controls visible must not drag the other along with it. */
+  --color-surface-2: #212c3a;
+  --color-surface-hover: #313f52;
+  --color-chip-bg: #1b2533;
   --color-border: #2a3441;
   --color-border-strong: #3a4554;
   --color-text: #e6edf3;
@@ -13,6 +16,7 @@
   --color-text-subtle: #828b99;
   /* Control boundary color meeting WCAG 1.4.11 (>=3:1) for inputs/buttons */
   --color-control-border: #6b7585;
+  --color-control-border-hover: #8492aa;
   --color-accent: #4da3ff;
   --color-accent-dim: rgba(77, 163, 255, 0.12);
   --color-accent-border: rgba(77, 163, 255, 0.7);
@@ -165,7 +169,7 @@ textarea:focus-visible,
   width: 100%;
   height: 100%;
   display: grid;
-  grid-template-rows: var(--topbar-h) minmax(0, 1fr) var(--statusbar-h);
+  grid-template-rows: var(--topbar-h) minmax(0, 1fr) auto var(--statusbar-h);
   overflow: hidden;
   background: var(--color-bg);
 }
@@ -209,7 +213,7 @@ textarea:focus-visible,
 .breadcrumb-chip {
   padding: 1px 7px;
   color: var(--color-text);
-  background: var(--color-surface-2);
+  background: var(--color-chip-bg);
   border: var(--border-thin);
   border-radius: var(--radius-sm);
   font-family: var(--font-mono);
@@ -306,7 +310,7 @@ textarea:focus-visible,
 .icon-button:hover,
 .topbar-action:hover {
   color: var(--color-text);
-  background: var(--color-surface-2);
+  background: var(--color-surface-hover);
   border-color: var(--color-accent-border);
 }
 
@@ -399,9 +403,76 @@ textarea:focus-visible,
   position: sticky;
   bottom: 0;
   z-index: 2;
+  flex: 0 0 auto;
   background: var(--color-surface);
   border-top: var(--border-thin);
+  border-bottom: 0;
   box-shadow: 0 -16px 24px rgba(11, 15, 20, 0.32);
+}
+
+/* Progress messages are unbounded worker strings; wrapping one would grow the
+   pinned bar mid-run and shove the scroll content under it. */
+.generate-progress-track {
+  /* Matches .btn-large so the pinned bar is the same height in both states. */
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.generate-progress-track .progress-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.generate-progress-track .progress-bar {
+  flex: 0 0 72px;
+  margin: 0;
+}
+
+.validation-chip {
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-right: 1px solid rgba(42, 52, 65, 0.72);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.validation-chip:disabled {
+  cursor: default;
+}
+
+.validation-chip.is-pass { color: var(--color-success); }
+.validation-chip.is-fail { color: #ff9aa1; }
+.validation-chip.is-running { color: var(--color-text-muted); }
+
+.validation-chip:not(:disabled):hover {
+  text-decoration: underline;
+}
+
+.btn-caution {
+  color: #f8d798;
+  background: rgba(245, 158, 11, 0.14);
+  border-color: rgba(245, 158, 11, 0.55);
+}
+
+.btn-caution:hover:not(:disabled) {
+  background: rgba(245, 158, 11, 0.22);
+  border-color: rgba(245, 158, 11, 0.75);
+}
+
+.export-warning {
+  flex: 0 0 auto;
+  color: #f8d798;
+  font-family: var(--font-mono);
+  font-size: var(--fs-mini);
+  white-space: nowrap;
 }
 
 .viewer-shell {
@@ -680,9 +751,13 @@ textarea:focus-visible,
   color: var(--color-accent);
 }
 
-.viewer-controls-panel .view-buttons .btn:hover,
-.viewer-controls-panel .view-buttons .btn:focus-visible,
-.viewer-controls-panel .view-buttons .btn-active {
+.viewer-controls-panel .view-buttons .btn:hover:not(:disabled) {
+  border-color: var(--color-control-border-hover);
+  background: var(--color-surface-hover);
+}
+
+.viewer-controls-panel .view-buttons .btn.btn-active {
+  color: var(--color-accent);
   border-color: var(--color-accent-border);
   background: var(--color-accent-dim);
 }
@@ -793,9 +868,9 @@ textarea:focus-visible,
   transition: background 100ms ease, border-color 100ms ease, color 100ms ease;
 }
 
-.btn:hover {
+.btn:hover:not(:disabled):not([aria-disabled='true']) {
   background: var(--color-surface-hover);
-  border-color: var(--color-accent-border);
+  border-color: var(--color-control-border-hover);
 }
 
 .btn:disabled,
@@ -849,10 +924,10 @@ textarea:focus-visible,
   font-size: var(--fs-md);
 }
 
-.btn-active {
-  color: var(--color-accent) !important;
-  background: var(--color-accent-dim) !important;
-  border-color: var(--color-accent-border) !important;
+.btn.btn-active {
+  color: var(--color-accent);
+  background: var(--color-accent-dim);
+  border-color: var(--color-accent-border);
 }
 
 .btn-generate-muted {
@@ -893,6 +968,11 @@ textarea:focus-visible,
 
 .row input[type='number'] {
   width: 78px;
+}
+
+.row input[type='number'][aria-invalid='true'] {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: var(--color-error);
 }
 
 .row select {
@@ -936,9 +1016,53 @@ textarea:focus-visible,
   cursor: pointer;
 }
 
-.checkbox-row input {
-  margin-top: 2px;
-  accent-color: var(--color-accent);
+.checkbox-row label {
+  min-height: 26px;
+}
+
+.checkbox-row input[type='checkbox'],
+.popover-checkbox-row input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  margin: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  background-color: var(--color-bg);
+  background-repeat: no-repeat;
+  background-position: center;
+  border: 1px solid var(--color-control-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background-color 100ms ease, border-color 100ms ease;
+}
+
+.checkbox-row input[type='checkbox']:hover:not(:disabled),
+.popover-checkbox-row input[type='checkbox']:hover:not(:disabled) {
+  border-color: var(--color-control-border-hover);
+}
+
+.checkbox-row input[type='checkbox']:checked,
+.popover-checkbox-row input[type='checkbox']:checked {
+  background-color: var(--color-accent);
+  border-color: var(--color-accent);
+  /* Tick is drawn in the on-accent ink; keep in step with --color-accent. */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='none' stroke='%2306111e' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round' d='M3.5 8.5l3 3 6-6'/%3E%3C/svg%3E");
+}
+
+.checkbox-row input[type='checkbox']:disabled,
+.popover-checkbox-row input[type='checkbox']:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* forced-colors drops background-image, so carry the checked state on the
+   border box too rather than losing it entirely. */
+@media (forced-colors: active) {
+  .checkbox-row input[type='checkbox']:checked,
+  .popover-checkbox-row input[type='checkbox']:checked {
+    border-width: 5px;
+  }
 }
 
 .info-block {
@@ -1131,6 +1255,9 @@ textarea:focus-visible,
 }
 
 .statusbar {
+  /* The drawer's row is absent while it is closed; pin the statusbar to the
+     last row so it keeps its height either way. */
+  grid-row: -2 / -1;
   position: relative;
   min-width: 0;
   display: flex;
@@ -1167,10 +1294,15 @@ textarea:focus-visible,
   font-size: var(--fs-xs);
 }
 
-.status-tabs button:hover,
-.status-tabs button.active {
+.status-tabs button:hover {
   color: var(--color-text);
-  background: var(--color-surface-2);
+  background: var(--color-surface-hover);
+  border-color: var(--color-control-border-hover);
+}
+
+.status-tabs button.active {
+  color: var(--color-accent);
+  background: var(--color-accent-dim);
   border-color: var(--color-accent-border);
 }
 
@@ -1178,7 +1310,7 @@ textarea:focus-visible,
   min-width: 18px;
   padding: 0 5px;
   color: var(--color-text);
-  background: var(--color-surface-2);
+  background: var(--color-chip-bg);
   border: var(--border-thin);
   border-radius: 999px;
   font-family: var(--font-mono);
@@ -1261,11 +1393,12 @@ textarea:focus-visible,
 }
 
 .bottom-content {
-  position: fixed;
-  right: 0;
-  bottom: var(--statusbar-h);
-  left: 0;
+  /* A grid row, not an overlay: the workspace above it shrinks, so the viewer
+     control bar stays reachable and the drawer cannot float over mid-page
+     content once the shell stops filling the viewport below 1120px. */
+  position: relative;
   z-index: 20;
+  min-height: 0;
   height: 320px;
   background: rgba(17, 24, 33, 0.98);
   border-top: var(--border-thin);
@@ -1356,7 +1489,7 @@ textarea:focus-visible,
 .log-copy-button:hover,
 .log-clear-button:hover {
   color: var(--color-text);
-  background: var(--color-surface-2);
+  background: var(--color-surface-hover);
   border-color: var(--color-accent-border);
 }
 
@@ -1472,7 +1605,7 @@ textarea:focus-visible,
   .app-shell {
     height: auto;
     min-height: 100%;
-    grid-template-rows: auto auto var(--statusbar-h);
+    grid-template-rows: auto auto auto var(--statusbar-h);
   }
 
   .topbar {
@@ -1490,11 +1623,6 @@ textarea:focus-visible,
     min-height: var(--statusbar-h);
   }
 
-  .bottom-content {
-    right: 0;
-    left: 0;
-  }
-
   .workspace {
     display: grid;
     grid-template-columns: 1fr;
@@ -1509,6 +1637,11 @@ textarea:focus-visible,
 
   .panel-content {
     overflow: visible;
+  }
+
+  .panel-section-sticky {
+    position: static;
+    box-shadow: none;
   }
 }
 

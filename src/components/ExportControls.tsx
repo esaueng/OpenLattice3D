@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../store/useStore';
+import { summarizeValidation } from '../utils/validation-summary';
 import {
   download3MF,
   downloadOBJ,
@@ -61,6 +62,10 @@ export function ExportControls() {
     generationSeed,
   };
   const estimatedTriangles = resultMesh ? Math.round(resultMesh.triCount * simplifyRatio) : 0;
+  // Never blocks the export -- wanting the mesh anyway is legitimate -- but the
+  // risk must not be silent on a print-preparation tool.
+  const checks = summarizeValidation(validation, Boolean(resultMesh), false);
+  const checksFailed = checks.tone === 'fail';
   const runExport = async (task: () => void) => {
     setBusy(true);
     try {
@@ -97,12 +102,18 @@ export function ExportControls() {
           </span>
         </div>
       )}
+      {resultMesh && checksFailed && (
+        <span className="export-warning" id="export-validation-note">
+          {checks.failedCount} of {checks.totalCount} checks failed
+        </span>
+      )}
       <div className="export-controls-actions">
         {resultMesh && (
           <>
             <button
-              className="btn btn-primary btn-small"
+              className={`btn btn-small ${checksFailed ? 'btn-caution' : 'btn-primary'}`}
               disabled={busy}
+              aria-describedby={checksFailed ? 'export-validation-note' : undefined}
               title="Download a 3MF package with millimetre units and indexed vertices."
               onClick={() => void runExport(() => download3MF(
                 resultMesh,
@@ -110,7 +121,7 @@ export function ExportControls() {
                 meshOptions,
               ))}
             >
-              {busy ? 'Working...' : 'Export 3MF'}
+              {busy ? 'Working...' : checksFailed ? 'Export 3MF anyway' : 'Export 3MF'}
             </button>
             <button
               className="btn btn-small"

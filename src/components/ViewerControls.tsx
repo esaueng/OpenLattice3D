@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { useStore } from '../store/useStore';
+import { canSelectView, useStore } from '../store/useStore';
 import type { ViewMode } from '../store/useStore';
 
 const VIEW_LABELS: Record<ViewMode, string> = {
@@ -72,18 +72,14 @@ export function ViewerControls() {
     <div className="viewer-controls-panel" aria-label="Viewer controls">
       <div className="view-buttons">
         {(Object.keys(VIEW_LABELS) as ViewMode[]).map((mode) => {
-          const disabled = !demoModeActive && (
-            (mode === 'lattice' && !resultMesh) ||
-            (mode === 'cross_section' && !resultMesh) ||
-            (mode === 'xray' && !resultMesh) ||
-            (mode === 'original' && !store.originalMesh && !store.sphereMode)
-          );
+          const disabled = !canSelectView(store, mode);
+          const selected = viewMode === mode && !disabled;
 
           if (mode !== 'cross_section') {
             return (
               <button
                 key={mode}
-                className={`btn btn-small ${viewMode === mode ? 'btn-active' : ''}`}
+                className={`btn btn-small ${selected ? 'btn-active' : ''}`}
                 title={`Switch viewer to ${VIEW_LABELS[mode]} mode (${VIEW_HOTKEYS[mode]}).`}
                 onClick={() => store.setViewMode(mode)}
                 disabled={disabled}
@@ -96,7 +92,7 @@ export function ViewerControls() {
           return (
             <div key={mode} className="view-mode-slot view-mode-slot-settings">
               <button
-                className={`btn btn-small ${viewMode === mode ? 'btn-active' : ''}`}
+                className={`btn btn-small ${selected ? 'btn-active' : ''}`}
                 title={`Switch viewer to ${VIEW_LABELS[mode]} mode (${VIEW_HOTKEYS[mode]}).`}
                 onClick={() => store.setViewMode(mode)}
                 disabled={disabled}

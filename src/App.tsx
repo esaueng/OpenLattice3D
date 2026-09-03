@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent } from 'react';
+import { forwardRef, useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type UIEvent } from 'react';
 import { LeftPanel } from './components/LeftPanel';
 import { Viewer3D } from './components/Viewer3D';
 import { ViewerControls } from './components/ViewerControls';
@@ -8,6 +8,7 @@ import { registerNotificationServiceWorker } from './utils/notifications';
 import { escapeControlCharacters } from './utils/text-safety';
 import { useLatticeGeneration } from './hooks/useLatticeGeneration';
 import { useWorkspaceHotkeys } from './hooks/useWorkspaceHotkeys';
+import { summarizeValidation } from './utils/validation-summary';
 import './App.css';
 
 function App() {
@@ -85,13 +86,35 @@ function HydratedApp() {
     demoModeActive,
     logs,
     clearLogs,
+    validation,
     keepOutTris,
     keepInTris,
     selectionMode,
   } = useStore();
   const generationControls = useLatticeGeneration();
+  const [logsExpanded, setLogsExpanded] = useState(false);
+  const logsTabRef = useRef<HTMLButtonElement>(null);
+  const logsDrawerRef = useRef<HTMLDivElement>(null);
+  const logsToggledRef = useRef(false);
 
   useWorkspaceHotkeys(generationControls);
+
+  const toggleLogs = useCallback(() => {
+    logsToggledRef.current = true;
+    setLogsExpanded((current) => !current);
+  }, []);
+
+  const closeLogs = useCallback(() => {
+    logsToggledRef.current = true;
+    setLogsExpanded(false);
+  }, []);
+
+  // Move focus into the drawer when it opens, and back to its toggle when it closes.
+  useEffect(() => {
+    if (!logsToggledRef.current) return;
+    if (logsExpanded) logsDrawerRef.current?.focus();
+    else logsTabRef.current?.focus();
+  }, [logsExpanded]);
 
   useEffect(() => {
     void registerNotificationServiceWorker();
@@ -104,6 +127,16 @@ function HydratedApp() {
   const solverStatus = generating ? `Generating ${progressLabel}` : hasModel ? 'Ready' : 'Idle';
   const viewportMode = demoModeActive ? 'Multiview' : hasModel ? 'Interactive' : 'Standby';
   const showFaceLegend = keepOutTris.size > 0 || keepInTris.size > 0 || selectionMode !== 'none';
+  const checks = summarizeValidation(validation, Boolean(resultMesh), generating);
+
+  // The statusbar verdict is a route to the detail, not another dead readout.
+  const revealValidation = () => {
+    const target = document.getElementById('validation-panel') ?? document.getElementById('generate-action');
+    if (!target) return;
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    target.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'start' });
+    target.focus({ preventScroll: true });
+  };
 
   return (
     <div className="app-shell">
@@ -160,11 +193,41 @@ function HydratedApp() {
         </section>
       </main>
 
+      {logsExpanded && (
+        <BottomLogDrawer
+          ref={logsDrawerRef}
+          logs={logs}
+          onClearLogs={clearLogs}
+          onClose={closeLogs}
+        />
+      )}
+
       <footer className="statusbar">
-        <BottomLogDrawer logs={logs} onClearLogs={clearLogs} />
+        <div className="status-tabs">
+          <button
+            ref={logsTabRef}
+            type="button"
+            className={logsExpanded ? 'active' : ''}
+            aria-expanded={logsExpanded}
+            aria-controls={logsExpanded ? 'run-logs-drawer' : undefined}
+            onClick={toggleLogs}
+          >
+            Logs
+            <span className="count-pill">{logs.length}</span>
+          </button>
+        </div>
         <div className="statusbar-group" aria-label="Model and solver status">
           <span className="statusbar-segment">Lattice: {params.latticeType}</span>
           <span className="statusbar-segment">Result: {resultStats}</span>
+          <button
+            type="button"
+            className={`statusbar-segment validation-chip is-${checks.tone}`}
+            onClick={revealValidation}
+            disabled={!hasModel}
+            title={checks.detail}
+          >
+            <span aria-live="polite">{checks.label}</span>
+          </button>
           <span className="statusbar-segment">Solver: {solverStatus}</span>
           <span className="statusbar-segment">Viewport: {viewportMode}</span>
         </div>
@@ -223,14 +286,21 @@ function maxDrawerHeight() {
   return Math.max(MIN_DRAWER_HEIGHT, viewportHeight - 120);
 }
 
-function BottomLogDrawer({ logs, onClearLogs }: { logs: LogEntry[]; onClearLogs: () => void }) {
-  const [expanded, setExpanded] = useState(false);
+type BottomLogDrawerProps = {
+  logs: LogEntry[];
+  onClearLogs: () => void;
+  onClose: () => void;
+};
+
+const BottomLogDrawer = forwardRef<HTMLDivElement, BottomLogDrawerProps>(function BottomLogDrawer(
+  { logs, onClearLogs, onClose },
+  ref,
+) {
   const [drawerHeight, setDrawerHeight] = useState(320);
   const [clearPromptVisible, setClearPromptVisible] = useState(false);
   const dragStart = useRef<{ y: number; height: number } | null>(null);
-  const toggleButtonRef = useRef<HTMLButtonElement>(null);
-  const drawerRef = useRef<HTMLDivElement>(null);
-  const hasToggledRef = useRef(false);
+  const logViewRef = useRef<HTMLPreElement>(null);
+  const stickToBottom = useRef(true);
   const formattedLogs = logs.map(formatLogEntry);
 
   useEffect(() => {
@@ -239,27 +309,24 @@ function BottomLogDrawer({ logs, onClearLogs }: { logs: LogEntry[]; onClearLogs:
     return () => window.clearTimeout(timeoutId);
   }, [clearPromptVisible]);
 
-  // Move focus into the drawer when it opens, and back to its toggle when it closes.
-  useEffect(() => {
-    if (!hasToggledRef.current) return;
-    if (expanded) drawerRef.current?.focus();
-    else toggleButtonRef.current?.focus();
-  }, [expanded]);
+  // Show the newest entry on open and follow new ones, unless the reader has
+  // deliberately scrolled back through the history.
+  useLayoutEffect(() => {
+    const view = logViewRef.current;
+    if (!view || !stickToBottom.current) return;
+    view.scrollTop = view.scrollHeight;
+  }, [drawerHeight, logs]);
 
-  function toggleLogs() {
-    hasToggledRef.current = true;
-    setExpanded((current) => !current);
-  }
-
-  function closeLogs() {
-    hasToggledRef.current = true;
-    setExpanded(false);
+  function trackLogScroll(event: UIEvent<HTMLPreElement>) {
+    const view = event.currentTarget;
+    // scrollTop never reaches scrollHeight - clientHeight exactly at fractional DPRs.
+    stickToBottom.current = view.scrollHeight - view.scrollTop - view.clientHeight <= 24;
   }
 
   function handleDrawerKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key === 'Escape') {
       event.stopPropagation();
-      closeLogs();
+      onClose();
     }
   }
 
@@ -318,67 +385,54 @@ function BottomLogDrawer({ logs, onClearLogs }: { logs: LogEntry[]; onClearLogs:
   }
 
   return (
-    <>
-      <div className="status-tabs">
+    <div
+      ref={ref}
+      id="run-logs-drawer"
+      className="bottom-content logs-content"
+      style={{ height: drawerHeight }}
+      role="group"
+      aria-label="Run logs"
+      tabIndex={-1}
+      onKeyDown={handleDrawerKeyDown}
+    >
         <button
-          ref={toggleButtonRef}
           type="button"
-          className={expanded ? 'active' : ''}
-          aria-expanded={expanded}
-          onClick={toggleLogs}
-        >
-          Logs
-          <span className="count-pill">{logs.length}</span>
-        </button>
-      </div>
-      {expanded && (
-        <div
-          ref={drawerRef}
-          className="bottom-content logs-content"
-          style={{ height: drawerHeight }}
-          role="group"
-          aria-label="Run logs"
-          tabIndex={-1}
-          onKeyDown={handleDrawerKeyDown}
-        >
-          <button
-            type="button"
-            className="bottom-resize-handle"
-            role="separator"
-            aria-orientation="horizontal"
-            aria-label="Resize logs drawer. Use up and down arrow keys to resize."
-            aria-valuenow={Math.round(drawerHeight)}
-            aria-valuemin={MIN_DRAWER_HEIGHT}
-            aria-valuemax={Math.round(maxDrawerHeight())}
-            title="Drag, or use arrow keys, to resize"
-            onPointerDown={startDrawerResize}
-            onPointerMove={resizeDrawer}
-            onPointerUp={stopDrawerResize}
-            onPointerCancel={stopDrawerResize}
-            onKeyDown={handleResizeKeyDown}
-          />
-          <div className="logs-drawer-header">
-            <span>Run logs</span>
-            <div className="logs-drawer-actions">
-              <button type="button" className="log-copy-button" onClick={copyLogs}>Copy logs</button>
-              <button
-                type="button"
-                className="log-clear-button"
-                disabled={!logs.length}
-                aria-live="polite"
-                title={clearPromptVisible ? 'Activate again to clear run logs' : 'Clear run logs'}
-                onClick={clearLogEntries}
-              >
-                {clearPromptVisible ? 'Click again to clear' : 'Clear logs'}
-              </button>
-            </div>
+          className="bottom-resize-handle"
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Resize logs drawer. Use up and down arrow keys to resize."
+          aria-valuenow={Math.round(drawerHeight)}
+          aria-valuemin={MIN_DRAWER_HEIGHT}
+          aria-valuemax={Math.round(maxDrawerHeight())}
+          title="Drag, or use arrow keys, to resize"
+          onPointerDown={startDrawerResize}
+          onPointerMove={resizeDrawer}
+          onPointerUp={stopDrawerResize}
+          onPointerCancel={stopDrawerResize}
+          onKeyDown={handleResizeKeyDown}
+        />
+        <div className="logs-drawer-header">
+          <span>Run logs</span>
+          <div className="logs-drawer-actions">
+            <button type="button" className="log-copy-button" onClick={copyLogs}>Copy logs</button>
+            <button
+              type="button"
+              className="log-clear-button"
+              disabled={!logs.length}
+              aria-live="polite"
+              title={clearPromptVisible ? 'Activate again to clear run logs' : 'Clear run logs'}
+              onClick={clearLogEntries}
+            >
+              {clearPromptVisible ? 'Click again to clear' : 'Clear logs'}
+            </button>
           </div>
-          <pre>{formattedLogs.length ? formattedLogs.join('\n') : 'No log entries.'}</pre>
         </div>
-      )}
-    </>
+      <pre ref={logViewRef} onScroll={trackLogScroll}>
+        {formattedLogs.length ? formattedLogs.join('\n') : 'No log entries.'}
+      </pre>
+    </div>
   );
-}
+});
 
 function formatLogEntry(entry: LogEntry) {
   const level = entry.level === 'error' ? 'ERR' : entry.level === 'warn' ? 'WARN' : 'INFO';
