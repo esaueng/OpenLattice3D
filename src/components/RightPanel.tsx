@@ -32,7 +32,7 @@ export function RightPanel() {
     <>
       {/* Validation Panel */}
       {validation && (
-        <section className="panel-section">
+        <section className="panel-section" id="validation-panel" tabIndex={-1}>
           <h3>Validation</h3>
           <div className={`validation-status ${validation.passed ? 'pass' : 'fail'}`}>
             {validation.passed ? 'ALL CHECKS PASSED' : 'SOME CHECKS FAILED'}

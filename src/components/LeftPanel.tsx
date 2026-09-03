@@ -554,10 +554,19 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
         </section>
       )}
 
-      {/* Generate */}
+      <div className="left-inspection-panel">
+        <RightPanel />
+      </div>
+
+      {/* Generate: last child so the pinned bar un-sticks at max scroll instead
+          of permanently covering the validation panel above it. */}
       {hasModel && (
-        <section className="panel-section">
-          <h3>Generate</h3>
+        <section
+          className="panel-section panel-section-sticky"
+          id="generate-action"
+          aria-label="Generate lattice"
+          tabIndex={-1}
+        >
           <div className="row" style={{ gap: '6px', flexWrap: 'wrap' }}>
             <span title="Persisted deterministic generation seed">
               Seed {formatGenerationSeed(store.generationSeed)}
@@ -587,20 +596,16 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
               Generate Lattice
             </button>
           ) : (
-            <div>
+            <div className="generate-progress-track">
+              <div className="progress-text">{store.progressMessage}</div>
               <div className="progress-bar">
                 <div className="progress-fill" style={{ width: `${store.progress * 100}%` }} />
               </div>
-              <div className="progress-text">{store.progressMessage}</div>
               <button className="btn btn-small" title="Stop the current generation job." onClick={cancelGeneration}>Cancel</button>
             </div>
           )}
         </section>
       )}
-
-      <div className="left-inspection-panel">
-        <RightPanel />
-      </div>
 
     </div>
   );

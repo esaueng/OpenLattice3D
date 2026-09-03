@@ -8,6 +8,7 @@ import { registerNotificationServiceWorker } from './utils/notifications';
 import { escapeControlCharacters } from './utils/text-safety';
 import { useLatticeGeneration } from './hooks/useLatticeGeneration';
 import { useWorkspaceHotkeys } from './hooks/useWorkspaceHotkeys';
+import { summarizeValidation } from './utils/validation-summary';
 import './App.css';
 
 function App() {
@@ -85,6 +86,7 @@ function HydratedApp() {
     demoModeActive,
     logs,
     clearLogs,
+    validation,
     keepOutTris,
     keepInTris,
     selectionMode,
@@ -104,6 +106,16 @@ function HydratedApp() {
   const solverStatus = generating ? `Generating ${progressLabel}` : hasModel ? 'Ready' : 'Idle';
   const viewportMode = demoModeActive ? 'Multiview' : hasModel ? 'Interactive' : 'Standby';
   const showFaceLegend = keepOutTris.size > 0 || keepInTris.size > 0 || selectionMode !== 'none';
+  const checks = summarizeValidation(validation, Boolean(resultMesh), generating);
+
+  // The statusbar verdict is a route to the detail, not another dead readout.
+  const revealValidation = () => {
+    const target = document.getElementById('validation-panel') ?? document.getElementById('generate-action');
+    if (!target) return;
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    target.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'start' });
+    target.focus({ preventScroll: true });
+  };
 
   return (
     <div className="app-shell">
@@ -165,6 +177,15 @@ function HydratedApp() {
         <div className="statusbar-group" aria-label="Model and solver status">
           <span className="statusbar-segment">Lattice: {params.latticeType}</span>
           <span className="statusbar-segment">Result: {resultStats}</span>
+          <button
+            type="button"
+            className={`statusbar-segment validation-chip is-${checks.tone}`}
+            onClick={revealValidation}
+            disabled={!hasModel}
+            title={checks.detail}
+          >
+            <span aria-live="polite">{checks.label}</span>
+          </button>
           <span className="statusbar-segment">Solver: {solverStatus}</span>
           <span className="statusbar-segment">Viewport: {viewportMode}</span>
         </div>
