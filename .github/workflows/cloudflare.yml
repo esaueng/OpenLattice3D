@@ -36,8 +36,17 @@ jobs:
   # deploy job here, because this workflow no longer deploys -- and Actions is
   # not notified when Workers Builds finishes, so the retry window below is what
   # absorbs that lag.
+  #
+  # Disabled by default: Cloudflare returns 403 to GitHub's runner IP ranges for
+  # both hosts (verified -- every User-Agent gets 200 from a residential IP, and
+  # all 40 attempts got 403 from a runner), so this cannot pass until those
+  # requests are allowed through. To enable, add a WAF skip rule for /health and
+  # set the repository variable DEPLOY_SMOKE_ENABLED to 'true'.
   smoke:
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    if: >-
+      github.event_name != 'pull_request'
+      && github.ref == 'refs/heads/main'
+      && vars.DEPLOY_SMOKE_ENABLED == 'true'
     needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 10
