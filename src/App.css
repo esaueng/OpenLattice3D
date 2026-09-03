@@ -169,7 +169,7 @@ textarea:focus-visible,
   width: 100%;
   height: 100%;
   display: grid;
-  grid-template-rows: var(--topbar-h) minmax(0, 1fr) var(--statusbar-h);
+  grid-template-rows: var(--topbar-h) minmax(0, 1fr) auto var(--statusbar-h);
   overflow: hidden;
   background: var(--color-bg);
 }
@@ -1255,6 +1255,9 @@ textarea:focus-visible,
 }
 
 .statusbar {
+  /* The drawer's row is absent while it is closed; pin the statusbar to the
+     last row so it keeps its height either way. */
+  grid-row: -2 / -1;
   position: relative;
   min-width: 0;
   display: flex;
@@ -1390,11 +1393,12 @@ textarea:focus-visible,
 }
 
 .bottom-content {
-  position: fixed;
-  right: 0;
-  bottom: var(--statusbar-h);
-  left: 0;
+  /* A grid row, not an overlay: the workspace above it shrinks, so the viewer
+     control bar stays reachable and the drawer cannot float over mid-page
+     content once the shell stops filling the viewport below 1120px. */
+  position: relative;
   z-index: 20;
+  min-height: 0;
   height: 320px;
   background: rgba(17, 24, 33, 0.98);
   border-top: var(--border-thin);
@@ -1601,7 +1605,7 @@ textarea:focus-visible,
   .app-shell {
     height: auto;
     min-height: 100%;
-    grid-template-rows: auto auto var(--statusbar-h);
+    grid-template-rows: auto auto auto var(--statusbar-h);
   }
 
   .topbar {
@@ -1617,11 +1621,6 @@ textarea:focus-visible,
 
   .statusbar {
     min-height: var(--statusbar-h);
-  }
-
-  .bottom-content {
-    right: 0;
-    left: 0;
   }
 
   .workspace {
