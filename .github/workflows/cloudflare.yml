@@ -1,4 +1,7 @@
-name: Cloudflare deploy
+# Deployment is owned by Cloudflare Workers Builds, which is connected to this
+# repository and publishes on push to main (the "Workers Builds: openlattice3d"
+# check). This workflow must not publish, or the two would race on the same push.
+name: Cloudflare build check
 
 on:
   pull_request: {}
@@ -29,25 +32,16 @@ jobs:
       - run: npm run build
       - run: npx wrangler deploy --dry-run
 
-  deploy:
+  # Verifies what Workers Builds actually published. It cannot be a step of a
+  # deploy job here, because this workflow no longer deploys -- and Actions is
+  # not notified when Workers Builds finishes, so the retry window below is what
+  # absorbs that lag.
+  smoke:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: verify
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npm run build
-      - run: npx wrangler deploy
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       - name: Smoke test deployed health endpoints
         shell: bash
         run: |
@@ -56,8 +50,11 @@ jobs:
           readonly expected_body='{"status":"ok"}'
           readonly expected_content_type='application/json; charset=utf-8'
           readonly expected_cache_control='no-store'
-          readonly max_attempts=5
-          readonly retry_delay_seconds=5
+          # Widened from 5x5s: that window assumed the deploy had just finished in
+          # this same job. Workers Builds publishes asynchronously and Actions is not
+          # told when, so this has to outlast a cold build (~5 minutes of tolerance).
+          readonly max_attempts=20
+          readonly retry_delay_seconds=15
           readonly headers_file="${RUNNER_TEMP}/openlattice-health-headers"
           readonly body_file="${RUNNER_TEMP}/openlattice-health-body"
           readonly -a endpoints=(
@@ -123,7 +120,8 @@ jobs:
           }
 
           smoke_failed=0
-          sleep 5
+          # Give Workers Builds a head start before the first attempt.
+          sleep 15
           for endpoint in "${endpoints[@]}"; do
             if ! check_endpoint "${endpoint}"; then
               smoke_failed=1
