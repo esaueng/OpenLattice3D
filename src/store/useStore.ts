@@ -387,6 +387,7 @@ interface AppState {
   viewerCameraState: ViewerCameraState | null;
   demoModeActive: boolean;
   demoRunId: number;
+  demoSuspended: SuspendedResult | null;
 
   // Logs
   logs: LogEntry[];
@@ -443,6 +444,31 @@ export const SAMPLE_SHAPE_INFO: Record<SampleShape, { label: string; fileName: s
   capsule:  { label: 'Capsule (R=12 H=30mm)', fileName: 'Capsule R=12 H=30mm' },
 };
 
+interface ViewAvailability {
+  demoModeActive: boolean;
+  originalMesh: TriangleMesh | null;
+  sphereMode: boolean;
+  resultMesh: MarchingCubesResult | null;
+}
+
+/** Single source of truth for which viewer modes are selectable. */
+export function canSelectView(state: ViewAvailability, mode: ViewMode): boolean {
+  if (state.demoModeActive) return true;
+  if (mode === 'original') return Boolean(state.originalMesh || state.sphereMode);
+  return Boolean(state.resultMesh);
+}
+
+function legalViewMode(state: ViewAvailability, desired: ViewMode): ViewMode {
+  return canSelectView(state, desired) ? desired : 'original';
+}
+
+/** A completed run parked while multiview borrows the viewport. Never persisted. */
+interface SuspendedResult {
+  resultMesh: MarchingCubesResult | null;
+  validation: ValidationResult | null;
+  viewMode: ViewMode;
+}
+
 export const useStore = create<AppState>((set) => ({
   originalMesh: null,
   meshInfo: null,
@@ -473,6 +499,7 @@ export const useStore = create<AppState>((set) => ({
   viewportResetSignal: 0,
   viewerCameraState: null,
   demoModeActive: false,
+  demoSuspended: null,
   demoRunId: 0,
   logs: [],
   // IndexedDB is asynchronous, so the UI waits for saved preferences before rendering.
@@ -497,6 +524,7 @@ export const useStore = create<AppState>((set) => ({
     demoParamsByType: {},
     viewerCameraState: null,
     demoModeActive: false,
+    demoSuspended: null,
   }),
 
   setMeshRepaired: (repaired) => set((s) => ({
@@ -524,6 +552,7 @@ export const useStore = create<AppState>((set) => ({
     demoParamsByType: {},
     viewerCameraState: null,
     demoModeActive: false,
+    demoSuspended: null,
     params: {
       ...DEFAULT_PARAMS,
       toleranceMm: 0.2,
@@ -555,6 +584,7 @@ export const useStore = create<AppState>((set) => ({
     demoParamsByType: {},
     viewerCameraState: null,
     demoModeActive: false,
+    demoSuspended: null,
     params: {
       ...DEFAULT_PARAMS,
       toleranceMm: 0.2,
@@ -743,7 +773,7 @@ export const useStore = create<AppState>((set) => ({
 
   setValidation: (validation) => set({ validation }),
 
-  setViewMode: (mode) => set({ viewMode: mode }),
+  setViewMode: (mode) => set((s) => (canSelectView(s, mode) ? { viewMode: mode } : {})),
 
   setClipPlane: (partial) => set((s) => ({ clipPlane: { ...s.clipPlane, ...partial } })),
 
@@ -756,9 +786,22 @@ export const useStore = create<AppState>((set) => ({
 
   setViewerCameraState: (cameraState) => set({ viewerCameraState: cameraState }),
 
-  setDemoModeActive: (active) => set({
-    demoModeActive: active,
-    ...(active ? {} : { viewMode: 'original' as ViewMode }),
+  setDemoModeActive: (active) => set((s) => {
+    if (active) return { demoModeActive: true };
+    // A run that finished while multiview was open outranks the parked one.
+    const restored = s.resultMesh
+      ? { resultMesh: s.resultMesh, validation: s.validation, viewMode: s.viewMode }
+      : (s.demoSuspended ?? { resultMesh: null, validation: null, viewMode: 'original' as ViewMode });
+    return {
+      demoModeActive: false,
+      demoSuspended: null,
+      resultMesh: restored.resultMesh,
+      validation: restored.validation,
+      viewMode: legalViewMode(
+        { ...s, demoModeActive: false, resultMesh: restored.resultMesh },
+        restored.viewMode,
+      ),
+    };
   }),
 
   startDemoRun: () => set((s) => {
@@ -772,6 +815,10 @@ export const useStore = create<AppState>((set) => ({
     return {
       demoModeActive: true,
       demoRunId: s.demoRunId + 1,
+      // Park the finished run rather than destroying it; multiview only borrows the viewport.
+      demoSuspended: s.demoModeActive
+        ? s.demoSuspended
+        : { resultMesh: s.resultMesh, validation: s.validation, viewMode: s.viewMode },
       resultMesh: null,
       validation: null,
       viewMode: 'lattice',
@@ -832,6 +879,7 @@ export const useStore = create<AppState>((set) => ({
     viewerBackground: normalizeViewerBackground(project.viewerBackground),
     viewerCameraState: null,
     demoModeActive: false,
+    demoSuspended: null,
     demoRunId: 0,
   }),
 
@@ -871,6 +919,7 @@ export const useStore = create<AppState>((set) => ({
       viewerCameraState: null,
       logs: [],
       demoModeActive: false,
+      demoSuspended: null,
       demoRunId: 0,
     });
   },
@@ -930,6 +979,7 @@ export function hydrateFromSnapshot(snapshot: Partial<PersistedAppState>): Parti
     viewerBackground: persistedState.viewerBackground,
     viewerCameraState: normalizeViewerCameraState(snapshot.viewerCameraState),
     demoModeActive: false,
+    demoSuspended: null,
     demoRunId: 0,
     logs: [],
   };

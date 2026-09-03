@@ -15,7 +15,7 @@ import { parseProjectFile } from '../utils/project-file';
 import { isSheetType } from '../geometry/lattice';
 import { SAMPLE_SHAPE_INFO } from '../store/useStore';
 import type { LatticeGenerationControls } from '../hooks/useLatticeGeneration';
-import { boundedNumberInput } from '../utils/numeric-input';
+import { NumericInput } from './NumericInput';
 import { RightPanel } from './RightPanel';
 import { formatGenerationSeed } from '../geometry/deterministic-random';
 
@@ -257,17 +257,12 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
             <>
               <div className="row" style={{ marginTop: '6px' }}>
                 <label htmlFor="constraint-brush-radius">Brush Radius (mm):</label>
-                <input
+                <NumericInput
                   id="constraint-brush-radius"
-                  type="number"
                   title="Radius around the pointer hit. Zero paints one triangle. Hold Alt while dragging to erase."
-                  min={0}
-                  max={100}
-                  step={0.5}
+                  min={0} max={100} step={0.5}
                   value={store.brushRadius}
-                  onChange={(e) => store.setBrushRadius(
-                    boundedNumberInput(e.target.value, store.brushRadius, 0, 100),
-                  )}
+                  onCommit={(next) => store.setBrushRadius(next)}
                 />
               </div>
               <div className="info-block">Drag on the imported model to paint. Hold Alt to erase.</div>
@@ -276,22 +271,12 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
           {store.keepInTris.size > 0 && (
             <div className="row" style={{ marginTop: '6px' }}>
               <label htmlFor="keep-in-depth">Keep-in Depth (mm):</label>
-              <input
+              <NumericInput
                 id="keep-in-depth"
-                type="number"
                 title="Depth of solid material preserved below painted keep-in faces."
-                min={0.1}
-                max={100}
-                step={0.5}
+                min={0.1} max={100} step={0.5}
                 value={store.params.keepInDepth}
-                onChange={(e) => store.updateParams({
-                  keepInDepth: boundedNumberInput(
-                    e.target.value,
-                    store.params.keepInDepth,
-                    0.1,
-                    100,
-                  ),
-                })}
+                onCommit={(keepInDepth) => store.updateParams({ keepInDepth })}
               />
             </div>
           )}
@@ -353,14 +338,13 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
 
           <div className="row">
             <label htmlFor="cell-size">Cell Size (mm):</label>
-            <input
+            <NumericInput
               id="cell-size"
-              type="number"
               title="Controls overall lattice spacing. Larger values create bigger cells."
               value={store.params.cellSize}
               min={2} max={50} step={0.5}
-              onChange={(e) => store.updateParams({
-                cellSize: boundedNumberInput(e.target.value, store.params.cellSize, 2, 50),
+              onCommit={(next) => store.updateParams({
+                cellSize: next,
               })}
             />
           </div>
@@ -392,14 +376,13 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
           {store.params.surfaceOnly && (
             <div className="row">
               <label htmlFor="lattice-depth">Lattice Depth (mm):</label>
-              <input
+              <NumericInput
                 id="lattice-depth"
-                type="number"
                 title="Depth of the generated lattice band from the outer surface."
                 value={store.params.surfaceDepth}
                 min={1} max={50} step={0.5}
-                onChange={(e) => store.updateParams({
-                  surfaceDepth: boundedNumberInput(e.target.value, store.params.surfaceDepth, 1, 50),
+                onCommit={(next) => store.updateParams({
+                  surfaceDepth: next,
                 })}
               />
             </div>
@@ -408,14 +391,13 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
           {!store.params.noShell && !store.params.surfaceOnly && (
             <div className="row">
               <label htmlFor="shell-thickness">Shell Thickness (mm):</label>
-              <input
+              <NumericInput
                 id="shell-thickness"
-                type="number"
                 title="Thickness of the outer shell retained around the lattice."
                 value={store.params.shellThickness}
                 min={0.3} max={10} step={0.1}
-                onChange={(e) => store.updateParams({
-                  shellThickness: boundedNumberInput(e.target.value, store.params.shellThickness, 0.3, 10),
+                onCommit={(next) => store.updateParams({
+                  shellThickness: next,
                 })}
               />
             </div>
@@ -450,36 +432,22 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
                   </div>
                   <div className="row">
                     <label htmlFor="escape-hole-diameter">Hole Diameter (mm):</label>
-                    <input
+                    <NumericInput
                       id="escape-hole-diameter"
-                      type="number"
+                      title="Diameter of the powder-escape holes."
                       value={store.params.escapeHoleDiameter}
                       min={0.5} max={50} step={0.5}
-                      onChange={(e) => store.updateParams({
-                        escapeHoleDiameter: boundedNumberInput(
-                          e.target.value,
-                          store.params.escapeHoleDiameter,
-                          0.5,
-                          50,
-                        ),
-                      })}
+                      onCommit={(escapeHoleDiameter) => store.updateParams({ escapeHoleDiameter })}
                     />
                   </div>
                   <div className="row">
                     <label htmlFor="escape-hole-count">Hole Count:</label>
-                    <input
+                    <NumericInput
                       id="escape-hole-count"
-                      type="number"
+                      title="Number of powder-escape holes."
                       value={store.params.escapeHoleCount}
                       min={1} max={100} step={1}
-                      onChange={(e) => store.updateParams({
-                        escapeHoleCount: Math.trunc(boundedNumberInput(
-                          e.target.value,
-                          store.params.escapeHoleCount,
-                          1,
-                          100,
-                        )),
-                      })}
+                      onCommit={(next) => store.updateParams({ escapeHoleCount: Math.trunc(next) })}
                     />
                   </div>
                 </>
@@ -487,31 +455,32 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
             </>
           )}
 
+          {/* Keyed: both branches render a .row at the same child slot, so without a
+              key React reuses the instance and carries an in-progress edit from one
+              parameter to the other. */}
           {isSheetType(store.params.latticeType) ? (
-            <div className="row">
+            <div className="row" key="wall-thickness">
               <label htmlFor="wall-thickness">Wall Thickness (mm):</label>
-              <input
+              <NumericInput
                 id="wall-thickness"
-                type="number"
                 title="Thickness of sheet-style TPMS surfaces."
                 value={store.params.wallThickness}
                 min={0.3} max={5} step={0.1}
-                onChange={(e) => store.updateParams({
-                  wallThickness: boundedNumberInput(e.target.value, store.params.wallThickness, 0.3, 5),
+                onCommit={(next) => store.updateParams({
+                  wallThickness: next,
                 })}
               />
             </div>
           ) : (
-            <div className="row">
+            <div className="row" key="strut-diameter">
               <label htmlFor="strut-diameter">Strut Diameter (mm):</label>
-              <input
+              <NumericInput
                 id="strut-diameter"
-                type="number"
                 title="Diameter of strut members for strut-based lattices."
                 value={store.params.strutDiameter}
                 min={0.3} max={5} step={0.1}
-                onChange={(e) => store.updateParams({
-                  strutDiameter: boundedNumberInput(e.target.value, store.params.strutDiameter, 0.3, 5),
+                onCommit={(next) => store.updateParams({
+                  strutDiameter: next,
                 })}
               />
             </div>
@@ -519,28 +488,26 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
 
           <div className="row">
             <label htmlFor="min-feature-size">Min Feature Size (mm):</label>
-            <input
+            <NumericInput
               id="min-feature-size"
-              type="number"
               title="Minimum manufacturable feature size target used in validation."
               value={store.params.minFeatureSize}
               min={0.3} max={5} step={0.1}
-              onChange={(e) => store.updateParams({
-                minFeatureSize: boundedNumberInput(e.target.value, store.params.minFeatureSize, 0.3, 5),
+              onCommit={(next) => store.updateParams({
+                minFeatureSize: next,
               })}
             />
           </div>
 
           <div className="row">
             <label htmlFor="tolerance">Tolerance (mm):</label>
-            <input
+            <NumericInput
               id="tolerance"
-              type="number"
               title="Maximum allowed outer-surface deviation versus the source mesh."
               value={store.params.toleranceMm}
               min={0.05} max={2} step={0.05}
-              onChange={(e) => store.updateParams({
-                toleranceMm: boundedNumberInput(e.target.value, store.params.toleranceMm, 0.05, 2),
+              onCommit={(next) => store.updateParams({
+                toleranceMm: next,
               })}
             />
           </div>
@@ -551,7 +518,7 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
               id="export-resolution"
               title="Sampling resolution for marching cubes. Higher values increase detail and compute time."
               value={store.params.exportResolution}
-              onChange={(e) => store.updateParams({ exportResolution: parseInt(e.target.value) || 3 })}
+              onChange={(e) => store.updateParams({ exportResolution: Number(e.target.value) })}
             >
               {['Min', 'Low', 'Med', 'Good', 'High', 'Fine', 'Ultra', 'Extreme', 'Hyper', 'Max'].map(
                 (label, index) => {
@@ -573,7 +540,7 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
               id="thin-filter"
               title="Remove features thinner than this by morphological opening. The run log explains when the export grid cannot resolve the requested size."
               value={store.params.thinSectionFilter}
-              onChange={(e) => store.updateParams({ thinSectionFilter: parseFloat(e.target.value) || 0 })}
+              onChange={(e) => store.updateParams({ thinSectionFilter: Number(e.target.value) })}
             >
               <option value={0}>Off</option>
               <option value={0.5}>Under 0.5mm</option>
@@ -587,10 +554,19 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
         </section>
       )}
 
-      {/* Generate */}
+      <div className="left-inspection-panel">
+        <RightPanel />
+      </div>
+
+      {/* Generate: last child so the pinned bar un-sticks at max scroll instead
+          of permanently covering the validation panel above it. */}
       {hasModel && (
-        <section className="panel-section">
-          <h3>Generate</h3>
+        <section
+          className="panel-section panel-section-sticky"
+          id="generate-action"
+          aria-label="Generate lattice"
+          tabIndex={-1}
+        >
           <div className="row" style={{ gap: '6px', flexWrap: 'wrap' }}>
             <span title="Persisted deterministic generation seed">
               Seed {formatGenerationSeed(store.generationSeed)}
@@ -620,20 +596,16 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
               Generate Lattice
             </button>
           ) : (
-            <div>
+            <div className="generate-progress-track">
+              <div className="progress-text">{store.progressMessage}</div>
               <div className="progress-bar">
                 <div className="progress-fill" style={{ width: `${store.progress * 100}%` }} />
               </div>
-              <div className="progress-text">{store.progressMessage}</div>
               <button className="btn btn-small" title="Stop the current generation job." onClick={cancelGeneration}>Cancel</button>
             </div>
           )}
         </section>
       )}
-
-      <div className="left-inspection-panel">
-        <RightPanel />
-      </div>
 
     </div>
   );
