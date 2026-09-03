@@ -3,8 +3,11 @@
 :root {
   --color-bg: #0b0f14;
   --color-surface: #111821;
-  --color-surface-2: #17202b;
-  --color-surface-hover: #1b2430;
+  /* Control rest and control hover are separate roles: raising one to make
+     resting controls visible must not drag the other along with it. */
+  --color-surface-2: #212c3a;
+  --color-surface-hover: #313f52;
+  --color-chip-bg: #1b2533;
   --color-border: #2a3441;
   --color-border-strong: #3a4554;
   --color-text: #e6edf3;
@@ -13,6 +16,7 @@
   --color-text-subtle: #828b99;
   /* Control boundary color meeting WCAG 1.4.11 (>=3:1) for inputs/buttons */
   --color-control-border: #6b7585;
+  --color-control-border-hover: #8492aa;
   --color-accent: #4da3ff;
   --color-accent-dim: rgba(77, 163, 255, 0.12);
   --color-accent-border: rgba(77, 163, 255, 0.7);
@@ -209,7 +213,7 @@ textarea:focus-visible,
 .breadcrumb-chip {
   padding: 1px 7px;
   color: var(--color-text);
-  background: var(--color-surface-2);
+  background: var(--color-chip-bg);
   border: var(--border-thin);
   border-radius: var(--radius-sm);
   font-family: var(--font-mono);
@@ -306,7 +310,7 @@ textarea:focus-visible,
 .icon-button:hover,
 .topbar-action:hover {
   color: var(--color-text);
-  background: var(--color-surface-2);
+  background: var(--color-surface-hover);
   border-color: var(--color-accent-border);
 }
 
@@ -747,9 +751,13 @@ textarea:focus-visible,
   color: var(--color-accent);
 }
 
-.viewer-controls-panel .view-buttons .btn:hover,
-.viewer-controls-panel .view-buttons .btn:focus-visible,
-.viewer-controls-panel .view-buttons .btn-active {
+.viewer-controls-panel .view-buttons .btn:hover:not(:disabled) {
+  border-color: var(--color-control-border-hover);
+  background: var(--color-surface-hover);
+}
+
+.viewer-controls-panel .view-buttons .btn.btn-active {
+  color: var(--color-accent);
   border-color: var(--color-accent-border);
   background: var(--color-accent-dim);
 }
@@ -860,9 +868,9 @@ textarea:focus-visible,
   transition: background 100ms ease, border-color 100ms ease, color 100ms ease;
 }
 
-.btn:hover {
+.btn:hover:not(:disabled):not([aria-disabled='true']) {
   background: var(--color-surface-hover);
-  border-color: var(--color-accent-border);
+  border-color: var(--color-control-border-hover);
 }
 
 .btn:disabled,
@@ -916,10 +924,10 @@ textarea:focus-visible,
   font-size: var(--fs-md);
 }
 
-.btn-active {
-  color: var(--color-accent) !important;
-  background: var(--color-accent-dim) !important;
-  border-color: var(--color-accent-border) !important;
+.btn.btn-active {
+  color: var(--color-accent);
+  background: var(--color-accent-dim);
+  border-color: var(--color-accent-border);
 }
 
 .btn-generate-muted {
@@ -1008,9 +1016,53 @@ textarea:focus-visible,
   cursor: pointer;
 }
 
-.checkbox-row input {
-  margin-top: 2px;
-  accent-color: var(--color-accent);
+.checkbox-row label {
+  min-height: 26px;
+}
+
+.checkbox-row input[type='checkbox'],
+.popover-checkbox-row input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  margin: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  background-color: var(--color-bg);
+  background-repeat: no-repeat;
+  background-position: center;
+  border: 1px solid var(--color-control-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background-color 100ms ease, border-color 100ms ease;
+}
+
+.checkbox-row input[type='checkbox']:hover:not(:disabled),
+.popover-checkbox-row input[type='checkbox']:hover:not(:disabled) {
+  border-color: var(--color-control-border-hover);
+}
+
+.checkbox-row input[type='checkbox']:checked,
+.popover-checkbox-row input[type='checkbox']:checked {
+  background-color: var(--color-accent);
+  border-color: var(--color-accent);
+  /* Tick is drawn in the on-accent ink; keep in step with --color-accent. */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='none' stroke='%2306111e' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round' d='M3.5 8.5l3 3 6-6'/%3E%3C/svg%3E");
+}
+
+.checkbox-row input[type='checkbox']:disabled,
+.popover-checkbox-row input[type='checkbox']:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* forced-colors drops background-image, so carry the checked state on the
+   border box too rather than losing it entirely. */
+@media (forced-colors: active) {
+  .checkbox-row input[type='checkbox']:checked,
+  .popover-checkbox-row input[type='checkbox']:checked {
+    border-width: 5px;
+  }
 }
 
 .info-block {
@@ -1239,10 +1291,15 @@ textarea:focus-visible,
   font-size: var(--fs-xs);
 }
 
-.status-tabs button:hover,
-.status-tabs button.active {
+.status-tabs button:hover {
   color: var(--color-text);
-  background: var(--color-surface-2);
+  background: var(--color-surface-hover);
+  border-color: var(--color-control-border-hover);
+}
+
+.status-tabs button.active {
+  color: var(--color-accent);
+  background: var(--color-accent-dim);
   border-color: var(--color-accent-border);
 }
 
@@ -1250,7 +1307,7 @@ textarea:focus-visible,
   min-width: 18px;
   padding: 0 5px;
   color: var(--color-text);
-  background: var(--color-surface-2);
+  background: var(--color-chip-bg);
   border: var(--border-thin);
   border-radius: 999px;
   font-family: var(--font-mono);
@@ -1428,7 +1485,7 @@ textarea:focus-visible,
 .log-copy-button:hover,
 .log-clear-button:hover {
   color: var(--color-text);
-  background: var(--color-surface-2);
+  background: var(--color-surface-hover);
   border-color: var(--color-accent-border);
 }
 
