@@ -895,6 +895,11 @@ textarea:focus-visible,
   width: 78px;
 }
 
+.row input[type='number'][aria-invalid='true'] {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: var(--color-error);
+}
+
 .row select {
   flex: 1;
 }
