@@ -175,6 +175,60 @@ describe('workspace transitions', () => {
     expect(useStore.getState().viewMode).toBe('original');
   });
 
+  it('parks a finished run while multiview is open and restores it on exit', () => {
+    const mesh = generateCubeMesh(10);
+    useStore.getState().setSampleShape('sphere');
+    useStore.getState().setResultMesh(mesh);
+    const generated = useStore.getState().resultMesh;
+    expect(generated).not.toBeNull();
+
+    useStore.getState().startDemoRun();
+    expect(useStore.getState().resultMesh).toBeNull();
+
+    useStore.getState().setDemoModeActive(false);
+
+    expect(useStore.getState().resultMesh).toBe(generated);
+    expect(useStore.getState().demoSuspended).toBeNull();
+  });
+
+  it('does not resurrect a parked run that belonged to a previous model', () => {
+    const mesh = generateCubeMesh(10);
+    useStore.getState().setSampleShape('sphere');
+    useStore.getState().setResultMesh(mesh);
+    useStore.getState().startDemoRun();
+
+    // Switching model while multiview is open must invalidate the parked run.
+    useStore.getState().setSampleShape('cube');
+    useStore.getState().setDemoModeActive(false);
+
+    expect(useStore.getState().resultMesh).toBeNull();
+    expect(useStore.getState().demoSuspended).toBeNull();
+  });
+
+  it('lets a run that finishes during multiview outrank the parked one', () => {
+    const parked = generateCubeMesh(10);
+    const fresh = generateCubeMesh(20);
+    useStore.getState().setSampleShape('sphere');
+    useStore.getState().setResultMesh(parked);
+    useStore.getState().startDemoRun();
+
+    useStore.getState().setResultMesh(fresh);
+    useStore.getState().setDemoModeActive(false);
+
+    expect(useStore.getState().resultMesh?.triCount).toBe(fresh.triCount);
+  });
+
+  it('refuses a viewer mode the current state cannot show', () => {
+    useStore.getState().setSampleShape('sphere');
+
+    useStore.getState().setViewMode('xray');
+    expect(useStore.getState().viewMode).toBe('original');
+
+    useStore.getState().setResultMesh(generateCubeMesh(10));
+    useStore.getState().setViewMode('xray');
+    expect(useStore.getState().viewMode).toBe('xray');
+  });
+
   it('clears a stale persisted camera when the viewport is reset', () => {
     const beforeSignal = useStore.getState().viewportResetSignal;
     useStore.getState().setViewerCameraState({
