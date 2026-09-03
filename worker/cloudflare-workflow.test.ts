@@ -38,10 +38,16 @@ describe('Cloudflare workflow', () => {
   });
 
   it('runs the smoke check on main only, never on pull requests', () => {
-    expect(smokeJob).toContain(
-      "    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'",
-    );
+    expect(smokeJob).toContain("github.event_name != 'pull_request'");
+    expect(smokeJob).toContain("github.ref == 'refs/heads/main'");
     expect(smokeJob).not.toContain('${{ secrets');
+  });
+
+  it('keeps the smoke check opt-in while Cloudflare blocks runner IPs', () => {
+    // Cloudflare answers 403 to GitHub's runner ranges for both hosts, so an
+    // ungated smoke job fails every run on main. It stays off until a WAF skip
+    // rule exists and DEPLOY_SMOKE_ENABLED is set.
+    expect(smokeJob).toContain("vars.DEPLOY_SMOKE_ENABLED == 'true'");
   });
 
   it('checks both uncached JSON health responses with bounded retries', () => {
