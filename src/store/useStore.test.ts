@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { analyzeMesh, generateCubeMesh } from '../geometry/mesh-analysis';
-import { DEFAULT_PARAMS } from '../types/project';
+import { DEFAULT_PARAMS, type ValidationResult } from '../types/project';
 import { buildPersistedAppState, hydrateFromSnapshot, useStore } from './useStore';
 
 describe('persistence hydration', () => {
@@ -251,5 +251,66 @@ describe('workspace transitions', () => {
 
     useStore.getState().setViewerBackground('#A1b2C3');
     expect(useStore.getState().viewerBackground).toBe('#a1b2c3');
+  });
+});
+
+describe('completed result invalidation', () => {
+  const mesh = generateCubeMesh(10);
+  const validation: ValidationResult = {
+    passed: true,
+    outerDeviation: { passed: true, maxDeviation: 0, tolerance: 0.2 },
+    minThickness: { passed: true, minMeasured: 1, required: 0.8, absoluteMin: 1, sampled: 10 },
+    manifold: { passed: true, details: 'Mesh is manifold and watertight' },
+    disconnected: { passed: true, fragmentCount: 1 },
+    warnings: [],
+  };
+
+  beforeEach(() => {
+    useStore.getState().resetProject();
+    useStore.getState().setSampleShape('cube');
+    useStore.getState().setResultMesh(mesh);
+    useStore.getState().setValidation(validation);
+  });
+
+  const edits = [
+    ['cell size', () => useStore.getState().updateParams({ cellSize: 12 })],
+    ['validation tolerance', () => useStore.getState().updateParams({ toleranceMm: 0.4 })],
+    ['lattice type', () => useStore.getState().setLatticeType('bcc')],
+    ['process preset', () => useStore.getState().setProcessPreset('SLA_DLP')],
+    ['variant', () => useStore.getState().setVariant('implicit_conformal')],
+    ['seed', () => useStore.getState().reseedGeneration()],
+    ['face constraints', () => useStore.getState().toggleKeepIn(1)],
+  ] as const;
+
+  it.each(edits)('removes completed geometry and validation atomically on %s changes', (_name, edit) => {
+    const observed: boolean[] = [];
+    const unsubscribe = useStore.subscribe((state) => {
+      observed.push(state.resultMesh === null && state.validation === null);
+    });
+    try {
+      edit();
+    } finally {
+      unsubscribe();
+    }
+    expect(observed).toEqual([true]);
+    expect(useStore.getState().viewMode).toBe('original');
+  });
+
+  it.each(edits)('does not restore a stale multiview result after %s changes', (_name, edit) => {
+    useStore.getState().startDemoRun();
+    edit();
+    useStore.getState().setDemoModeActive(false);
+    expect(useStore.getState().resultMesh).toBeNull();
+    expect(useStore.getState().validation).toBeNull();
+    expect(useStore.getState().demoSuspended).toBeNull();
+  });
+
+  it('preserves completed results for unchanged inputs and display-only edits', () => {
+    useStore.getState().updateParams({ cellSize: 8, materialDensityGPerCm3: 1.2 });
+    useStore.getState().setLatticeType('gyroid');
+    useStore.getState().setViewerBackground('#112233');
+    useStore.getState().setClipPlane({ axis: 'x' });
+    expect(useStore.getState().resultMesh).toBe(mesh);
+    expect(useStore.getState().validation).toBe(validation);
   });
 });
