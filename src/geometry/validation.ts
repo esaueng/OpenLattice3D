@@ -9,6 +9,12 @@ export function checkTopology(result: MarchingCubesResult): {
   manifold: { passed: boolean; details: string };
   disconnected: { passed: boolean; fragmentCount: number };
 } {
+  if (result.triCount === 0) {
+    return {
+      manifold: { passed: false, details: 'Mesh is empty; no printable surface' },
+      disconnected: { passed: false, fragmentCount: 0 },
+    };
+  }
   const topology = buildEdgeTopology(result.positions, result.triCount);
 
   const { boundaryEdges, nonManifoldEdges } = countEdgeDefects(topology);
@@ -181,7 +187,8 @@ export function checkMinThickness(
   }
 
   if (thicknesses.length === 0) {
-    return { passed: true, minMeasured: maxDepth, absoluteMin: maxDepth, sampled: 0 };
+    // Keep numeric fields serializable; sampled=0 means unavailable, not 0mm.
+    return { passed: false, minMeasured: 0, absoluteMin: 0, sampled: 0 };
   }
 
   thicknesses.sort((a, b) => a - b);
@@ -222,6 +229,7 @@ export function runValidation(
 
   // Min thickness
   const minThickness = checkMinThickness(sdf, result, params.minFeatureSize);
+  if (minThickness.sampled === 0) warnings.push('Minimum thickness could not be measured');
 
   const { manifold, disconnected } = checkTopology(result);
   if (disconnected.fragmentCount > 1) {
