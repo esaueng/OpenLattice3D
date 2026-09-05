@@ -1,6 +1,12 @@
 import { analyzeMesh } from '../geometry/mesh-analysis';
 import { exportBinarySTL, parseSTL, type TriangleMesh } from '../geometry/stl-parser';
 import {
+  DEFAULT_IMPORT_LIMITS,
+  estimateDecodedBase64Bytes,
+  formatByteCount,
+  type ImportLimits,
+} from '../geometry/mesh-limits';
+import {
   DEFAULT_PARAMS,
   sanitizeLatticeParams,
   type LatticeParams,
@@ -73,8 +79,22 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-function base64ToBytes(encoded: string): Uint8Array {
+function base64ToBytes(encoded: string, maxDecodedBytes: number): Uint8Array {
+  // atob() materializes the full decoded string, so reject payloads whose
+  // decoded size can exceed the budget before calling it. atob() strips
+  // ASCII whitespace, which only shrinks the result, so the estimate is an
+  // upper bound; the post-decode check guards the exact boundary.
+  if (estimateDecodedBase64Bytes(encoded.length) > maxDecodedBytes) {
+    throw new Error(
+      `Embedded mesh data decodes to more than the ${formatByteCount(maxDecodedBytes)} import limit`
+    );
+  }
   const binary = atob(encoded);
+  if (binary.length > maxDecodedBytes) {
+    throw new Error(
+      `Embedded mesh data decodes to ${formatByteCount(binary.length)}, exceeding the ${formatByteCount(maxDecodedBytes)} import limit`
+    );
+  }
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   return bytes;
@@ -160,7 +180,7 @@ function parseClipPlane(value: unknown): ClipPlaneState | undefined {
   };
 }
 
-export function parseProjectFile(data: unknown): ParsedProjectFile {
+export function parseProjectFile(data: unknown, limits: ImportLimits = DEFAULT_IMPORT_LIMITS): ParsedProjectFile {
   if (typeof data !== 'object' || data === null) {
     throw new Error('Project JSON must contain an object');
   }
@@ -217,10 +237,10 @@ export function parseProjectFile(data: unknown): ParsedProjectFile {
     if (source.encoding !== 'base64-binary-stl' || typeof source.data !== 'string') {
       throw new Error('Embedded mesh is missing or uses an unsupported encoding');
     }
-    const bytes = base64ToBytes(source.data);
+    const bytes = base64ToBytes(source.data, limits.maxEmbeddedStlBytes);
     const meshBuffer = new ArrayBuffer(bytes.byteLength);
     new Uint8Array(meshBuffer).set(bytes);
-    const mesh = parseSTL(meshBuffer);
+    const mesh = parseSTL(meshBuffer, limits);
     const fingerprint = meshFingerprint(mesh);
     const expected = typeof source.fingerprint === 'string' ? source.fingerprint : null;
     const selectionFingerprint = typeof selection.meshFingerprint === 'string' ? selection.meshFingerprint : null;
