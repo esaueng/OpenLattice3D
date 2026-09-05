@@ -469,7 +469,32 @@ interface SuspendedResult {
   viewMode: ViewMode;
 }
 
-export const useStore = create<AppState>((set) => ({
+export const useStore = create<AppState>((rawSet) => {
+  // Clear derived data atomically with input edits, including completed runs
+  // parked by multiview after the worker's input subscription has ended.
+  const set = (update: Partial<AppState> | ((state: AppState) => Partial<AppState>)) => rawSet((state) => {
+    const patch = typeof update === 'function' ? update(state) : update;
+    const next = { ...state, ...patch };
+    const paramsChanged = (Object.keys(state.params) as (keyof LatticeParams)[])
+      .some((key) => key !== 'materialDensityGPerCm3' && next.params[key] !== state.params[key]);
+    const inputsChanged = paramsChanged
+      || next.originalMesh !== state.originalMesh
+      || next.sampleShape !== state.sampleShape
+      || next.sphereMode !== state.sphereMode
+      || next.sphereRadius !== state.sphereRadius
+      || next.generationSeed !== state.generationSeed
+      || next.keepOutTris !== state.keepOutTris
+      || next.keepInTris !== state.keepInTris;
+    if (!inputsChanged) return patch;
+    return {
+      ...patch,
+      resultMesh: null,
+      validation: null,
+      demoSuspended: null,
+      viewMode: next.demoModeActive ? next.viewMode : 'original',
+    };
+  });
+  return ({
   originalMesh: null,
   meshInfo: null,
   meshRepaired: false,
@@ -923,7 +948,8 @@ export const useStore = create<AppState>((set) => ({
       demoRunId: 0,
     });
   },
-}));
+  });
+});
 
 function persistedSubset(state: AppState): PersistedState {
   return {

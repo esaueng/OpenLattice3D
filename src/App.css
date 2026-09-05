@@ -1715,6 +1715,21 @@ textarea:focus-visible,
     width: 100%;
     margin-left: 0;
     justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .export-simplify {
+    min-width: 0;
+    flex-wrap: wrap;
+  }
+
+  .export-controls-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .export-controls-actions .btn {
+    flex: 1 1 auto;
   }
 
   .demo-grid-view {
