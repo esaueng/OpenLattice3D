@@ -76,6 +76,24 @@ Automatic browser persistence is limited to parameters and viewer preferences;
 source and generated mesh buffers remain in memory unless the user exports a
 project JSON file.
 
+### Import budgets
+
+All geometry enters the browser, so imports are bounded before memory is
+allocated; the constants live in `src/geometry/mesh-limits.ts`:
+
+- STL files: 128 MiB (`MAX_STL_FILE_BYTES`), checked from `File.size` before
+  reading and again on the parse entry buffer.
+- Triangles: 5,000,000 (`MAX_MESH_TRIANGLES`), checked on the binary header
+  declaration before typed-array sizing and enforced per facet while scanning
+  ASCII, so parser arrays never grow past the budget.
+- Project JSON: 256 MiB (`MAX_PROJECT_FILE_BYTES`), checked from `File.size`.
+- Embedded project STL: 128 MiB decoded (`MAX_EMBEDDED_STL_BYTES`); the base64
+  payload is rejected on its decoded-size estimate before `atob()` runs and
+  verified again after decoding.
+
+Every rejection surfaces as a log message naming the file, its size, and the
+limit it exceeded.
+
 Generation randomness uses a versioned Mulberry32 stream with FNV-1a-derived
 logical substreams. Stochastic lattice fields are coordinate-hashed from the root
 seed, surface-sampling jobs use fixed stream identities, and tile results merge by
