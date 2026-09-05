@@ -1,0 +1,90 @@
+{
+  "hardware": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "cpuModel": "Apple M5 Pro",
+    "cores": 15,
+    "node": "v22.23.1"
+  },
+  "startedAt": "2026-09-05T16:20:45.565Z",
+  "options": {
+    "warmupIterations": 1,
+    "iterations": 5
+  },
+  "fixtures": [
+    {
+      "fixture": "sphere-gyroid-bench",
+      "resolution": 160,
+      "backends": [
+        {
+          "backend": "cpu-single",
+          "iterations": 5,
+          "medianTotalMs": 2440.623791,
+          "p95TotalMs": 2859.7599169999994,
+          "phases": {
+            "fieldMs": 161.31216700000004,
+            "classifyScanEmitMs": 78.15779199999997,
+            "readbackMs": 0,
+            "mergeMs": null,
+            "cleanupMs": 2200.958833999999
+          },
+          "speedupVsCpuTiled": 0.8858795681550418
+        },
+        {
+          "backend": "cpu-tiled",
+          "iterations": 5,
+          "medianTotalMs": 2162.098750000001,
+          "p95TotalMs": 2364.0347079999992,
+          "phases": {
+            "fieldMs": null,
+            "classifyScanEmitMs": 230.94132900003024,
+            "readbackMs": 0,
+            "mergeMs": 2.809326999991754,
+            "cleanupMs": 1935.4009590000023
+          },
+          "speedupVsCpuTiled": null
+        }
+      ]
+    },
+    {
+      "fixture": "sphere-schwarzP-bench",
+      "resolution": 160,
+      "backends": [
+        {
+          "backend": "cpu-single",
+          "iterations": 5,
+          "medianTotalMs": 1881.9474590000027,
+          "p95TotalMs": 2137.406624999996,
+          "phases": {
+            "fieldMs": 135.62833300000057,
+            "classifyScanEmitMs": 71.36245799999597,
+            "readbackMs": 0,
+            "mergeMs": null,
+            "cleanupMs": 1677.3969590000052
+          },
+          "speedupVsCpuTiled": 1.0005465301356176
+        },
+        {
+          "backend": "cpu-tiled",
+          "iterations": 5,
+          "medianTotalMs": 1882.975999999995,
+          "p95TotalMs": 1958.6048749999973,
+          "phases": {
+            "fieldMs": null,
+            "classifyScanEmitMs": 240.992545000081,
+            "readbackMs": 0,
+            "mergeMs": 3.0355089999866323,
+            "cleanupMs": 1639.6347920000044
+          },
+          "speedupVsCpuTiled": null
+        }
+      ]
+    }
+  ],
+  "promotion": {
+    "minSpeedup": 1.5,
+    "gpuBackendPresent": false,
+    "gpuMedianSpeedupVsCpuTiled": null,
+    "meetsSpeedupThreshold": null
+  }
+}
