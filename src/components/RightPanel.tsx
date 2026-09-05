@@ -51,11 +51,17 @@ export function RightPanel() {
               <span className="check-icon">{validation.minThickness.passed ? 'OK' : 'FAIL'}</span>
               <div>
                 <strong>Min Thickness</strong>
-                <div>Measured: {validation.minThickness.minMeasured.toFixed(3)}mm (required: {validation.minThickness.required}mm)</div>
-                <div>
-                  Absolute min: {(validation.minThickness.absoluteMin ?? validation.minThickness.minMeasured).toFixed(3)}mm
-                  {' '}across {validation.minThickness.sampled ?? 0} measured rays
-                </div>
+                {validation.minThickness.sampled > 0 ? (
+                  <>
+                    <div>Measured: {validation.minThickness.minMeasured.toFixed(3)}mm (required: {validation.minThickness.required}mm)</div>
+                    <div>
+                      Absolute min: {(validation.minThickness.absoluteMin ?? validation.minThickness.minMeasured).toFixed(3)}mm
+                      {' '}across {validation.minThickness.sampled} measured rays
+                    </div>
+                  </>
+                ) : (
+                  <div>Not measured: no usable thickness samples (required: {validation.minThickness.required}mm)</div>
+                )}
               </div>
             </div>
 
