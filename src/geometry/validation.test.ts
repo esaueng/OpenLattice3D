@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { checkMinThickness } from './validation';
+import { checkMinThickness, runValidation } from './validation';
+import { DEFAULT_PARAMS } from '../types/project';
 import type { MarchingCubesResult } from './marching-cubes';
 
 function planarSurface(x: number): MarchingCubesResult {
@@ -54,5 +55,25 @@ describe('minimum-thickness validation against known solids', () => {
     expect(measured.minMeasured).toBeCloseTo(1, 5);
     expect(measured.absoluteMin).toBeCloseTo(0.1, 5);
     expect(measured.passed).toBe(false);
+  });
+});
+
+describe('unmeasurable thickness', () => {
+  it('fails topology, connectivity, and overall validation for an empty mesh', () => {
+    const result = runValidation(
+      { positions: new Float32Array(0), normals: new Float32Array(0), triCount: 0 },
+      () => 1, DEFAULT_PARAMS, null, 25,
+    );
+    expect(result.passed).toBe(false);
+    expect(result.manifold.passed).toBe(false);
+    expect(result.manifold.details).toMatch(/empty/);
+    expect(result.disconnected).toEqual({ passed: false, fragmentCount: 0 });
+    expect(result.minThickness.passed).toBe(false);
+    expect(result.warnings).toContain('Minimum thickness could not be measured');
+  });
+
+  it('fails without inventing thickness when no usable ray is found', () => {
+    const result = checkMinThickness(() => 1, planarSurface(0), 0.8);
+    expect(result).toEqual({ passed: false, minMeasured: 0, absoluteMin: 0, sampled: 0 });
   });
 });
