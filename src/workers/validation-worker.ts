@@ -137,6 +137,7 @@ function runProceduralValidation(
   const minThickness = checkMinThickness(sdf, result, msg.params.minFeatureSize, 200);
   const { manifold, disconnected } = checkTopology(result);
   const warnings: string[] = [];
+  if (minThickness.sampled === 0) warnings.push('Minimum thickness could not be measured');
 
   if (!msg.params.escapeHoles && msg.params.variant === 'shell_core') {
     warnings.push('Escape holes disabled - trapped powder/resin likely');

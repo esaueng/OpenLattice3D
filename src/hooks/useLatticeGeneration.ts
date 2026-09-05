@@ -62,6 +62,20 @@ export function useLatticeGeneration(): LatticeGenerationControls {
   const [workerController] = useState(() => new GenerationWorkerController());
   const generationRunRef = useRef(0);
   const validationWorkerRef = useRef<Worker | null>(null);
+  const inputSubscriptionRef = useRef<(() => void) | null>(null);
+
+  const releaseInputSubscription = useCallback(() => {
+    inputSubscriptionRef.current?.();
+    inputSubscriptionRef.current = null;
+  }, []);
+
+  const stopRun = useCallback(() => {
+    generationRunRef.current++;
+    releaseInputSubscription();
+    workerController.dispose();
+    validationWorkerRef.current?.terminate();
+    validationWorkerRef.current = null;
+  }, [releaseInputSubscription, workerController]);
 
   const canGenerate = useCallback(() => {
     const store = useStore.getState();
@@ -81,6 +95,7 @@ export function useLatticeGeneration(): LatticeGenerationControls {
   const startGeneration = useCallback(() => {
     const store = useStore.getState();
     if (!canGenerate()) return;
+    stopRun();
 
     void requestNotificationPermission();
     store.setGenerating(true);
@@ -95,11 +110,7 @@ export function useLatticeGeneration(): LatticeGenerationControls {
     store.setValidation(null);
     store.setDemoModeActive(false);
 
-    const runId = ++generationRunRef.current;
-    if (validationWorkerRef.current) {
-      validationWorkerRef.current.terminate();
-      validationWorkerRef.current = null;
-    }
+    const runId = generationRunRef.current;
 
     let worker: Worker;
     try {
@@ -165,7 +176,6 @@ export function useLatticeGeneration(): LatticeGenerationControls {
 
     const startValidation = (resp: GenerationResultResponse) => {
       if (generationRunRef.current !== runId) return;
-      const latest = useStore.getState();
       if (validationWorkerRef.current) {
         validationWorkerRef.current.terminate();
       }
@@ -181,23 +191,23 @@ export function useLatticeGeneration(): LatticeGenerationControls {
         positions: new Float32Array(resp.positions),
         normals: new Float32Array(resp.normals),
         triCount: resp.triCount,
-        params: latest.params,
+        params: store.params,
         generationSeed,
-        sphereMode: latest.sphereMode,
-        sphereRadius: latest.sphereRadius,
-        sampleShape: latest.sampleShape,
-        keepOutTris: Array.from(latest.keepOutTris),
-        keepInTris: Array.from(latest.keepInTris),
+        sphereMode: store.sphereMode,
+        sphereRadius: store.sphereRadius,
+        sampleShape: store.sampleShape,
+        keepOutTris: Array.from(store.keepOutTris),
+        keepInTris: Array.from(store.keepInTris),
         thinFilterSkipped: resp.thinFilterSkipped,
         surfaceSamplePositions: resp.surfaceSamplePositions,
         surfaceSampleNormals: resp.surfaceSampleNormals,
         surfaceSampleHoleScales: resp.surfaceSampleHoleScales,
       };
 
-      if (latest.originalMesh) {
-        validationMsg.meshPositions = new Float32Array(latest.originalMesh.positions);
-        validationMsg.meshNormals = new Float32Array(latest.originalMesh.normals);
-        validationMsg.meshTriCount = latest.originalMesh.triCount;
+      if (store.originalMesh) {
+        validationMsg.meshPositions = new Float32Array(store.originalMesh.positions);
+        validationMsg.meshNormals = new Float32Array(store.originalMesh.normals);
+        validationMsg.meshTriCount = store.originalMesh.triCount;
       }
 
       validationWorker.onmessage = (event: MessageEvent<ValidationWorkerResponse>) => {
@@ -207,11 +217,13 @@ export function useLatticeGeneration(): LatticeGenerationControls {
         if (validationResp.type === 'progress') {
           if (validationResp.message) current.addLog(validationResp.message);
         } else if (validationResp.type === 'result') {
+          releaseInputSubscription();
           current.setValidation(validationResp.validation || null);
           current.addLog('Validation complete');
           validationWorker.terminate();
           if (validationWorkerRef.current === validationWorker) validationWorkerRef.current = null;
         } else if (validationResp.type === 'error') {
+          releaseInputSubscription();
           current.addLog(`Validation error: ${validationResp.message}`, 'error');
           validationWorker.terminate();
           if (validationWorkerRef.current === validationWorker) validationWorkerRef.current = null;
@@ -220,6 +232,7 @@ export function useLatticeGeneration(): LatticeGenerationControls {
       validationWorker.onerror = () => {
         if (generationRunRef.current !== runId || validationWorkerRef.current !== validationWorker) return;
         const current = useStore.getState();
+        releaseInputSubscription();
         current.addLog('Validation worker failed', 'error');
         validationWorker.terminate();
         if (validationWorkerRef.current === validationWorker) validationWorkerRef.current = null;
@@ -227,6 +240,7 @@ export function useLatticeGeneration(): LatticeGenerationControls {
       validationWorker.onmessageerror = () => {
         if (generationRunRef.current !== runId || validationWorkerRef.current !== validationWorker) return;
         const current = useStore.getState();
+        releaseInputSubscription();
         current.addLog('Validation worker returned an unreadable response', 'error');
         validationWorker.terminate();
         validationWorkerRef.current = null;
@@ -243,6 +257,17 @@ export function useLatticeGeneration(): LatticeGenerationControls {
       },
       onResult: (resp) => {
         const current = useStore.getState();
+        if (resp.triCount === 0) {
+          stopRun();
+          const message = 'Generation produced an empty mesh; adjust the parameters and regenerate';
+          current.setGenerating(false);
+          current.setResultMesh(null);
+          current.setValidation(null);
+          current.setProgress(0, 'Generation failed');
+          current.setGenerationError(message);
+          current.addLog(message, 'error');
+          return;
+        }
         current.setResultMesh({
           positions: resp.positions,
           normals: resp.normals,
@@ -253,11 +278,18 @@ export function useLatticeGeneration(): LatticeGenerationControls {
         current.setGenerationError(null);
         current.setDemoModeActive(false);
         current.addLog(`Generation complete (${resp.backend || 'cpu-single'}): ${resp.triCount} triangles`);
-        startValidation(resp);
+        try {
+          startValidation(resp);
+        } catch (error) {
+          stopRun();
+          const message = error instanceof Error ? error.message : 'Unknown error';
+          current.addLog(`Could not start validation: ${message}`, 'error');
+        }
         const elapsedMs = performance.now() - generationStartedAt;
         void notifyGenerationComplete(resp.triCount, elapsedMs);
       },
       onFailure: (message) => {
+        releaseInputSubscription();
         const current = useStore.getState();
         current.addLog(message, 'error');
         current.setGenerating(false);
@@ -267,25 +299,44 @@ export function useLatticeGeneration(): LatticeGenerationControls {
       },
     });
 
+    // Subscribe synchronously so even edits before the next React effect invalidate
+    // this run. Display preferences and mass density do not change its geometry.
+    inputSubscriptionRef.current = useStore.subscribe((current) => {
+      const paramsChanged = (Object.keys(store.params) as (keyof typeof store.params)[])
+        .some((key) => key !== 'materialDensityGPerCm3' && current.params[key] !== store.params[key]);
+      if (
+        current.originalMesh === store.originalMesh
+        && current.sampleShape === store.sampleShape
+        && current.sphereMode === store.sphereMode
+        && current.sphereRadius === store.sphereRadius
+        && current.generationSeed === store.generationSeed
+        && current.keepOutTris === store.keepOutTris
+        && current.keepInTris === store.keepInTris
+        && !paramsChanged
+      ) return;
+      stopRun();
+      current.setGenerating(false);
+      current.setResultMesh(null);
+      current.setValidation(null);
+      current.setProgress(0, 'Inputs changed; regenerate');
+      current.setGenerationError(null);
+      current.addLog('Generation or validation cancelled because inputs changed', 'warn');
+    });
+
     workerController.post(msg, transferList);
-  }, [canGenerate, notifyGenerationComplete, workerController]);
+  }, [canGenerate, notifyGenerationComplete, releaseInputSubscription, stopRun, workerController]);
 
   const cancelGeneration = useCallback(() => {
-    generationRunRef.current++;
-    workerController.cancel({ type: 'cancel' } satisfies WorkerMessage);
+    stopRun();
     const store = useStore.getState();
     store.setGenerating(false);
     store.setDemoModeActive(false);
     store.setProgress(0, 'Cancelled');
     store.setGenerationError(null);
     store.addLog('Generation cancelled', 'warn');
-  }, [workerController]);
+  }, [stopRun]);
 
-  useEffect(() => () => {
-    generationRunRef.current++;
-    workerController.dispose();
-    validationWorkerRef.current?.terminate();
-  }, [workerController]);
+  useEffect(() => stopRun, [stopRun]);
 
   return { startGeneration, cancelGeneration, canGenerate };
 }
