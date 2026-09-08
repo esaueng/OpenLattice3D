@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { exportBinarySTL, parseSTL } from './stl-parser';
+import { DEFAULT_IMPORT_LIMITS, MAX_MESH_TRIANGLES, MAX_STL_FILE_BYTES, type ImportLimits } from './mesh-limits';
 
 function makeBinarySTL(triangles: number[][][], declaredCount?: number): ArrayBuffer {
   const triCount = triangles.length;
@@ -50,6 +51,62 @@ describe('parseSTL binary', () => {
     new Uint8Array(buffer, 0, 5).set(new TextEncoder().encode('solid'));
     const mesh = parseSTL(buffer);
     expect(mesh.triCount).toBe(1);
+  });
+});
+
+describe('parseSTL import limits', () => {
+  // Small budgets keep the boundary cases fast; the defaults have their own
+  // oversized-declaration and byte-cap coverage below.
+  const tinyLimits: ImportLimits = { maxStlBytes: 1024, maxTriangles: 2, maxEmbeddedStlBytes: 1024, maxProjectBytes: 1024 };
+
+  it('accepts a binary file at the byte budget and rejects one byte over', () => {
+    const buffer = makeBinarySTL([UNIT_TRI]);
+    expect(buffer.byteLength).toBe(134);
+    const atBudget: ImportLimits = { ...tinyLimits, maxStlBytes: 134 };
+    expect(parseSTL(buffer, atBudget).triCount).toBe(1);
+    expect(() => parseSTL(buffer, { ...tinyLimits, maxStlBytes: 133 })).toThrow(/134 B, exceeding the 133 B import limit/);
+  });
+
+  it('rejects a file over the default byte budget before scanning it', () => {
+    expect(() => parseSTL(new ArrayBuffer(MAX_STL_FILE_BYTES + 1))).toThrow(/exceeding the 128 MiB import limit/);
+  });
+
+  it('accepts a binary file at the triangle budget and rejects one triangle over', () => {
+    const buffer = makeBinarySTL([UNIT_TRI, UNIT_TRI], 2);
+    expect(parseSTL(buffer, tinyLimits).triCount).toBe(2);
+    expect(() => parseSTL(buffer, { ...tinyLimits, maxTriangles: 1 })).toThrow(/declares 2 triangles, exceeding the supported limit of 1/);
+  });
+
+  it('rejects oversized declarations before sizing allocations, even with ample file bytes', () => {
+    // Declared count above the default cap with a matching (sparse) byte
+    // length must hit the triangle limit, not allocation or the byte check.
+    expect(() => parseSTL(makeBinarySTL([UNIT_TRI], MAX_MESH_TRIANGLES + 1), tinyLimits))
+      .toThrow(/declares 5000001 triangles, exceeding the supported limit of 2/);
+    expect(() => parseSTL(makeBinarySTL([UNIT_TRI], MAX_MESH_TRIANGLES + 1)))
+      .toThrow(/exceeding the supported limit of 5000000/);
+  });
+
+  it('stops ASCII parsing at the facet budget instead of growing unbounded arrays', () => {
+    const facet = 'facet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\n';
+    const ascii = `solid t\n${facet}${facet}${facet}endsolid t`;
+    const buffer = new TextEncoder().encode(ascii).buffer as ArrayBuffer;
+    expect(() => parseSTL(buffer, tinyLimits)).toThrow(/triangle count exceeds the supported limit of 2/);
+    const twoFacets = `solid t\n${facet}${facet}endsolid t`;
+    const okBuffer = new TextEncoder().encode(twoFacets).buffer as ArrayBuffer;
+    expect(parseSTL(okBuffer, tinyLimits).triCount).toBe(2);
+  });
+
+  it('keeps the documented default budgets coherent', () => {
+    expect(DEFAULT_IMPORT_LIMITS.maxStlBytes).toBe(MAX_STL_FILE_BYTES);
+    expect(DEFAULT_IMPORT_LIMITS.maxTriangles).toBe(MAX_MESH_TRIANGLES);
+  });
+
+  it('rejects ASCII input above the default byte budget before decoding text', () => {
+    // A >128 MiB ASCII document never reaches the facet loop: the entry byte
+    // cap fires first, so oversized text is neither decoded nor scanned.
+    const buffer = new ArrayBuffer(MAX_STL_FILE_BYTES + 1);
+    new Uint8Array(buffer, 0, 5).set(new TextEncoder().encode('solid'));
+    expect(() => parseSTL(buffer)).toThrow(/exceeding the 128 MiB import limit/);
   });
 });
 

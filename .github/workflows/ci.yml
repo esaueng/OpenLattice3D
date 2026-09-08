@@ -12,16 +12,27 @@ jobs:
   checks:
     permissions:
       contents: read
-      id-token: write
-    uses: esaueng/OpenLattice3D/.github/workflows/trusted-ci.yml@60b8b6ad54b4d5388fff1cc06a170f4e6984dbcf
+    uses: esaueng/OpenLattice3D/.github/workflows/fleet-ci.yml@d1c17f2e0b9a6c75d3f2a1da8a8f82e50c2cac2a # reviewed workflow (unreleased)
 
+  # Branch protection requires this exact name outside the reusable workflow.
   ci:
     name: ci
     needs: checks
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Require all checks
         env:
           RESULT: ${{ needs.checks.result }}
         run: test "$RESULT" = success
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 22
+      - name: Check workflow action pins
+        run: node scripts/check-workflow-pins.mjs
+      - name: Verify agent docs
+        run: node scripts/verify-agent-docs.mjs

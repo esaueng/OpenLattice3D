@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useStore } from '../store/useStore';
 import { parseSTL } from '../geometry/stl-parser';
+import { assertFileSizeWithinBudget, DEFAULT_IMPORT_LIMITS } from '../geometry/mesh-limits';
 import {
   alignNormalsToWinding,
   analyzeMesh,
@@ -41,6 +42,9 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
     if (!file) return;
     store.addLog(`Importing ${file.name}...`);
     try {
+      // Check the declared size before reading: arrayBuffer() would otherwise
+      // pull the whole file into tab memory before any limit could apply.
+      assertFileSizeWithinBudget(file.size, DEFAULT_IMPORT_LIMITS.maxStlBytes, `STL file ${file.name}`);
       const buffer = await file.arrayBuffer();
       let mesh = parseSTL(buffer);
       const info = analyzeMesh(mesh);
@@ -95,6 +99,7 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
+      assertFileSizeWithinBudget(file.size, DEFAULT_IMPORT_LIMITS.maxProjectBytes, `Project file ${file.name}`);
       const text = await file.text();
       const data: unknown = JSON.parse(text);
       const parsed = parseProjectFile(data);
