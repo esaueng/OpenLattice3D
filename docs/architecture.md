@@ -56,6 +56,10 @@ Two production CPU paths are intentionally supported:
 
 Inactive WebGPU and WASM placeholders were removed. Their reinstatement gates
 and a full GPU marching-cubes design live under `docs/performance/`.
+`src/backend/` makes those gates executable: deterministic fixtures, a
+tolerance-documented parity comparison, fallback and promotion-gate tests, and
+a warm-run benchmark (`npm run bench:backends`). GPU selection remains
+disabled until parity, fallback, and speed evidence is committed.
 
 ## UI and persistence boundaries
 

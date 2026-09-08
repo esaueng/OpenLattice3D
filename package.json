@@ -11,6 +11,7 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
+    "bench:backends": "node scripts/run-backend-benchmark.mjs",
     "typecheck": "tsc -b",
     "preview": "vite preview",
     "predeploy": "npm test",
