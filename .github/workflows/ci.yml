@@ -13,3 +13,16 @@ jobs:
     permissions:
       contents: read
     uses: esaueng/OpenLattice3D/.github/workflows/fleet-ci.yml@8b9a88a429cc18539c08f86014d951d716b71e13
+
+  # Branch protection requires this exact name outside the reusable workflow.
+  ci:
+    name: ci
+    needs: checks
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require all checks
+        env:
+          RESULT: ${{ needs.checks.result }}
+        run: test "$RESULT" = success
