@@ -12,16 +12,4 @@ jobs:
   checks:
     permissions:
       contents: read
-      id-token: write
-    uses: esaueng/OpenLattice3D/.github/workflows/trusted-ci.yml@f8cffbb613f5a1abae90e7cdd3d9aee8102a6f36
-
-  ci:
-    name: ci
-    needs: checks
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - name: Require all checks
-        env:
-          RESULT: ${{ needs.checks.result }}
-        run: test "$RESULT" = success
+    uses: esaueng/OpenLattice3D/.github/workflows/fleet-ci.yml@8b9a88a429cc18539c08f86014d951d716b71e13
