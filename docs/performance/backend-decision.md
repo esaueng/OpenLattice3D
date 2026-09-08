@@ -23,3 +23,8 @@ The proposed full GPU implementation remains documented in
    not the dominant cost, and
 4. demonstrates a repeatable end-to-end speedup on representative parts while
    preserving automatic CPU fallback.
+
+These requirements are executable gates, not aspirations: `src/backend/`
+compares any candidate backend against the CPU reference on deterministic
+fixtures, tests its fallback behavior, and benchmarks warm runs against a
+minimum 1.5x end-to-end speedup. See `parity-gates.md`.
