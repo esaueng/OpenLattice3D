@@ -1,0 +1,154 @@
+name: Trusted app checks
+on:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  authorize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      trusted: ${{ steps.policy.outputs.trusted }}
+    steps:
+      - name: Authorize source before checkout
+        id: policy
+        env:
+          REPOSITORY: ${{ github.repository }}
+          REPOSITORY_ID: ${{ github.repository_id }}
+          ACTOR: ${{ github.actor }}
+          ACTOR_ID: ${{ github.actor_id }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          REF_PROTECTED: ${{ github.ref_protected }}
+          SHA: ${{ github.sha }}
+        run: |
+          python3 - <<'PY_POLICY'
+          import json
+          import os
+          import re
+
+          REPO = "esaueng/OpenLattice3D"
+          REPO_ID = 1153178599
+          ACTOR = "petergstfsn"
+          ACTOR_ID = 171875562
+
+          def authorized(event, context):
+              if not (context.get("REPOSITORY") == REPO
+                      and context.get("REPOSITORY_ID") == str(REPO_ID)
+                      and context.get("ACTOR") == ACTOR
+                      and context.get("ACTOR_ID") == str(ACTOR_ID)
+                      and context.get("TRIGGERING_ACTOR") == ACTOR):
+                  return False
+              if context.get("EVENT_NAME") in ("push", "workflow_dispatch"):
+                  return context.get("REF") == "refs/heads/main" and context.get("REF_PROTECTED") == "true"
+              pr = event.get("pull_request") or {}
+              head = pr.get("head") or {}
+              base = pr.get("base") or {}
+              author = pr.get("user") or {}
+              def same_repo(repo):
+                  return isinstance(repo, dict) and repo.get("id") == REPO_ID and repo.get("full_name") == REPO and repo.get("fork") is False
+              return (context.get("EVENT_NAME") == "pull_request"
+                      and pr.get("state") == "open"
+                      and type(pr.get("number")) is int and pr["number"] > 0
+                      and author.get("login") == ACTOR and author.get("id") == ACTOR_ID
+                      and same_repo(head.get("repo")) and same_repo(base.get("repo"))
+                      and base.get("ref") == "main"
+                      and context.get("REF") == f"refs/pull/{pr['number']}/merge"
+                      and re.fullmatch(r"[0-9a-f]{40}", context.get("SHA", "")) is not None)
+
+          def main():
+              with open(os.environ["GITHUB_EVENT_PATH"]) as stream:
+                  event = json.load(stream)
+              trusted = authorized(event, os.environ)
+              with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+                  output.write(f"trusted={str(trusted).lower()}\n")
+              print("Trusted fleet eligible" if trusted else "Use hosted checks")
+
+          if __name__ == "__main__":
+              main()
+          PY_POLICY
+  route:
+    needs: authorize
+    if: needs.authorize.outputs.trusted == 'true' && vars.CI_FLEET_ENABLED == 'true'
+    permissions:
+      id-token: write
+    uses: esaueng/remus/.github/workflows/select-runner.yml@d7168a6576f078f6128191f5b37ac38068c8f0af
+    with:
+      enabled: true
+  quality:
+    timeout-minutes: 60
+    needs: [authorize, route]
+    if: always() && !cancelled() && needs.authorize.result == 'success'
+    runs-on: ${{ fromJSON(needs.route.outputs.target == 'ci-server-jane' && '{"group":"ci-trusted-main","labels":"ci-server-jane"}' || needs.route.outputs.target == 'ci-server-john' && '{"group":"ci-trusted-main","labels":"ci-server-john"}' || '"ubuntu-latest"') }}
+    env:
+      CI: "true"
+    steps:
+      - name: Verify runner isolation and fresh storage
+        if: runner.environment == 'self-hosted'
+        run: |
+          set -euo pipefail
+          case "$RUNNER_NAME" in
+            ci-vm-1441561|ci-server-jane|ci-server-john)
+              CI_USER=ci-runner CI_STORAGE=/srv/ci CI_SLICE=ci.slice
+              CI_DOCKER=ci-docker CI_MEMORY=3221225472 CI_CPUS=1
+              CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 ;;
+            ci-server-jane-1|ci-server-jane-2)
+              slot=${RUNNER_NAME##*-}
+              CI_USER=ci-slot$slot CI_STORAGE=/srv/ci-slot$slot CI_SLICE=cislot$slot.slice
+              CI_DOCKER=ci-slot$slot-docker CI_MEMORY=6442450944 CI_CPUS=6
+              CARGO_BUILD_JOBS=3 RUST_TEST_THREADS=6 ;;
+            *) echo 'Unknown trusted runner' >&2; exit 1 ;;
+          esac
+          CI_CGROUP=/sys/fs/cgroup/$CI_SLICE
+          test "$(id -un)" = "$CI_USER"
+          test "$(id -u)" != 0
+          test "$HOME" = "$CI_STORAGE/home"
+          test -f "/opt/$CI_USER/bin/Runner.Listener"
+          test -f "/etc/systemd/system/$CI_USER.service"
+          test ! -w "/opt/$CI_USER/bin/Runner.Listener"
+          test ! -w "/etc/systemd/system/$CI_USER.service"
+          test "$(awk '/^NoNewPrivs:/ {print $2}' /proc/self/status)" = 1
+          test ! -e "$HOME/.app-ci-sentinel"
+          test ! -e "$CI_STORAGE/work/.app-ci-sentinel"
+          touch "$HOME/.app-ci-sentinel" "$CI_STORAGE/work/.app-ci-sentinel"
+          test "$DOCKER_HOST" = "unix:///run/$CI_DOCKER/docker.sock"
+          docker info --format '{{json .SecurityOptions}}' | jq -e 'index("name=rootless") != null'
+          test -z "$(docker ps --all --quiet)"
+          test -z "$(docker image ls --quiet)"
+          test "$(cat "$CI_CGROUP/memory.max")" = "$CI_MEMORY"
+          test "$(cat "$CI_CGROUP/memory.swap.max")" = 0
+          awk -v cpus="$CI_CPUS" '{exit !($1 == $2 * cpus)}' "$CI_CGROUP/cpu.max"
+          grep -Fx "0::/$CI_SLICE/$CI_USER.service" /proc/self/cgroup
+          case ",$(findmnt -n -o OPTIONS --mountpoint "$CI_STORAGE")," in
+            *,nosuid,*) ;; *) exit 1 ;; esac
+          {
+            echo "CI_CGROUP=$CI_CGROUP"
+            echo "CI_STORAGE=$CI_STORAGE"
+            echo "CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS"
+            echo "RUST_TEST_THREADS=$RUST_TEST_THREADS"
+          } >> "$GITHUB_ENV"
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Test trusted routing policy
+        run: python3 scripts/test-ci-routing.py
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
