@@ -12,7 +12,7 @@ jobs:
   checks:
     permissions:
       contents: read
-    uses: esaueng/OpenLattice3D/.github/workflows/fleet-ci.yml@d1c17f2e0b9a6c75d3f2a1da8a8f82e50c2cac2a
+    uses: esaueng/OpenLattice3D/.github/workflows/fleet-ci.yml@d1c17f2e0b9a6c75d3f2a1da8a8f82e50c2cac2a # reviewed workflow (unreleased)
 
   # Branch protection requires this exact name outside the reusable workflow.
   ci:
