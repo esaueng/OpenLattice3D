@@ -34,3 +34,5 @@ jobs:
           node-version: 22
       - name: Check workflow action pins
         run: node scripts/check-workflow-pins.mjs
+      - name: Verify agent docs
+        run: node scripts/verify-agent-docs.mjs
