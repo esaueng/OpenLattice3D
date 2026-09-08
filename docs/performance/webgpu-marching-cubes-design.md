@@ -344,6 +344,12 @@ compared against `cpu-tiled` on the same end-to-end jobs.
 
 ## Correctness checks
 
+The fixture list, comparison tolerances, and fallback behaviors sketched below
+are executable in `src/backend/` and enforced by `npm test`; see
+`parity-gates.md`. A WebGPU backend plugs into that gate by implementing the
+`MarchingCubesBackend` interface; GPU selection stays disabled until the
+parity, fallback, and warm-run speed gates all pass with committed evidence.
+
 Use small deterministic sample jobs first:
 
 - sphere + gyroid at low resolution
