@@ -1,6 +1,6 @@
 # Trusted CI fleet
 
-Linux CI jobs and their completion gates live in `fleet-ci.yml`, called at an
+Linux CI jobs and their internal completion gate live in `fleet-ci.yml`, called at an
 immutable commit from `ci.yml`. GitHub evaluates the runner expression before
 scheduling each job. There is no GitHub-hosted authorization or routing job in
 front of the Linux checks, and no routing HTTP request from Actions.
@@ -33,9 +33,10 @@ workflow jobs install browser binaries without sudo.
 Approve the exact immutable `fleet-ci.yml` runner-group entry without removing
 existing restrictions. Configure the external controller's selected repository
 identities and dedicated GitHub credential, then validate both hosts. Review
-required check names: the new reusable workflow adds the `checks /` prefix.
-Change only explicitly approved contexts after checking actual job names;
-retain the complete application suite and review requirements.
+required check names: the reusable jobs have the `checks /` prefix, while
+the caller preserves the required `ci` check and fails unless every reusable
+job succeeds. This final compatibility gate still needs hosted capacity, but
+it never blocks the fleet jobs from starting. Branch protection stays unchanged.
 
 Run an authorized real application job on each Jane slot, verify cleanup and
 unavailable-only selection, then enable normal routing. Code merge alone does

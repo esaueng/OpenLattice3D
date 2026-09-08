@@ -151,6 +151,17 @@ class DirectFleetTests(unittest.TestCase):
                 self.assertLess(job.index(guard), job.index("actions/checkout@"))
                 self.assertIn("persist-credentials: false", job)
 
+    def test_required_ci_gate_propagates_every_unsuccessful_result(self):
+        gate = CALLER.split("\n  ci:\n", 1)[1]
+        self.assertIn("name: ci", gate)
+        self.assertIn("needs: checks", gate)
+        self.assertIn("if: always()", gate)
+        self.assertIn("RESULT: ${{ needs.checks.result }}", gate)
+        command = re.search(r"^        run: (.+)$", gate, re.M)[1]
+        for status in ("success", "failure", "cancelled", "skipped", ""):
+            result = subprocess.run(["bash", "-c", command], env={"RESULT": status})
+            self.assertEqual(result.returncode == 0, status == "success")
+
     def test_embedded_shell_syntax(self):
         for block in re.findall(r"        run: \|\n((?:          [^\n]*\n|\n)+)", TEXT):
             script = "\n".join(
