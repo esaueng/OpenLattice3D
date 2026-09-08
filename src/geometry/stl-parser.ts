@@ -1,6 +1,11 @@
 // STL import/export: supports binary and ASCII STL
 import type { Vec3 } from './vec3';
-import { validateMeshPositions } from './mesh-limits';
+import {
+  DEFAULT_IMPORT_LIMITS,
+  formatByteCount,
+  validateMeshPositions,
+  type ImportLimits,
+} from './mesh-limits';
 
 export interface TriangleMesh {
   positions: Float32Array;  // flat xyz, 3 floats per vertex, 9 per triangle
@@ -12,8 +17,13 @@ const BINARY_HEADER_BYTES = 84;
 const BINARY_TRIANGLE_BYTES = 50;
 
 /** Parse binary or ASCII STL from ArrayBuffer.
- *  Throws on truncated, empty, or unrecognizable input. */
-export function parseSTL(buffer: ArrayBuffer): TriangleMesh {
+ *  Throws on truncated, empty, oversized, or unrecognizable input. */
+export function parseSTL(buffer: ArrayBuffer, limits: ImportLimits = DEFAULT_IMPORT_LIMITS): TriangleMesh {
+  if (buffer.byteLength > limits.maxStlBytes) {
+    throw new Error(
+      `STL parse failed: file is ${formatByteCount(buffer.byteLength)}, exceeding the ${formatByteCount(limits.maxStlBytes)} import limit`
+    );
+  }
   const header = new Uint8Array(buffer, 0, Math.min(80, buffer.byteLength));
   const headerStr = String.fromCharCode(...header);
 
@@ -24,18 +34,18 @@ export function parseSTL(buffer: ArrayBuffer): TriangleMesh {
       const triCount = view.getUint32(80, true);
       const expectedBinarySize = BINARY_HEADER_BYTES + triCount * BINARY_TRIANGLE_BYTES;
       if (Math.abs(expectedBinarySize - buffer.byteLength) <= 1) {
-        return parseBinarySTL(buffer);
+        return parseBinarySTL(buffer, limits);
       }
     }
-    const ascii = parseASCIISTL(buffer);
+    const ascii = parseASCIISTL(buffer, limits);
     if (ascii.triCount > 0) return ascii;
-    if (buffer.byteLength >= BINARY_HEADER_BYTES) return parseBinarySTL(buffer);
+    if (buffer.byteLength >= BINARY_HEADER_BYTES) return parseBinarySTL(buffer, limits);
     throw new Error('STL parse failed: no facets found in ASCII STL');
   }
-  return parseBinarySTL(buffer);
+  return parseBinarySTL(buffer, limits);
 }
 
-function parseBinarySTL(buffer: ArrayBuffer): TriangleMesh {
+function parseBinarySTL(buffer: ArrayBuffer, limits: ImportLimits): TriangleMesh {
   if (buffer.byteLength < BINARY_HEADER_BYTES) {
     throw new Error(`STL parse failed: file too small for binary STL (${buffer.byteLength} bytes)`);
   }
@@ -43,6 +53,15 @@ function parseBinarySTL(buffer: ArrayBuffer): TriangleMesh {
   const triCount = view.getUint32(80, true);
   if (triCount === 0) {
     throw new Error('STL parse failed: file contains no triangles');
+  }
+  // The declared count drives typed-array allocation below, so it is capped
+  // before any allocation is sized from it. triCount * BINARY_TRIANGLE_BYTES
+  // stays an exact integer in doubles for any uint32, so this also covers
+  // multiplication overflow.
+  if (triCount > limits.maxTriangles) {
+    throw new Error(
+      `STL parse failed: header declares ${triCount} triangles, exceeding the supported limit of ${limits.maxTriangles}`
+    );
   }
   const requiredBytes = BINARY_HEADER_BYTES + triCount * BINARY_TRIANGLE_BYTES;
   if (requiredBytes > buffer.byteLength) {
@@ -69,7 +88,7 @@ function parseBinarySTL(buffer: ArrayBuffer): TriangleMesh {
   return { positions, normals, triCount };
 }
 
-function parseASCIISTL(buffer: ArrayBuffer): TriangleMesh {
+function parseASCIISTL(buffer: ArrayBuffer, limits: ImportLimits): TriangleMesh {
   const text = new TextDecoder().decode(buffer);
   let offset = 0;
   let line = 1;
@@ -109,11 +128,21 @@ function parseASCIISTL(buffer: ArrayBuffer): TriangleMesh {
 
   const positionValues: number[] = [];
   const normalValues: number[] = [];
+  let facetCount = 0;
   let token: { value: string; line: number } | null;
   while ((token = nextToken()) !== null) {
     const keyword = token.value.toLowerCase();
     if (keyword === 'endsolid') break;
     if (keyword !== 'facet') continue;
+
+    // The position/normal arrays grow per facet, so enforce the triangle
+    // budget during the scan instead of after unbounded growth.
+    facetCount++;
+    if (facetCount > limits.maxTriangles) {
+      throw new Error(
+        `STL parse failed at line ${token.line}: triangle count exceeds the supported limit of ${limits.maxTriangles}`
+      );
+    }
 
     requireToken('normal', 'after facet');
     const normal: Vec3 = [readNumber('normal x'), readNumber('normal y'), readNumber('normal z')];
