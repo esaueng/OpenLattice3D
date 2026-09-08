@@ -153,6 +153,31 @@ describe('project embedded-mesh budgets', () => {
     expect(() => parseProjectFile(exported, oneUnder)).toThrow(/decodes to more than/);
   });
 
+  it.each([1, 2])('accepts %i-triangle padded and unpadded meshes exactly at the limit', (triCount) => {
+    const mesh = generateCubeMesh(10);
+    const exported = createProjectFile({
+      params: DEFAULT_PARAMS,
+      generationSeed: 123,
+      source: { kind: 'mesh', fileName: 'part.stl', mesh: {
+        positions: mesh.positions.slice(0, triCount * 9),
+        normals: mesh.normals.slice(0, triCount * 3),
+        triCount,
+      } },
+      keepOutTris: new Set(), keepInTris: new Set(), validation: null,
+      clipPlane: { axis: 'z', position: 0.5, flipped: false }, viewerBackground: '#000000',
+    });
+    const source = exported.source as { data: string };
+    const encoded = source.data;
+    const decodedBytes = 84 + triCount * 50;
+    for (const data of [encoded, encoded.replace(/=+$/, '')]) {
+      source.data = data;
+      expect(parseProjectFile(exported, { ...DEFAULT_IMPORT_LIMITS, maxEmbeddedStlBytes: decodedBytes }).kind)
+        .toBe('project');
+      expect(() => parseProjectFile(exported, { ...DEFAULT_IMPORT_LIMITS, maxEmbeddedStlBytes: decodedBytes - 1 }))
+        .toThrow(/decodes to more than/);
+    }
+  });
+
   it('rejects oversized base64 before atob() runs', () => {
     const exported = cubeProject();
     // Invalid base64: if the budget check did not run first, atob() would
