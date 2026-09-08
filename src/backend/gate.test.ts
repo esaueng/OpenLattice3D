@@ -43,6 +43,10 @@ describe('GPU promotion gate', () => {
     expect(evaluateGpuPromotion({ ...passingEvidence, medianSpeedupVsCpuTiled: null }).enabled).toBe(false);
   });
 
+  it.each([NaN, Infinity, -Infinity])('rejects non-finite speedup %s', (speedup) => {
+    expect(evaluateGpuPromotion({ ...passingEvidence, medianSpeedupVsCpuTiled: speedup }).enabled).toBe(false);
+  });
+
   it('blocks GPU selection on the promotion gate before probing hardware', () => {
     const eligibility = resolveGpuEligibility({ webgpuAvailable: true, modeSupportedByGpu: true });
     expect(eligibility.eligible).toBe(false);
@@ -116,6 +120,26 @@ describe('backend fallback behavior', () => {
       { isCancelled: () => true },
     )).rejects.toThrow(/Cancelled/);
     expect(fallbackRan).toBe(false);
+  });
+
+  it.each([false, true])('rejects late success after cancellation (fallback=%s)', async (useFallback) => {
+    let cancelled = false;
+    let fallbackRuns = 0;
+    const completed = await cpuSingleBackend.run(tinyFixture);
+    const late: MarchingCubesBackend = {
+      id: 'webgpu-mc',
+      run: async () => { cancelled = true; return completed; },
+    };
+    const failed: MarchingCubesBackend = {
+      id: 'webgpu-mc', run: async () => { throw new Error('device lost'); },
+    };
+    const fallback: MarchingCubesBackend = {
+      id: 'cpu-single',
+      run: async () => { fallbackRuns++; return late.run(tinyFixture); },
+    };
+    await expect(runBackendWithFallback(useFallback ? failed : late, fallback, tinyFixture,
+      { isCancelled: () => cancelled })).rejects.toThrow(/Cancelled/);
+    expect(fallbackRuns).toBe(useFallback ? 1 : 0);
   });
 
   it('rejects a cancelled tiled run before delivering geometry', async () => {

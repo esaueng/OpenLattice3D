@@ -81,6 +81,21 @@ export function compareBackendResults(
     checks.push({ name, passed, measured, limit });
   };
 
+  for (const [label, mesh] of [['reference', reference], ['candidate', candidate]] as const) {
+    const validBuffers = Number.isSafeInteger(mesh.triCount) && mesh.triCount >= 0
+      && mesh.positions.length === mesh.triCount * 9 && mesh.normals.length === mesh.triCount * 3
+      && mesh.positions.every(Number.isFinite) && mesh.normals.every(Number.isFinite);
+    let validNormals = validBuffers;
+    for (let i = 0; validNormals && i < mesh.normals.length; i += 3) {
+      validNormals = Math.hypot(mesh.normals[i], mesh.normals[i + 1], mesh.normals[i + 2]) > 1e-12;
+    }
+    check(`${label} mesh buffers`, validBuffers && validNormals,
+      `${mesh.triCount} triangles`, 'finite, correctly sized buffers with nonzero normals');
+  }
+  if (checks.some((entry) => !entry.passed)) {
+    return { fixture: fixture.name, reference: referenceId, candidate: candidateId, checks, passed: false };
+  }
+
   // Triangle count: exact when the reference is empty, relative otherwise.
   const triLimit = Math.max(1, Math.round(reference.triCount * tolerances.triCountRelative));
   check(

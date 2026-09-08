@@ -13,7 +13,8 @@
     }
   ],
   "assets": {
-    "directory": "./dist"
+    "directory": "./dist",
+    "run_worker_first": ["/health", "/healthz"]
   },
   "observability": {
     "enabled": false,

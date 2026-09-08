@@ -28,6 +28,9 @@ export interface BackendFixture {
 export interface BackendPhaseTimings {
   fieldMs: number | null;
   classifyScanEmitMs: number | null;
+  classifyMs: number | null;
+  scanMs: number | null;
+  emitMs: number | null;
   readbackMs: number | null;
   mergeMs: number | null;
   cleanupMs: number | null;

@@ -51,7 +51,11 @@ surface crosses every internal tile seam.
 
 `npm run bench:backends` runs each backend 1 warmup + 5 recorded times per
 benchmark fixture and reports median and p95 end-to-end latency plus per-phase
-timings (field, classification/scan/emission, readback, merge, cleanup). The
+timings (field, classification, scan, emission, readback, merge, cleanup).
+CPU classification/scan/emission remain a fused timing; their separate fields
+are null. The aggregate speedup is the median of fixture speedups, each
+computed from warm-run median latency. Non-finite or nonpositive total
+timings cannot contribute evidence. The
 JSON report records the hardware and lands in
 `docs/performance/results/backend-benchmark-<platform>-<arch>.json`;
 committing it is what makes a speedup claim citable.
@@ -79,6 +83,8 @@ disabled until all three gates pass with committed evidence. There is no
 and the benchmark reports no GPU backend.
 
 Latest committed benchmark: `results/backend-benchmark-darwin-arm64.json`
-(Apple M5 Pro, 15 cores, Node v22.23.1): at resolution 160, cpu-single and
-inline cpu-tiled are within noise of each other end-to-end (0.89-1.00x),
-because boundary-loop cleanup dominates both.
+(Apple M5 Pro, 15 cores, Node v22.23.1; September 8, 2026). At resolution
+160, cpu-single speedup relative to inline cpu-tiled ranges from
+0.82x to 1.13x across the two fixtures. The report includes median and
+p95 timings; these inline CPU measurements do not establish GPU or browser
+multi-worker speedup. Boundary-loop cleanup remains the dominant phase.
