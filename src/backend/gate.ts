@@ -32,6 +32,8 @@ export function evaluateGpuPromotion(evidence: GpuPromotionEvidence): GpuPromoti
   if (!evidence.fallbackPassed) reasons.push('fallback gate has not passed');
   if (evidence.medianSpeedupVsCpuTiled === null) {
     reasons.push('no warm-run benchmark speedup recorded against cpu-tiled');
+  } else if (!Number.isFinite(evidence.medianSpeedupVsCpuTiled)) {
+    reasons.push('warm-run benchmark speedup must be finite');
   } else if (evidence.medianSpeedupVsCpuTiled < GPU_PROMOTION_MIN_SPEEDUP) {
     reasons.push(
       `median speedup ${evidence.medianSpeedupVsCpuTiled.toFixed(2)}x is below the minimum ${GPU_PROMOTION_MIN_SPEEDUP}x`,

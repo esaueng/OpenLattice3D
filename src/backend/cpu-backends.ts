@@ -78,6 +78,9 @@ export const cpuSingleBackend: MarchingCubesBackend = {
       timings: {
         fieldMs: fieldEnd - start,
         classifyScanEmitMs: extractEnd - fieldEnd,
+        classifyMs: null,
+        scanMs: null,
+        emitMs: null,
         readbackMs: 0,
         mergeMs: null,
         cleanupMs: cleanupEnd - extractEnd,
@@ -122,6 +125,9 @@ export function createCpuTiledBackend(workerCount = 1): MarchingCubesBackend {
         timings: {
           fieldMs: null,
           classifyScanEmitMs: tileComputeMs,
+          classifyMs: null,
+          scanMs: null,
+          emitMs: null,
           readbackMs: 0,
           mergeMs: Math.max(0, tilesEnd - start - tileComputeMs),
           cleanupMs: cleanupEnd - tilesEnd,
@@ -150,11 +156,16 @@ export async function runBackendWithFallback(
   fixture: BackendFixture,
   hooks?: BackendRunHooks,
 ): Promise<BackendRunOutcome> {
+  throwIfCancelled(hooks);
   try {
-    return { run: await preferred.run(fixture, hooks), fellBack: false, fallbackReason: null };
+    const run = await preferred.run(fixture, hooks);
+    throwIfCancelled(hooks);
+    return { run, fellBack: false, fallbackReason: null };
   } catch (error) {
     if (hooks?.isCancelled?.() || (error instanceof Error && error.message === 'Cancelled')) throw error;
     const reason = error instanceof Error ? error.message : String(error);
-    return { run: await fallback.run(fixture, hooks), fellBack: true, fallbackReason: reason };
+    const run = await fallback.run(fixture, hooks);
+    throwIfCancelled(hooks);
+    return { run, fellBack: true, fallbackReason: reason };
   }
 }
