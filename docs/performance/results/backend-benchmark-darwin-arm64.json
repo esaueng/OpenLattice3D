@@ -1,0 +1,102 @@
+{
+  "hardware": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "cpuModel": "Apple M5 Pro",
+    "cores": 15,
+    "node": "v22.23.1"
+  },
+  "startedAt": "2026-09-08T22:12:35.174Z",
+  "options": {
+    "warmupIterations": 1,
+    "iterations": 5
+  },
+  "fixtures": [
+    {
+      "fixture": "sphere-gyroid-bench",
+      "resolution": 160,
+      "backends": [
+        {
+          "backend": "cpu-single",
+          "iterations": 5,
+          "medianTotalMs": 5614.175499999998,
+          "p95TotalMs": 7905.47825,
+          "phases": {
+            "fieldMs": 251.6652920000006,
+            "classifyScanEmitMs": 208.18504200000007,
+            "classifyMs": null,
+            "scanMs": null,
+            "emitMs": null,
+            "readbackMs": 0,
+            "mergeMs": null,
+            "cleanupMs": 5190.149707999997
+          },
+          "speedupVsCpuTiled": 0.8182397915775883
+        },
+        {
+          "backend": "cpu-tiled",
+          "iterations": 5,
+          "medianTotalMs": 4593.741791,
+          "p95TotalMs": 5883.758499999996,
+          "phases": {
+            "fieldMs": null,
+            "classifyScanEmitMs": 436.5832859999209,
+            "classifyMs": null,
+            "scanMs": null,
+            "emitMs": null,
+            "readbackMs": 0,
+            "mergeMs": 7.881660000006377,
+            "cleanupMs": 4183.068040999999
+          },
+          "speedupVsCpuTiled": null
+        }
+      ]
+    },
+    {
+      "fixture": "sphere-schwarzP-bench",
+      "resolution": 160,
+      "backends": [
+        {
+          "backend": "cpu-single",
+          "iterations": 5,
+          "medianTotalMs": 3795.010209,
+          "p95TotalMs": 4152.801499999987,
+          "phases": {
+            "fieldMs": 253.25595800000883,
+            "classifyScanEmitMs": 129.75274999999965,
+            "classifyMs": null,
+            "scanMs": null,
+            "emitMs": null,
+            "readbackMs": 0,
+            "mergeMs": null,
+            "cleanupMs": 3409.828125
+          },
+          "speedupVsCpuTiled": 1.1346892511086795
+        },
+        {
+          "backend": "cpu-tiled",
+          "iterations": 5,
+          "medianTotalMs": 4306.1572920000035,
+          "p95TotalMs": 4771.8092079999915,
+          "phases": {
+            "fieldMs": null,
+            "classifyScanEmitMs": 600.4667499999487,
+            "classifyMs": null,
+            "scanMs": null,
+            "emitMs": null,
+            "readbackMs": 0,
+            "mergeMs": 5.775247999961721,
+            "cleanupMs": 3653.734958000001
+          },
+          "speedupVsCpuTiled": null
+        }
+      ]
+    }
+  ],
+  "promotion": {
+    "minSpeedup": 1.5,
+    "gpuBackendPresent": false,
+    "gpuMedianSpeedupVsCpuTiled": null,
+    "meetsSpeedupThreshold": null
+  }
+}
