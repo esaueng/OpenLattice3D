@@ -2,7 +2,7 @@
 // Rejects mutable action references in workflow files. Every `uses:` must be
 // pinned to a full commit SHA with the reviewed release version kept beside
 // it as a comment (Dependabot updates both). Local actions (uses: ./...) are
-// exempt.
+// exempt. Unreleased reusable workflows carry an explicit review annotation.
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,7 +29,9 @@ for (const file of readdirSync(workflowsDir).sort()) {
       failures.push(`${location}: "${ref}" is not pinned to a full 40-character commit SHA`);
       return;
     }
-    if (!comment || !VERSION_COMMENT_PATTERN.test(comment)) {
+    const reviewedWorkflow = /^[\w.-]+\/[\w.-]+\/\.github\/workflows\/[\w.-]+\.ya?ml@[0-9a-f]{40}$/.test(ref)
+      && comment === 'reviewed workflow (unreleased)';
+    if (!reviewedWorkflow && (!comment || !VERSION_COMMENT_PATTERN.test(comment))) {
       failures.push(`${location}: "${ref}" needs its release version beside the SHA, e.g. "# v4.2.2"`);
     }
   });
