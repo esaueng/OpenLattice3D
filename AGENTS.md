@@ -29,9 +29,9 @@ and the smoke workflow is disabled by default (see
   builders, marching cubes, BVH, mesh analysis/topology/repair, STL/3MF/OBJ
   codecs. No DOM or React imports; everything here runs in Node tests.
 - `src/workers/` — `lattice-worker.ts` orchestrates one generation job
-  (SDF sampling, marching cubes, cleanup, escape holes) and kicks off
-  `validation-worker.ts` (deviation, min thickness, manifoldness,
-  connectivity). `tiled-generation.ts` fans procedural jobs out to bounded
+  (SDF sampling, marching cubes, cleanup, escape holes).
+  `useLatticeGeneration.ts` starts `validation-worker.ts` separately for
+  deviation, min thickness, manifoldness, and connectivity. `tiled-generation.ts` fans procedural jobs out to bounded
   `lattice-tile-worker.ts` instances (max 8, sparse tile skipping, merge by
   tile id). `surface-sample-worker.ts` Poisson-samples surfaces for
   hex/triangle surface lattices.
@@ -41,14 +41,14 @@ and the smoke workflow is disabled by default (see
   computational geometry out of components.
 - `src/store/useStore.ts` — Zustand global state; browser persistence is
   limited to parameters and viewer preferences.
-- `worker/index.ts` — tiny production Worker serving `GET /health`; static
+- `worker/index.ts` — tiny production Worker serving `/health` and `/healthz`; static
   assets come from `dist/`.
 
 ## Geometry invariants
 
 - Millimetres everywhere; never silently rescale imported or exported
   geometry.
-- Scalar fields are signed distances: negative inside material, positive
+- Fields use the SDF sign convention: negative inside material, positive
   outside, extracted at iso 0. Marching cubes emits outward-facing winding.
 - Never compare floats with exact equality; use the tolerance helpers
   appropriate to each algorithm's scale.
