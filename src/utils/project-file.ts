@@ -84,7 +84,11 @@ function base64ToBytes(encoded: string, maxDecodedBytes: number): Uint8Array {
   // decoded size can exceed the budget before calling it. atob() strips
   // ASCII whitespace, which only shrinks the result, so the estimate is an
   // upper bound; the post-decode check guards the exact boundary.
-  if (estimateDecodedBase64Bytes(encoded.length) > maxDecodedBytes) {
+  const padding = encoded.endsWith('==') ? 2 : encoded.endsWith('=') ? 1 : 0;
+  const decodedEstimate = encoded.length % 4 === 0
+    ? estimateDecodedBase64Bytes(encoded.length) - padding
+    : Math.floor(encoded.length * 3 / 4);
+  if (decodedEstimate > maxDecodedBytes) {
     throw new Error(
       `Embedded mesh data decodes to more than the ${formatByteCount(maxDecodedBytes)} import limit`
     );
