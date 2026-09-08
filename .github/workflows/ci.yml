@@ -12,14 +12,15 @@ jobs:
   checks:
     permissions:
       contents: read
-      id-token: write
-    uses: esaueng/OpenLattice3D/.github/workflows/trusted-ci.yml@f8cffbb613f5a1abae90e7cdd3d9aee8102a6f36
+    uses: esaueng/OpenLattice3D/.github/workflows/fleet-ci.yml@8b9a88a429cc18539c08f86014d951d716b71e13 # reviewed workflow (unreleased)
 
+  # Branch protection requires this exact name outside the reusable workflow.
   ci:
     name: ci
     needs: checks
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Require all checks
         env:
