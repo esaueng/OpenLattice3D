@@ -13,7 +13,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: esaueng/OpenLattice3D/.github/workflows/trusted-ci.yml@c5667f4d9161b14553010224947b420b542afbd9
+    uses: esaueng/OpenLattice3D/.github/workflows/trusted-ci.yml@60b8b6ad54b4d5388fff1cc06a170f4e6984dbcf
 
   ci:
     name: ci
