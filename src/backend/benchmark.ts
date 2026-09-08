@@ -27,6 +27,9 @@ export const DEFAULT_BENCHMARK_OPTIONS: BackendBenchmarkOptions = {
 export interface PhaseSummary {
   fieldMs: number | null;
   classifyScanEmitMs: number | null;
+  classifyMs: number | null;
+  scanMs: number | null;
+  emitMs: number | null;
   readbackMs: number | null;
   mergeMs: number | null;
   cleanupMs: number | null;
@@ -62,7 +65,7 @@ export interface BackendBenchmarkReport {
   promotion: {
     minSpeedup: number;
     gpuBackendPresent: boolean;
-    /** Mean warm-run speedup of webgpu-mc vs cpu-tiled across fixtures. */
+    /** Median warm-run speedup of webgpu-mc vs cpu-tiled across fixtures. */
     gpuMedianSpeedupVsCpuTiled: number | null;
     /** Whether the measured speedup meets the threshold; null without a GPU backend. */
     meetsSpeedupThreshold: boolean | null;
@@ -89,6 +92,12 @@ export function summarizeRuns(
 ): FixtureBenchmarkSummary {
   const byBackend = new Map<GenerationBackendId, BackendRunResult[]>();
   for (const run of runs) {
+    for (const [phase, value] of Object.entries(run.timings)) {
+      if (value !== null && (!Number.isFinite(value) || value < 0)) {
+        throw new Error(`Invalid ${phase} timing for ${run.backend}`);
+      }
+    }
+    if (!(run.timings.totalMs > 0)) throw new Error(`Invalid totalMs timing for ${run.backend}`);
     const list = byBackend.get(run.backend) ?? [];
     list.push(run);
     byBackend.set(run.backend, list);
@@ -114,6 +123,9 @@ export function summarizeRuns(
       phases: {
         fieldMs: phases('fieldMs'),
         classifyScanEmitMs: phases('classifyScanEmitMs'),
+        classifyMs: phases('classifyMs'),
+        scanMs: phases('scanMs'),
+        emitMs: phases('emitMs'),
         readbackMs: phases('readbackMs'),
         mergeMs: phases('mergeMs'),
         cleanupMs: phases('cleanupMs'),
@@ -133,6 +145,11 @@ export async function runBackendBenchmark(
   options: BackendBenchmarkOptions = DEFAULT_BENCHMARK_OPTIONS,
   onRun?: (fixture: string, backend: GenerationBackendId, iteration: string, totalMs: number) => void,
 ): Promise<BackendBenchmarkReport> {
+  if (!Number.isSafeInteger(options.iterations) || options.iterations < 1
+    || !Number.isSafeInteger(options.warmupIterations) || options.warmupIterations < 0) {
+    throw new Error('Benchmark iterations must be positive integers and warmups nonnegative integers');
+  }
+  if (fixtures.length === 0 || backends.length === 0) throw new Error('Benchmark needs fixtures and backends');
   const fixturesSummaries: FixtureBenchmarkSummary[] = [];
   let gpuPresent = false;
   const gpuSpeedups: number[] = [];
@@ -160,7 +177,7 @@ export async function runBackendBenchmark(
   }
 
   const gpuMedianSpeedup = gpuSpeedups.length > 0
-    ? gpuSpeedups.reduce((sum, value) => sum + value, 0) / gpuSpeedups.length
+    ? median(gpuSpeedups.sort((a, b) => a - b))
     : null;
 
   const cpu = cpus()[0];
@@ -200,6 +217,9 @@ export function formatBenchmarkReport(report: BackendBenchmarkReport): string {
       const phases = [
         ['field', backend.phases.fieldMs],
         ['classify+scan+emit', backend.phases.classifyScanEmitMs],
+        ['classify', backend.phases.classifyMs],
+        ['scan', backend.phases.scanMs],
+        ['emit', backend.phases.emitMs],
         ['readback', backend.phases.readbackMs],
         ['merge', backend.phases.mergeMs],
         ['cleanup', backend.phases.cleanupMs],

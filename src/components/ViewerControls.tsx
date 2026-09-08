@@ -83,6 +83,7 @@ export function ViewerControls() {
                 title={`Switch viewer to ${VIEW_LABELS[mode]} mode (${VIEW_HOTKEYS[mode]}).`}
                 onClick={() => store.setViewMode(mode)}
                 disabled={disabled}
+                aria-pressed={selected}
               >
                 {VIEW_LABELS[mode]}
               </button>
@@ -96,6 +97,7 @@ export function ViewerControls() {
                 title={`Switch viewer to ${VIEW_LABELS[mode]} mode (${VIEW_HOTKEYS[mode]}).`}
                 onClick={() => store.setViewMode(mode)}
                 disabled={disabled}
+                aria-pressed={selected}
               >
                 {VIEW_LABELS[mode]}
               </button>
@@ -129,6 +131,7 @@ export function ViewerControls() {
                           type="button"
                           className={`btn btn-tiny ${clipPlane.axis === axis ? 'btn-active' : ''}`}
                           onClick={() => store.setClipPlane({ axis })}
+                          aria-pressed={clipPlane.axis === axis}
                         >
                           {axis.toUpperCase()}
                         </button>

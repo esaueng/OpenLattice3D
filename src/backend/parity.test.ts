@@ -28,6 +28,23 @@ describe('marching-cubes backend parity gate', () => {
     }, 60000);
   }
 
+  it('rejects missing, zero and non-finite mesh data before comparing geometry', async () => {
+    const fixture = { ...PARITY_FIXTURES[0], resolution: 16 };
+    const { result } = await cpuSingleBackend.run(fixture);
+    const nonFinitePositions = result.positions.slice();
+    nonFinitePositions[0] = NaN;
+    for (const candidate of [
+      { ...result, normals: new Float32Array() },
+      { ...result, normals: new Float32Array(result.normals.length) },
+      { ...result, positions: nonFinitePositions },
+      { ...result, triCount: result.triCount + 1 },
+    ]) {
+      const report = compareBackendResults(fixture, result, candidate, 'cpu-single', 'webgpu-mc');
+      expect(report.passed).toBe(false);
+      expect(report.checks.some((check) => check.name === 'candidate mesh buffers' && !check.passed)).toBe(true);
+    }
+  });
+
   it('records end-to-end phase timings for every backend run', async () => {
     const fixture = PARITY_FIXTURES[0];
     const single = await cpuSingleBackend.run(fixture);
