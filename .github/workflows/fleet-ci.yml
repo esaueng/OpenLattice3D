@@ -1,0 +1,125 @@
+name: Trusted CI jobs
+on:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  quality:
+    timeout-minutes: 60
+    runs-on: &fleet-runner ${{ fromJSON(vars.CI_FLEET_ENABLED == 'true' && (github.repository == 'esaueng/OpenLattice3D' && github.repository_id == '1153178599' && github.actor == 'petergstfsn' && github.actor_id == '171875562' && github.triggering_actor == 'petergstfsn' && ((github.event_name == 'pull_request' && github.event.pull_request.state == 'open' && github.event.pull_request.user.login == 'petergstfsn' && github.event.pull_request.user.id == 171875562 && github.event.pull_request.head.repo.id == 1153178599 && github.event.pull_request.base.repo.id == 1153178599 && github.event.pull_request.head.repo.fork == false && github.event.pull_request.base.repo.fork == false && github.event.pull_request.base.ref == 'main' && github.ref == format('refs/pull/{0}/merge', github.event.pull_request.number)) || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && github.ref_protected == true))) && (vars.CI_FLEET_TARGET == 'ci-server-jane' && '{"group":"ci-trusted-main","labels":"ci-server-jane"}' || vars.CI_FLEET_TARGET == 'ci-server-john' && '{"group":"ci-trusted-main","labels":"ci-server-john"}') || '"ubuntu-latest"') }}
+    env:
+      CI: "true"
+    steps:
+      - &fleet-isolation
+        name: Verify runner isolation and fresh storage
+        if: runner.environment == 'self-hosted'
+        run: |
+          set -euo pipefail
+          case "$RUNNER_NAME" in
+            ci-vm-1441561|ci-server-jane|ci-server-john)
+              CI_USER=ci-runner CI_STORAGE=/srv/ci CI_SLICE=ci.slice
+              CI_DOCKER=ci-docker CI_MEMORY=3221225472 CI_CPUS=1
+              CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 ;;
+            ci-server-jane-1|ci-server-jane-2)
+              slot=${RUNNER_NAME##*-}
+              CI_USER=ci-slot$slot CI_STORAGE=/srv/ci-slot$slot CI_SLICE=cislot$slot.slice
+              CI_DOCKER=ci-slot$slot-docker CI_MEMORY=6442450944 CI_CPUS=6
+              CARGO_BUILD_JOBS=3 RUST_TEST_THREADS=6 ;;
+            *) echo 'Unknown trusted runner' >&2; exit 1 ;;
+          esac
+          CI_CGROUP=/sys/fs/cgroup/$CI_SLICE
+          test "$(id -un)" = "$CI_USER"
+          test "$(id -u)" != 0
+          test "$HOME" = "$CI_STORAGE/home"
+          test -f "/opt/$CI_USER/bin/Runner.Listener"
+          test -f "/etc/systemd/system/$CI_USER.service"
+          test ! -w "/opt/$CI_USER/bin/Runner.Listener"
+          test ! -w "/etc/systemd/system/$CI_USER.service"
+          test "$(awk '/^NoNewPrivs:/ {print $2}' /proc/self/status)" = 1
+          test ! -e "$HOME/.app-ci-sentinel"
+          test ! -e "$CI_STORAGE/work/.app-ci-sentinel"
+          touch "$HOME/.app-ci-sentinel" "$CI_STORAGE/work/.app-ci-sentinel"
+          test "$DOCKER_HOST" = "unix:///run/$CI_DOCKER/docker.sock"
+          docker info --format '{{json .SecurityOptions}}' | jq -e 'index("name=rootless") != null'
+          test -z "$(docker ps --all --quiet)"
+          test -z "$(docker image ls --quiet)"
+          test "$(cat "$CI_CGROUP/memory.max")" = "$CI_MEMORY"
+          test "$(cat "$CI_CGROUP/memory.swap.max")" = 0
+          awk -v cpus="$CI_CPUS" '{exit !($1 == $2 * cpus)}' "$CI_CGROUP/cpu.max"
+          grep -Fx "0::/$CI_SLICE/$CI_USER.service" /proc/self/cgroup
+          case ",$(findmnt -n -o OPTIONS --mountpoint "$CI_STORAGE")," in
+            *,nosuid,*) ;; *) exit 1 ;; esac
+          {
+            echo "CI_CGROUP=$CI_CGROUP"
+            echo "CI_STORAGE=$CI_STORAGE"
+            echo "CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS"
+            echo "RUST_TEST_THREADS=$RUST_TEST_THREADS"
+          } >> "$GITHUB_ENV"
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Verify direct scheduling policy
+        run: python3 scripts/test-direct-fleet.py
+      - name: Test trusted routing policy
+        run: python3 scripts/test-ci-routing.py
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+  ci:
+    name: ci
+    needs: [quality]
+    if: always()
+    runs-on: *fleet-runner
+    steps:
+      - *fleet-isolation
+      - name: Require all checks
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY_GATE'
+          import json, os
+          results = json.loads(os.environ["RESULTS"])
+          assert results and all(job["result"] == "success" for job in results.values()), results
+          PY_GATE
+  cloudflare-verify:
+    runs-on: *fleet-runner
+    timeout-minutes: 20
+    steps:
+      - *fleet-isolation
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx wrangler deploy --dry-run
+
+  # Verifies what Workers Builds actually published. It cannot be a step of a
+  # deploy job here, because this workflow no longer deploys -- and Actions is
+  # not notified when Workers Builds finishes, so the retry window below is what
+  # absorbs that lag.
+  #
+  # Disabled by default: Cloudflare returns 403 to GitHub's runner IP ranges for
+  # both hosts (verified -- every User-Agent gets 200 from a residential IP, and
+  # all 40 attempts got 403 from a runner), so this cannot pass until those
+  # requests are allowed through. To enable, add a WAF skip rule for /health and
+  # set the repository variable DEPLOY_SMOKE_ENABLED to 'true'.
