@@ -155,9 +155,17 @@ The **Before you generate** block under the parameters shows the grid, voxel siz
 rough triangle, time and memory estimates for the current settings, plus any sanity
 warnings (cell larger than the part, shell filling it, walls thinner than two voxels, open
 mesh). Click "Generate Lattice" (or press `G`). Computation runs in background Web Workers with
-progress, time estimates, and run logs (drawer in the status bar). Hotkeys `1`–`4` switch
-viewer modes (Original, Solid, Cross-Section, X-Ray); `H` resets the viewport. Selection edits
-support `Ctrl/Cmd+Z` and `Ctrl/Cmd+Shift+Z` undo/redo.
+progress, time estimates, and run logs (drawer in the status bar); validation reports its own
+progress once the mesh lands. Hotkeys `1`–`4` switch viewer modes (Original, Solid,
+Cross-Section, X-Ray); `H` resets the viewport. `Ctrl/Cmd+Z` and `Ctrl/Cmd+Shift+Z` undo and
+redo painting, parameter edits, and seed changes on one history (rapid edits of one field
+collapse into a single step). The cross-section position is shown in millimetres along the
+cut axis.
+
+**Compare runs**: pin a result in the Inspect column, change settings, generate again, and
+flip the viewer between the pinned and current runs; the panel lists the parameter
+differences. The Min Thickness card can mark the sampled spots that measured thinner than
+the target directly on the model.
 
 ### 5. Validate
 

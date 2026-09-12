@@ -82,6 +82,8 @@ export interface ValidationResult {
     required: number;
     absoluteMin: number;
     sampled: number;
+    /** xyz triples of sample origins whose measured thickness was below the target. */
+    thinPoints?: number[];
   };
   manifold: { passed: boolean; details: string };
   disconnected: {

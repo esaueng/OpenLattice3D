@@ -74,6 +74,19 @@ describe('unmeasurable thickness', () => {
 
   it('fails without inventing thickness when no usable ray is found', () => {
     const result = checkMinThickness(() => 1, planarSurface(0), 0.8);
-    expect(result).toEqual({ passed: false, minMeasured: 0, absoluteMin: 0, sampled: 0 });
+    expect(result).toEqual({ passed: false, minMeasured: 0, absoluteMin: 0, sampled: 0, thinPoints: [] });
+  });
+});
+
+describe('thin feature reporting', () => {
+  it('records where thin rays started and reports sampling progress', () => {
+    const progress: number[] = [];
+    const slab = planarSurface(0.05);
+    const measured = checkMinThickness((x) => Math.abs(x) - 0.05, slab, 0.8, 1, (f) => progress.push(f));
+    expect(measured.passed).toBe(false);
+    expect(measured.thinPoints.length).toBeGreaterThan(0);
+    expect(measured.thinPoints.length % 3).toBe(0);
+    expect(measured.thinPoints.length).toBeLessThanOrEqual(400 * 3);
+    if (slab.triCount >= 64) expect(progress.length).toBeGreaterThan(0);
   });
 });

@@ -483,6 +483,25 @@ export function XRayView({ result }: { result: MarchingCubesResult }) {
   return <mesh geometry={geometry} material={material} />;
 }
 
+/** Red dots where the validation measured a feature thinner than the target. */
+export function ThinFeatureMarkers({ points, bounds }: { points: number[]; bounds: THREE.Box3 }) {
+  const geometry = useDisposable(useMemo(() => {
+    const next = new THREE.BufferGeometry();
+    next.setAttribute('position', new THREE.BufferAttribute(new Float32Array(points), 3));
+    return next;
+  }, [points]));
+  const size = Math.max(0.4, bounds.getSize(new THREE.Vector3()).length() * 0.012);
+  const material = useDisposable(useMemo(() => new THREE.PointsMaterial({
+    color: '#ff5a5f',
+    size,
+    sizeAttenuation: true,
+    depthTest: false,
+    transparent: true,
+    opacity: 0.95,
+  }), [size]));
+  return <points geometry={geometry} material={material} renderOrder={10} />;
+}
+
 export function normalizeDemoResult(result: MarchingCubesResult, targetRadius: number): MarchingCubesResult {
   const bounds = resultBounds(result);
   const center = bounds.getCenter(new THREE.Vector3());

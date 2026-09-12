@@ -69,4 +69,10 @@ describe('summarizeValidation', () => {
   it('lets a running generation outrank a stale flag', () => {
     expect(summarizeValidation(makeValidation(), true, true, true).tone).toBe('running');
   });
+
+  it('reports validation progress once the mesh has landed', () => {
+    const s = summarizeValidation(null, true, false, false, 0.4);
+    expect(s.tone).toBe('running');
+    expect(s.label).toBe('Checks: validating 40%');
+  });
 });

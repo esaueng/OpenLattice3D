@@ -746,6 +746,17 @@ textarea:focus-visible,
   margin: 0 0 var(--sp-3);
 }
 
+.popover-note {
+  grid-template-columns: 72px minmax(0, 1fr);
+  color: var(--color-text-subtle);
+  font-family: var(--font-mono);
+  font-size: var(--fs-mini);
+}
+
+.pinned-run .info-block {
+  margin-top: 0;
+}
+
 /* Seed and reseed live behind a disclosure; most runs never need them. */
 .advanced-section {
   margin-top: var(--sp-3);

@@ -159,20 +159,29 @@ function bisectCrossing(
  * percentile remains a representative measurement, while every measured ray
  * must meet the required minimum for validation to pass.
  */
+export const MAX_THIN_POINTS = 400;
+
 export function checkMinThickness(
   sdf: (x: number, y: number, z: number) => number,
   result: MarchingCubesResult,
   minRequired: number,
   sampleCount: number = 1500,
-): { passed: boolean; minMeasured: number; absoluteMin: number; sampled: number } {
+  onProgress?: (fraction: number) => void,
+): { passed: boolean; minMeasured: number; absoluteMin: number; sampled: number; thinPoints: number[] } {
   const { positions, triCount } = result;
   const stride = Math.max(1, Math.floor(triCount / sampleCount));
   const marchStep = minRequired / 16;
   const maxDepth = minRequired * 4;
   const gradientStep = Math.max(1e-4, minRequired * 0.01);
   const thicknesses: number[] = [];
+  // Where the thin rays start, so the viewer can point at them.
+  const thinPoints: number[] = [];
+  const expected = Math.max(1, Math.ceil(triCount / stride));
+  let visited = 0;
 
   for (let i = 0; i < triCount; i += stride) {
+    visited++;
+    if (onProgress && visited % 64 === 0) onProgress(visited / expected);
     const o = i * 9;
     const px = (positions[o] + positions[o + 3] + positions[o + 6]) / 3;
     const py = (positions[o + 1] + positions[o + 4] + positions[o + 7]) / 3;
@@ -215,12 +224,15 @@ export function checkMinThickness(
     const near = crossing(-1);
     if (!Number.isFinite(far) || !Number.isFinite(near)) continue;
     const thickness = far - near;
-    if (thickness > 0) thicknesses.push(thickness);
+    if (thickness > 0) {
+      thicknesses.push(thickness);
+      if (thickness < minRequired - 1e-3 && thinPoints.length < MAX_THIN_POINTS * 3) thinPoints.push(px, py, pz);
+    }
   }
 
   if (thicknesses.length === 0) {
     // Keep numeric fields serializable; sampled=0 means unavailable, not 0mm.
-    return { passed: false, minMeasured: 0, absoluteMin: 0, sampled: 0 };
+    return { passed: false, minMeasured: 0, absoluteMin: 0, sampled: 0, thinPoints };
   }
 
   thicknesses.sort((a, b) => a - b);
@@ -235,6 +247,7 @@ export function checkMinThickness(
     minMeasured,
     absoluteMin,
     sampled: thicknesses.length,
+    thinPoints,
   };
 }
 
