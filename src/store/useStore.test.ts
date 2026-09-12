@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { analyzeMesh, generateCubeMesh } from '../geometry/mesh-analysis';
 import { DEFAULT_PARAMS, type ValidationResult } from '../types/project';
 import { buildPersistedAppState, hydrateFromSnapshot, useStore } from './useStore';
+import { buildGenerationSnapshot } from './generation-snapshot';
+import { computeStaleness, selectGenerationInputs } from './useResultStaleness';
 
 describe('persistence hydration', () => {
   it('releases the boot gate when browser storage is unavailable', async () => {
@@ -44,6 +46,135 @@ describe('persistence hydration', () => {
     expect(hydrated.params?.exportResolution).toBe(DEFAULT_PARAMS.exportResolution);
     expect(hydrated.generationSeed).toBe(0);
     expect(hydrated.viewerBackground).toBe('#000000');
+  });
+
+  it('never restores a result-only view mode, which would show an empty canvas', () => {
+    const hydrated = hydrateFromSnapshot({
+      version: 3,
+      savedAt: Date.now(),
+      params: { ...DEFAULT_PARAMS },
+      sampleShape: 'sphere',
+      sphereMode: true,
+      viewMode: 'xray',
+    } as unknown as Parameters<typeof hydrateFromSnapshot>[0]);
+    expect(hydrated.resultMesh).toBeNull();
+    expect(hydrated.viewMode).toBe('original');
+  });
+});
+
+describe('result record', () => {
+  beforeEach(() => {
+    useStore.getState().resetProject();
+  });
+
+  function generateSphere() {
+    const store = useStore.getState();
+    store.setSampleShape('sphere');
+    const snapshot = buildGenerationSnapshot(selectGenerationInputs(useStore.getState()));
+    useStore.getState().setResultMesh(generateCubeMesh(10), snapshot);
+    useStore.getState().setValidation({
+      passed: true,
+      outerDeviation: { passed: true, maxDeviation: 0, tolerance: 0.2 },
+      minThickness: { passed: true, minMeasured: 1, required: 0.8, absoluteMin: 1, sampled: 10 },
+      manifold: { passed: true, details: 'ok' },
+      disconnected: { passed: true, fragmentCount: 1 },
+      warnings: [],
+    });
+  }
+
+  function staleness() {
+    const state = useStore.getState();
+    return computeStaleness(state.resultSnapshot, selectGenerationInputs(state));
+  }
+
+  it('matches the form right after generation and goes out of date on any edit', () => {
+    generateSphere();
+    expect(staleness()).toEqual({ stale: false, changes: [] });
+
+    useStore.getState().updateParams({ cellSize: 12 });
+    expect(staleness()).toEqual({ stale: true, changes: ['cell size'] });
+
+    useStore.getState().updateParams({ cellSize: 8 });
+    expect(staleness().stale).toBe(false);
+  });
+
+  it('keeps the previous result and verdict when the seed or parameters change', () => {
+    generateSphere();
+    useStore.getState().reseedGeneration();
+    expect(useStore.getState().resultMesh).not.toBeNull();
+    expect(useStore.getState().validation).not.toBeNull();
+    expect(staleness().changes).toEqual(['seed']);
+
+    useStore.getState().importParams({ wallThickness: 2 });
+    expect(useStore.getState().resultMesh).not.toBeNull();
+    expect(staleness().changes).toEqual(['wall thickness', 'seed']);
+  });
+
+  it('starts a new result without a verdict and legalises the view when cleared', () => {
+    generateSphere();
+    useStore.getState().setViewMode('xray');
+    useStore.getState().setResultMesh(generateCubeMesh(12), null);
+    expect(useStore.getState().validation).toBeNull();
+    expect(useStore.getState().viewMode).toBe('xray');
+
+    useStore.getState().setResultMesh(null);
+    expect(useStore.getState().resultSnapshot).toBeNull();
+    expect(useStore.getState().viewMode).toBe('original');
+  });
+
+  it('carries the record through a multiview round trip', () => {
+    generateSphere();
+    const snapshot = useStore.getState().resultSnapshot;
+    useStore.getState().startDemoRun();
+    expect(useStore.getState().resultSnapshot).toBeNull();
+    useStore.getState().setDemoModeActive(false);
+    expect(useStore.getState().resultSnapshot).toBe(snapshot);
+    expect(useStore.getState().validation).not.toBeNull();
+  });
+
+  it('mirrors the multiview queue and resets it on exit', () => {
+    useStore.getState().setSampleShape('cube');
+    useStore.getState().startDemoRun();
+    useStore.getState().setDemoQueue({ done: 3, running: 1, total: 12 });
+    expect(useStore.getState().demoQueue).toEqual({ done: 3, running: 1, total: 12 });
+    useStore.getState().setDemoModeActive(false);
+    expect(useStore.getState().demoQueue).toEqual({ done: 0, running: 0, total: 0 });
+  });
+});
+
+describe('painting defaults and erase mode', () => {
+  beforeEach(() => {
+    useStore.getState().resetProject();
+  });
+
+  it('sizes the brush to the part on import unless the user already chose one', () => {
+    const mesh = generateCubeMesh(30);
+    useStore.getState().setOriginalMesh(mesh, analyzeMesh(mesh), 'cube.stl');
+    expect(useStore.getState().brushRadius).toBe(2.1);
+
+    useStore.getState().setBrushRadius(5);
+    useStore.getState().setOriginalMesh(mesh, analyzeMesh(mesh), 'cube-again.stl');
+    expect(useStore.getState().brushRadius).toBe(5);
+  });
+
+  it('erases from both masks as one undoable action', () => {
+    const mesh = generateCubeMesh(10);
+    useStore.getState().setOriginalMesh(mesh, analyzeMesh(mesh), 'cube.stl');
+    useStore.getState().setSelectionMode('keep_out');
+    useStore.getState().paintTriangles([1, 2], true);
+    useStore.getState().setSelectionMode('keep_in');
+    useStore.getState().paintTriangles([3], true);
+
+    useStore.getState().setSelectionMode('erase');
+    useStore.getState().paintTriangles([2, 3, 9], true);
+    expect(Array.from(useStore.getState().keepOutTris)).toEqual([1]);
+    expect(useStore.getState().keepInTris.size).toBe(0);
+
+    useStore.getState().paintTriangles([7], true);
+    expect(useStore.getState().selectionUndo).toHaveLength(3);
+    useStore.getState().undoSelection();
+    expect(Array.from(useStore.getState().keepOutTris)).toEqual([1, 2]);
+    expect(Array.from(useStore.getState().keepInTris)).toEqual([3]);
   });
 });
 

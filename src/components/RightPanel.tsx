@@ -1,8 +1,15 @@
-// Inspection controls: validation and export
+// Inspection: validation verdict and part statistics for the current result
 import { useStore } from '../store/useStore';
 import { useMemo } from 'react';
 import { massGrams, meshVolumeMm3, proceduralSolidVolumeMm3 } from '../geometry/mesh-stats';
 import { boundedNumberInput } from '../utils/numeric-input';
+import { useResultStaleness } from '../store/useResultStaleness';
+
+function formatChangeList(changes: string[]): string {
+  if (changes.length === 0) return 'settings';
+  if (changes.length <= 3) return changes.join(', ');
+  return `${changes.slice(0, 3).join(', ')} and ${changes.length - 3} more`;
+}
 
 export function RightPanel() {
   const validation = useStore((s) => s.validation);
@@ -13,6 +20,7 @@ export function RightPanel() {
   const sphereRadius = useStore((s) => s.sphereRadius);
   const density = useStore((s) => s.params.materialDensityGPerCm3);
   const updateParams = useStore((s) => s.updateParams);
+  const staleness = useResultStaleness();
   const statistics = useMemo(() => {
     if (!resultMesh || !validation?.manifold.passed) return null;
     const resultVolume = meshVolumeMm3(resultMesh);
@@ -28,12 +36,19 @@ export function RightPanel() {
     };
   }, [meshInfo?.isWatertight, originalMesh, resultMesh, sampleShape, sphereRadius, validation?.manifold.passed]);
 
+  const staleBanner = staleness.stale && (
+    <div className="warning stale-banner" role="status">
+      Out of date: {formatChangeList(staleness.changes)} changed since this run. Regenerate to refresh.
+    </div>
+  );
+
   return (
     <>
       {/* Validation Panel */}
       {validation && (
         <section className="panel-section" id="validation-panel" tabIndex={-1}>
           <h3>Validation</h3>
+          {staleBanner}
           <div className={`validation-status ${validation.passed ? 'pass' : 'fail'}`}>
             {validation.passed ? 'ALL CHECKS PASSED' : 'SOME CHECKS FAILED'}
           </div>
@@ -43,7 +58,9 @@ export function RightPanel() {
               <span className="check-icon">{validation.outerDeviation.passed ? 'OK' : 'FAIL'}</span>
               <div>
                 <strong>Outer Deviation</strong>
-                <div>Max: {validation.outerDeviation.maxDeviation.toFixed(3)}mm (tolerance: {validation.outerDeviation.tolerance}mm)</div>
+                <div>
+                  Max {validation.outerDeviation.maxDeviation.toFixed(3)} mm · limit {validation.outerDeviation.tolerance} mm
+                </div>
               </div>
             </div>
 
@@ -53,14 +70,18 @@ export function RightPanel() {
                 <strong>Min Thickness</strong>
                 {validation.minThickness.sampled > 0 ? (
                   <>
-                    <div>Measured: {validation.minThickness.minMeasured.toFixed(3)}mm (required: {validation.minThickness.required}mm)</div>
+                    {/* The verdict is decided by the thinnest ray, so that number leads. */}
                     <div>
-                      Absolute min: {(validation.minThickness.absoluteMin ?? validation.minThickness.minMeasured).toFixed(3)}mm
-                      {' '}across {validation.minThickness.sampled} measured rays
+                      Thinnest feature {(validation.minThickness.absoluteMin ?? validation.minThickness.minMeasured).toFixed(3)} mm
+                      {' '}· needs ≥ {validation.minThickness.required} mm
+                    </div>
+                    <div>
+                      1% of samples are under {validation.minThickness.minMeasured.toFixed(3)} mm
+                      {' '}({validation.minThickness.sampled.toLocaleString()} rays)
                     </div>
                   </>
                 ) : (
-                  <div>Not measured: no usable thickness samples (required: {validation.minThickness.required}mm)</div>
+                  <div>Not measured: no usable thickness samples · needs ≥ {validation.minThickness.required} mm</div>
                 )}
               </div>
             </div>
@@ -77,7 +98,7 @@ export function RightPanel() {
               <span className="check-icon">{validation.disconnected.passed ? 'OK' : 'FAIL'}</span>
               <div>
                 <strong>Connectivity</strong>
-                <div>{validation.disconnected.fragmentCount} fragment(s)</div>
+                <div>{validation.disconnected.fragmentCount} fragment(s) · needs 1</div>
               </div>
             </div>
           </div>
@@ -94,7 +115,7 @@ export function RightPanel() {
       )}
       {resultMesh && (
         <section className="panel-section">
-          <h3>Part Statistics</h3>
+          <h3>Part Statistics{staleness.stale ? ' (previous run)' : ''}</h3>
           {!validation && <div>Waiting for manifold validation…</div>}
           {validation && !validation.manifold.passed && (
             <div className="warning">Volume unavailable: result mesh is not closed and manifold.</div>

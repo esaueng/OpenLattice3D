@@ -10,6 +10,8 @@ import {
   DEFAULT_GENERATION_SEED,
   normalizeGenerationSeed,
 } from '../geometry/deterministic-random';
+import type { GenerationSnapshot } from './generation-snapshot';
+import { defaultBrushRadius } from '../utils/model-summary';
 
 export type ViewMode = 'original' | 'lattice' | 'cross_section' | 'xray';
 
@@ -28,6 +30,22 @@ export interface LogEntry {
 }
 
 export type ViewerVector3 = [number, number, number];
+
+/** Outcome of the last file import, shown inline in the Model section. */
+export interface ImportNotice {
+  level: 'info' | 'warn' | 'error';
+  message: string;
+  detail?: string;
+}
+
+/** Progress of the multiview queue, mirrored from DemoGridView for the statusbar. */
+export interface DemoQueueState {
+  done: number;
+  running: number;
+  total: number;
+}
+
+const IDLE_DEMO_QUEUE: DemoQueueState = { done: 0, running: 0, total: 0 };
 
 export interface ViewerCameraState {
   position: ViewerVector3;
@@ -375,6 +393,10 @@ interface AppState {
   progressMessage: string;
   generationError: string | null;
   resultMesh: MarchingCubesResult | null;
+  /** Inputs the current resultMesh was generated from; null when no result. */
+  resultSnapshot: GenerationSnapshot | null;
+  importNotice: ImportNotice | null;
+  demoQueue: DemoQueueState;
 
   // Validation
   validation: ValidationResult | null;
@@ -419,7 +441,9 @@ interface AppState {
   setGenerating: (generating: boolean) => void;
   setProgress: (progress: number, message: string) => void;
   setGenerationError: (message: string | null) => void;
-  setResultMesh: (result: MarchingCubesResult | null) => void;
+  setResultMesh: (result: MarchingCubesResult | null, snapshot?: GenerationSnapshot | null) => void;
+  setImportNotice: (notice: ImportNotice | null) => void;
+  setDemoQueue: (queue: DemoQueueState) => void;
   setValidation: (validation: ValidationResult | null) => void;
   setViewMode: (mode: ViewMode) => void;
   setClipPlane: (partial: Partial<ClipPlaneState>) => void;
@@ -465,6 +489,7 @@ function legalViewMode(state: ViewAvailability, desired: ViewMode): ViewMode {
 /** A completed run parked while multiview borrows the viewport. Never persisted. */
 interface SuspendedResult {
   resultMesh: MarchingCubesResult | null;
+  resultSnapshot: GenerationSnapshot | null;
   validation: ValidationResult | null;
   viewMode: ViewMode;
 }
@@ -517,8 +542,15 @@ export const useStore = create<AppState>((rawSet) => {
   progressMessage: '',
   generationError: null,
   resultMesh: null,
+  resultSnapshot: null,
+  importNotice: null,
+  demoQueue: IDLE_DEMO_QUEUE,
   validation: null,
-  viewMode: persisted?.viewMode ?? 'original',
+  // A persisted result view has no result to show after a reload.
+  viewMode: legalViewMode(
+    { demoModeActive: false, originalMesh: null, sphereMode: persisted?.sphereMode ?? false, resultMesh: null },
+    persisted?.viewMode ?? 'original',
+  ),
   clipPlane: persisted?.clipPlane ?? { axis: 'z', position: 0.5, flipped: false },
   viewerBackground: persisted?.viewerBackground ?? DEFAULT_VIEWER_BACKGROUND,
   viewportResetSignal: 0,
@@ -530,14 +562,17 @@ export const useStore = create<AppState>((rawSet) => {
   // IndexedDB is asynchronous, so the UI waits for saved preferences before rendering.
   persistenceHydrated: false,
 
-  setOriginalMesh: (mesh, info, fileName) => set({
+  setOriginalMesh: (mesh, info, fileName) => set((s) => ({
     originalMesh: mesh,
     meshInfo: info,
     meshFileName: fileName,
     sampleShape: null,
     sphereMode: false,
     selectionMode: 'none',
+    // A zero brush paints one triangle per event; size it to the part unless the user chose otherwise.
+    brushRadius: s.brushRadius > 0 || !info ? s.brushRadius : defaultBrushRadius(info.boundingBox),
     resultMesh: null,
+    resultSnapshot: null,
     validation: null,
     generationError: null,
     viewMode: 'original',
@@ -550,7 +585,8 @@ export const useStore = create<AppState>((rawSet) => {
     viewerCameraState: null,
     demoModeActive: false,
     demoSuspended: null,
-  }),
+    demoQueue: IDLE_DEMO_QUEUE,
+  })),
 
   setMeshRepaired: (repaired) => set((s) => ({
     meshInfo: s.meshInfo ? { ...s.meshInfo, repaired } : null,
@@ -566,6 +602,7 @@ export const useStore = create<AppState>((rawSet) => {
     meshFileName: SAMPLE_SHAPE_INFO[shape].fileName,
     selectionMode: 'none',
     resultMesh: null,
+    resultSnapshot: null,
     validation: null,
     generationError: null,
     viewMode: 'original',
@@ -598,6 +635,7 @@ export const useStore = create<AppState>((rawSet) => {
     meshFileName: `Sphere R=${radius}mm`,
     selectionMode: 'none',
     resultMesh: null,
+    resultSnapshot: null,
     validation: null,
     generationError: null,
     viewMode: 'original',
@@ -642,6 +680,18 @@ export const useStore = create<AppState>((rawSet) => {
 
   paintTriangles: (triIndices, additive) => set((s) => {
     if (s.selectionMode === 'none' || triIndices.length === 0) return {};
+    if (s.selectionMode === 'erase') {
+      const keepOut = new Set(s.keepOutTris);
+      const keepIn = new Set(s.keepInTris);
+      let erased = false;
+      for (const triIdx of triIndices) {
+        if (keepOut.delete(triIdx)) erased = true;
+        if (keepIn.delete(triIdx)) erased = true;
+      }
+      if (!erased) return {};
+      const selection = { keepOutTris: keepOut, keepInTris: keepIn };
+      return s.selectionStrokeStart ? selection : { ...selection, ...pushSelectionHistory(s) };
+    }
     const target = new Set(s.selectionMode === 'keep_out' ? s.keepOutTris : s.keepInTris);
     const other = new Set(s.selectionMode === 'keep_out' ? s.keepInTris : s.keepOutTris);
     let changed = false;
@@ -729,10 +779,10 @@ export const useStore = create<AppState>((rawSet) => {
     };
   }),
 
+  // The seed is a generation input, so the current result simply becomes out of
+  // date rather than disappearing.
   reseedGeneration: () => set((state) => ({
     generationSeed: createReseedValue(state.generationSeed),
-    resultMesh: null,
-    validation: null,
     generationError: null,
   })),
 
@@ -788,15 +838,36 @@ export const useStore = create<AppState>((rawSet) => {
 
   setGenerationError: (message) => set({ generationError: message }),
 
-  setResultMesh: (result) => set((s) => {
-    if (!result) return { resultMesh: null, viewMode: 'original' };
+  setResultMesh: (result, snapshot = null) => set((s) => {
+    if (!result) {
+      return {
+        resultMesh: null,
+        resultSnapshot: null,
+        validation: null,
+        viewMode: legalViewMode({ ...s, resultMesh: null }, s.viewMode),
+      };
+    }
     // Preserve current view if it works with a result mesh; otherwise switch to lattice
     const resultViews: ViewMode[] = ['lattice', 'cross_section', 'xray'];
     const keepView = resultViews.includes(s.viewMode);
-    return { resultMesh: result, viewMode: keepView ? s.viewMode : 'xray' };
+    // A new mesh has no verdict yet; the previous verdict belonged to the previous mesh.
+    return {
+      resultMesh: result,
+      resultSnapshot: snapshot,
+      validation: null,
+      viewMode: keepView ? s.viewMode : 'xray',
+    };
   }),
 
   setValidation: (validation) => set({ validation }),
+
+  setImportNotice: (notice) => set({ importNotice: notice }),
+
+  setDemoQueue: (queue) => set((s) => (
+    s.demoQueue.done === queue.done && s.demoQueue.running === queue.running && s.demoQueue.total === queue.total
+      ? {}
+      : { demoQueue: queue }
+  )),
 
   setViewMode: (mode) => set((s) => (canSelectView(s, mode) ? { viewMode: mode } : {})),
 
@@ -815,12 +886,14 @@ export const useStore = create<AppState>((rawSet) => {
     if (active) return { demoModeActive: true };
     // A run that finished while multiview was open outranks the parked one.
     const restored = s.resultMesh
-      ? { resultMesh: s.resultMesh, validation: s.validation, viewMode: s.viewMode }
-      : (s.demoSuspended ?? { resultMesh: null, validation: null, viewMode: 'original' as ViewMode });
+      ? { resultMesh: s.resultMesh, resultSnapshot: s.resultSnapshot, validation: s.validation, viewMode: s.viewMode }
+      : (s.demoSuspended ?? { resultMesh: null, resultSnapshot: null, validation: null, viewMode: 'original' as ViewMode });
     return {
       demoModeActive: false,
       demoSuspended: null,
+      demoQueue: IDLE_DEMO_QUEUE,
       resultMesh: restored.resultMesh,
+      resultSnapshot: restored.resultSnapshot,
       validation: restored.validation,
       viewMode: legalViewMode(
         { ...s, demoModeActive: false, resultMesh: restored.resultMesh },
@@ -843,8 +916,9 @@ export const useStore = create<AppState>((rawSet) => {
       // Park the finished run rather than destroying it; multiview only borrows the viewport.
       demoSuspended: s.demoModeActive
         ? s.demoSuspended
-        : { resultMesh: s.resultMesh, validation: s.validation, viewMode: s.viewMode },
+        : { resultMesh: s.resultMesh, resultSnapshot: s.resultSnapshot, validation: s.validation, viewMode: s.viewMode },
       resultMesh: null,
+      resultSnapshot: null,
       validation: null,
       viewMode: 'lattice',
       params: activeParams,
@@ -856,19 +930,13 @@ export const useStore = create<AppState>((rawSet) => {
     logs: [...s.logs.slice(-200), { time: Date.now(), message, level }],
   })),
 
+  // Imported parameters are just parameter edits: the current result stays and
+  // reads as out of date until the next run.
   importParams: (imported) => set((s) => {
     const nextParams = { ...s.params, ...imported };
-    if (!s.demoModeActive) {
-      return {
-        params: nextParams,
-        resultMesh: null,
-        validation: null,
-      };
-    }
+    if (!s.demoModeActive) return { params: nextParams };
     return {
       params: nextParams,
-      resultMesh: null,
-      validation: null,
       demoParamsByType: {
         ...s.demoParamsByType,
         [nextParams.latticeType]: nextParams,
@@ -898,6 +966,9 @@ export const useStore = create<AppState>((rawSet) => {
     progressMessage: '',
     generationError: null,
     resultMesh: null,
+    resultSnapshot: null,
+    importNotice: null,
+    demoQueue: IDLE_DEMO_QUEUE,
     validation: null,
     viewMode: 'original',
     clipPlane: project.clipPlane ?? { axis: 'z', position: 0.5, flipped: false },
@@ -923,6 +994,9 @@ export const useStore = create<AppState>((rawSet) => {
       sphereRadius: 25,
       selectionMode: 'none',
       resultMesh: null,
+      resultSnapshot: null,
+      importNotice: null,
+      demoQueue: IDLE_DEMO_QUEUE,
       validation: null,
       keepOutTris: new Set(),
       keepInTris: new Set(),
@@ -999,8 +1073,15 @@ export function hydrateFromSnapshot(snapshot: Partial<PersistedAppState>): Parti
     progressMessage: '',
     generationError: null,
     resultMesh: null,
+    resultSnapshot: null,
+    importNotice: null,
+    demoQueue: IDLE_DEMO_QUEUE,
     validation: null,
-    viewMode: persistedState.viewMode,
+    // Nothing generated survives a reload, so a result view would show an empty canvas.
+    viewMode: legalViewMode(
+      { demoModeActive: false, originalMesh: null, sphereMode: persistedState.sphereMode, resultMesh: null },
+      persistedState.viewMode,
+    ),
     clipPlane: persistedState.clipPlane,
     viewerBackground: persistedState.viewerBackground,
     viewerCameraState: normalizeViewerCameraState(snapshot.viewerCameraState),
