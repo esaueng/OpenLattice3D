@@ -64,20 +64,20 @@ export function useLatticeGeneration(): LatticeGenerationControls {
   const [workerController] = useState(() => new GenerationWorkerController());
   const generationRunRef = useRef(0);
   const validationWorkerRef = useRef<Worker | null>(null);
-  const inputSubscriptionRef = useRef<(() => void) | null>(null);
+  const modelSubscriptionRef = useRef<(() => void) | null>(null);
 
-  const releaseInputSubscription = useCallback(() => {
-    inputSubscriptionRef.current?.();
-    inputSubscriptionRef.current = null;
+  const releaseModelSubscription = useCallback(() => {
+    modelSubscriptionRef.current?.();
+    modelSubscriptionRef.current = null;
   }, []);
 
   const stopRun = useCallback(() => {
     generationRunRef.current++;
-    releaseInputSubscription();
+    releaseModelSubscription();
     workerController.dispose();
     validationWorkerRef.current?.terminate();
     validationWorkerRef.current = null;
-  }, [releaseInputSubscription, workerController]);
+  }, [releaseModelSubscription, workerController]);
 
   const canGenerate = useCallback(() => {
     const store = useStore.getState();
@@ -113,6 +113,8 @@ export function useLatticeGeneration(): LatticeGenerationControls {
     console.info('[OpenLattice3D] Browser features at generation start', browserFeatures);
     // The previous result and its verdict stay on screen (marked as running in the
     // statusbar) until the new mesh lands, so a cancelled run loses nothing.
+    // Parameter, seed and mask edits made mid-run also keep it: the new mesh
+    // lands with its own snapshot and simply reads as out of date.
     store.setDemoModeActive(false);
 
     const runId = generationRunRef.current;
@@ -222,13 +224,13 @@ export function useLatticeGeneration(): LatticeGenerationControls {
         if (validationResp.type === 'progress') {
           if (validationResp.message) current.addLog(validationResp.message);
         } else if (validationResp.type === 'result') {
-          releaseInputSubscription();
+          releaseModelSubscription();
           current.setValidation(validationResp.validation || null);
           current.addLog('Validation complete');
           validationWorker.terminate();
           if (validationWorkerRef.current === validationWorker) validationWorkerRef.current = null;
         } else if (validationResp.type === 'error') {
-          releaseInputSubscription();
+          releaseModelSubscription();
           current.addLog(`Validation error: ${validationResp.message}`, 'error');
           validationWorker.terminate();
           if (validationWorkerRef.current === validationWorker) validationWorkerRef.current = null;
@@ -237,7 +239,7 @@ export function useLatticeGeneration(): LatticeGenerationControls {
       validationWorker.onerror = () => {
         if (generationRunRef.current !== runId || validationWorkerRef.current !== validationWorker) return;
         const current = useStore.getState();
-        releaseInputSubscription();
+        releaseModelSubscription();
         current.addLog('Validation worker failed', 'error');
         validationWorker.terminate();
         if (validationWorkerRef.current === validationWorker) validationWorkerRef.current = null;
@@ -245,7 +247,7 @@ export function useLatticeGeneration(): LatticeGenerationControls {
       validationWorker.onmessageerror = () => {
         if (generationRunRef.current !== runId || validationWorkerRef.current !== validationWorker) return;
         const current = useStore.getState();
-        releaseInputSubscription();
+        releaseModelSubscription();
         current.addLog('Validation worker returned an unreadable response', 'error');
         validationWorker.terminate();
         validationWorkerRef.current = null;
@@ -263,11 +265,10 @@ export function useLatticeGeneration(): LatticeGenerationControls {
       onResult: (resp) => {
         const current = useStore.getState();
         if (resp.triCount === 0) {
+          // A failed run leaves the previous result and its verdict in place.
           stopRun();
           const message = 'Generation produced an empty mesh; adjust the parameters and regenerate';
           current.setGenerating(false);
-          current.setResultMesh(null);
-          current.setValidation(null);
           current.setProgress(0, 'Generation failed');
           current.setGenerationError(message);
           current.addLog(message, 'error');
@@ -294,7 +295,7 @@ export function useLatticeGeneration(): LatticeGenerationControls {
         void notifyGenerationComplete(resp.triCount, elapsedMs);
       },
       onFailure: (message) => {
-        releaseInputSubscription();
+        releaseModelSubscription();
         const current = useStore.getState();
         current.addLog(message, 'error');
         current.setGenerating(false);
@@ -304,32 +305,27 @@ export function useLatticeGeneration(): LatticeGenerationControls {
       },
     });
 
-    // Subscribe synchronously so even edits before the next React effect invalidate
-    // this run. Display preferences and mass density do not change its geometry.
-    inputSubscriptionRef.current = useStore.subscribe((current) => {
-      const paramsChanged = (Object.keys(store.params) as (keyof typeof store.params)[])
-        .some((key) => key !== 'materialDensityGPerCm3' && current.params[key] !== store.params[key]);
+    // A run belongs to its model. Replacing the model (import, sample, reset,
+    // project restore) cancels it so an old model's lattice cannot land under the
+    // new one. Subscribe synchronously so even edits before the next React effect
+    // are caught. Other inputs are free to change: the result stays and reads as
+    // out of date.
+    modelSubscriptionRef.current = useStore.subscribe((current) => {
       if (
         current.originalMesh === store.originalMesh
         && current.sampleShape === store.sampleShape
         && current.sphereMode === store.sphereMode
         && current.sphereRadius === store.sphereRadius
-        && current.generationSeed === store.generationSeed
-        && current.keepOutTris === store.keepOutTris
-        && current.keepInTris === store.keepInTris
-        && !paramsChanged
       ) return;
       stopRun();
       current.setGenerating(false);
-      current.setResultMesh(null);
-      current.setValidation(null);
-      current.setProgress(0, 'Inputs changed; regenerate');
+      current.setProgress(0, 'Model changed; regenerate');
       current.setGenerationError(null);
-      current.addLog('Generation or validation cancelled because inputs changed', 'warn');
+      current.addLog('Generation cancelled because the model changed', 'warn');
     });
 
     workerController.post(msg, transferList);
-  }, [canGenerate, notifyGenerationComplete, releaseInputSubscription, stopRun, workerController]);
+  }, [canGenerate, notifyGenerationComplete, releaseModelSubscription, stopRun, workerController]);
 
   const cancelGeneration = useCallback(() => {
     stopRun();
