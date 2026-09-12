@@ -5,14 +5,32 @@ import type { LatticeParams, ValidationResult } from '../types/project';
 import type { MarchingCubesResult } from './marching-cubes';
 import { buildEdgeTopology, countEdgeDefects, findConnectedComponents } from './mesh-topology';
 
+/** Signed volume enclosed by a set of triangles (divergence theorem). */
+function signedVolumeOf(positions: Float32Array, triangles: number[]): number {
+  let volume = 0;
+  for (const triangle of triangles) {
+    const o = triangle * 9;
+    const ax = positions[o], ay = positions[o + 1], az = positions[o + 2];
+    const bx = positions[o + 3], by = positions[o + 4], bz = positions[o + 5];
+    const cx = positions[o + 6], cy = positions[o + 7], cz = positions[o + 8];
+    volume += (ax * (by * cz - bz * cy) - ay * (bx * cz - bz * cx) + az * (bx * cy - by * cx)) / 6;
+  }
+  return volume;
+}
+
+/**
+ * Surface components are not solid bodies: a closed shell around a sheet
+ * lattice has one outer skin plus one closed surface per enclosed void
+ * network. Classify each component by the volume it encloses instead.
+ */
 export function checkTopology(result: MarchingCubesResult): {
   manifold: { passed: boolean; details: string };
-  disconnected: { passed: boolean; fragmentCount: number };
+  disconnected: { passed: boolean; fragmentCount: number; voidCount: number; sliverCount: number };
 } {
   if (result.triCount === 0) {
     return {
       manifold: { passed: false, details: 'Mesh is empty; no printable surface' },
-      disconnected: { passed: false, fragmentCount: 0 },
+      disconnected: { passed: false, fragmentCount: 0, voidCount: 0, sliverCount: 0 },
     };
   }
   const topology = buildEdgeTopology(result.positions, result.triCount);
@@ -26,10 +44,24 @@ export function checkTopology(result: MarchingCubesResult): {
       : `Non-manifold edges: ${nonManifoldEdges}, boundary edges: ${boundaryEdges}`,
   };
 
-  const fragmentCount = result.triCount === 0 ? 0 : findConnectedComponents(topology).length;
+  const components = findConnectedComponents(topology);
+  const volumes = components.map((triangles) => signedVolumeOf(result.positions, triangles));
+  const largest = volumes.reduce((max, volume) => Math.max(max, Math.abs(volume)), 0);
+  // Anything under a millionth of the largest surface's volume is a numerical sliver.
+  const threshold = Math.max(1e-9, largest * 1e-6);
+  let fragmentCount = 0;
+  let voidCount = 0;
+  let sliverCount = 0;
+  for (const volume of volumes) {
+    if (volume > threshold) fragmentCount++;
+    else if (volume < -threshold) voidCount++;
+    else sliverCount++;
+  }
+  // An open mesh has no meaningful enclosed volume; fall back to surface counting.
+  if (!manifoldPassed && fragmentCount === 0) fragmentCount = components.length;
   return {
     manifold,
-    disconnected: { passed: fragmentCount <= 1, fragmentCount },
+    disconnected: { passed: fragmentCount === 1, fragmentCount, voidCount, sliverCount },
   };
 }
 
@@ -206,6 +238,26 @@ export function checkMinThickness(
   };
 }
 
+/** Warnings derived from the body/void classification, shared by both validation paths. */
+export function topologyWarnings(
+  disconnected: { fragmentCount: number; voidCount: number; sliverCount: number },
+  params: LatticeParams,
+): string[] {
+  const warnings: string[] = [];
+  if (disconnected.fragmentCount > 1) {
+    warnings.push(`${disconnected.fragmentCount} separate solid bodies detected`);
+  }
+  if (disconnected.voidCount > 0 && !params.escapeHoles) {
+    warnings.push(
+      `${disconnected.voidCount} enclosed void network${disconnected.voidCount === 1 ? '' : 's'} and no escape holes: trapped powder/resin likely`,
+    );
+  }
+  if (disconnected.sliverCount > 0) {
+    warnings.push(`${disconnected.sliverCount} zero-volume sliver${disconnected.sliverCount === 1 ? '' : 's'} (negligible, but present in the export)`);
+  }
+  return warnings;
+}
+
 /** Run full validation suite */
 export function runValidation(
   result: MarchingCubesResult,
@@ -232,17 +284,11 @@ export function runValidation(
   if (minThickness.sampled === 0) warnings.push('Minimum thickness could not be measured');
 
   const { manifold, disconnected } = checkTopology(result);
-  if (disconnected.fragmentCount > 1) {
-    warnings.push(`${disconnected.fragmentCount} disconnected fragments detected`);
-  }
+  warnings.push(...topologyWarnings(disconnected, params));
 
   // Process-specific warnings
   if (params.processPreset === 'FDM' && params.variant === 'implicit_conformal') {
     warnings.push('FDM with open lattice exterior can be difficult to print');
-  }
-
-  if (!params.escapeHoles && params.variant === 'shell_core') {
-    warnings.push('Escape holes disabled - trapped powder/resin likely');
   }
 
   const passed = outerDeviation.passed && minThickness.passed && manifold.passed && disconnected.passed;

@@ -98,7 +98,11 @@ export function RightPanel() {
               <span className="check-icon">{validation.disconnected.passed ? 'OK' : 'FAIL'}</span>
               <div>
                 <strong>Connectivity</strong>
-                <div>{validation.disconnected.fragmentCount} fragment(s) · needs 1</div>
+                <div>
+                  {validation.disconnected.fragmentCount} solid {validation.disconnected.fragmentCount === 1 ? 'body' : 'bodies'} · needs 1
+                  {(validation.disconnected.voidCount ?? 0) > 0 && ` · ${validation.disconnected.voidCount} enclosed void${validation.disconnected.voidCount === 1 ? '' : 's'}`}
+                  {(validation.disconnected.sliverCount ?? 0) > 0 && ` · ${validation.disconnected.sliverCount} negligible sliver${validation.disconnected.sliverCount === 1 ? '' : 's'}`}
+                </div>
               </div>
             </div>
           </div>
