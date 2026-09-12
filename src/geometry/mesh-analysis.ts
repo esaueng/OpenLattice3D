@@ -45,10 +45,17 @@ export function analyzeMesh(mesh: TriangleMesh): MeshInfo {
 
   let isManifold = true;
   let isWatertight = true;
+  let boundaryEdges = 0;
+  let nonManifoldEdges = 0;
   for (const count of edgeCounts.values()) {
     if (count !== 2) {
       isManifold = false;
-      if (count === 1) isWatertight = false;
+      if (count === 1) {
+        isWatertight = false;
+        boundaryEdges++;
+      } else {
+        nonManifoldEdges++;
+      }
     }
   }
 
@@ -66,6 +73,9 @@ export function analyzeMesh(mesh: TriangleMesh): MeshInfo {
     isWatertight,
     isManifold,
     repaired: false,
+    boundaryEdges,
+    nonManifoldEdges,
+    volumeMm3: isWatertight ? Math.abs(computeSignedVolume(mesh)) : null,
   };
 }
 
