@@ -21,6 +21,12 @@ export function RightPanel() {
   const density = useStore((s) => s.params.materialDensityGPerCm3);
   const updateParams = useStore((s) => s.updateParams);
   const staleness = useResultStaleness();
+  const showThinFeatures = useStore((s) => s.showThinFeatures);
+  const setShowThinFeatures = useStore((s) => s.setShowThinFeatures);
+  const viewMode = useStore((s) => s.viewMode);
+  const setViewMode = useStore((s) => s.setViewMode);
+  const thinPointCount = (validation?.minThickness.thinPoints?.length ?? 0) / 3;
+  const showPinnedRun = useStore((s) => s.showPinnedRun);
   const statistics = useMemo(() => {
     if (!resultMesh || !validation?.manifold.passed) return null;
     const resultVolume = meshVolumeMm3(resultMesh);
@@ -47,7 +53,7 @@ export function RightPanel() {
       {/* Validation Panel */}
       {validation && (
         <section className="panel-section" id="validation-panel" tabIndex={-1}>
-          <h3>Validation</h3>
+          <h3>Validation{showPinnedRun ? ' (current run, not the pinned one)' : ''}</h3>
           {staleBanner}
           <div className={`validation-status ${validation.passed ? 'pass' : 'fail'}`}>
             {validation.passed ? 'ALL CHECKS PASSED' : 'SOME CHECKS FAILED'}
@@ -79,6 +85,22 @@ export function RightPanel() {
                       1% of samples are under {validation.minThickness.minMeasured.toFixed(3)} mm
                       {' '}({validation.minThickness.sampled.toLocaleString()} rays)
                     </div>
+                    {thinPointCount > 0 && (
+                      <button
+                        type="button"
+                        className={`btn btn-tiny ${showThinFeatures ? 'btn-active' : ''}`}
+                        style={{ marginTop: '6px' }}
+                        aria-pressed={showThinFeatures}
+                        title="Mark the sampled spots that measured thinner than the target on the model."
+                        onClick={() => {
+                          const next = !showThinFeatures;
+                          setShowThinFeatures(next);
+                          if (next && viewMode === 'original') setViewMode('xray');
+                        }}
+                      >
+                        {showThinFeatures ? 'Hide thin spots' : `Show ${thinPointCount} thin spot${thinPointCount === 1 ? '' : 's'} on model`}
+                      </button>
+                    )}
                   </>
                 ) : (
                   <div>Not measured: no usable thickness samples · needs ≥ {validation.minThickness.required} mm</div>
