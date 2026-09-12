@@ -169,7 +169,10 @@ After generation, the validation panel shows:
 - **Outer Deviation**: max deviation from original surface vs. tolerance
 - **Min Thickness**: thinnest feature measured (must exceed min feature size)
 - **Manifold/Watertight**: printability check
-- **Connectivity**: disconnected fragment detection
+- **Connectivity**: counts separate solid bodies by the volume each closed surface encloses.
+  A shell around a sheet lattice legitimately has one outer skin plus one inner surface per
+  enclosed void network; those are reported as enclosed voids (with a trapped-powder warning
+  when escape holes are off), not as fragments. Zero-volume slivers are listed as negligible.
 
 ### 6. Export
 

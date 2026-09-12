@@ -15,6 +15,7 @@ import {
   checkSphereDeviation,
   checkTopology,
   runValidation,
+  topologyWarnings,
 } from '../geometry/validation';
 import type { LatticeParams, SampleShape, ValidationResult } from '../types/project';
 import type { Vec3 } from '../geometry/vec3';
@@ -139,9 +140,7 @@ function runProceduralValidation(
   const warnings: string[] = [];
   if (minThickness.sampled === 0) warnings.push('Minimum thickness could not be measured');
 
-  if (!msg.params.escapeHoles && msg.params.variant === 'shell_core') {
-    warnings.push('Escape holes disabled - trapped powder/resin likely');
-  }
+  warnings.push(...topologyWarnings(disconnected, msg.params));
   if (msg.params.processPreset === 'FDM' && msg.params.variant === 'implicit_conformal') {
     warnings.push('FDM with open lattice exterior can be difficult to print');
   }

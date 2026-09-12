@@ -67,7 +67,7 @@ describe('unmeasurable thickness', () => {
     expect(result.passed).toBe(false);
     expect(result.manifold.passed).toBe(false);
     expect(result.manifold.details).toMatch(/empty/);
-    expect(result.disconnected).toEqual({ passed: false, fragmentCount: 0 });
+    expect(result.disconnected).toEqual({ passed: false, fragmentCount: 0, voidCount: 0, sliverCount: 0 });
     expect(result.minThickness.passed).toBe(false);
     expect(result.warnings).toContain('Minimum thickness could not be measured');
   });
