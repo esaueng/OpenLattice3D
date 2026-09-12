@@ -1095,6 +1095,15 @@ export function Viewer3D() {
     return new THREE.Box3();
   }, [originalMesh, sampleShape, sphereMode, sphereRadius]);
 
+  const placingHoles = selectionMode === 'place_hole';
+  const placeHole = useCallback((point: [number, number, number]) => {
+    const state = useStore.getState();
+    state.updateParams({
+      escapeHolePlacement: 'manual',
+      escapeHoleManualCenters: [...state.params.escapeHoleManualCenters, ...point.map((v) => Math.round(v * 100) / 100)],
+    });
+  }, []);
+
   const requestView = useCallback((view: GizmoViewRequest) => {
     setGizmoViewRequest((request) => ({ view, signal: request.signal + 1 }));
   }, []);
@@ -1147,7 +1156,7 @@ export function Viewer3D() {
         aria-label="3D model viewport. Use arrow keys to orbit, plus and minus to zoom, and hold Shift with arrow keys to pan."
         tabIndex={0}
         onKeyDown={handleViewportKeyDown}
-        style={{ cursor: selectionMode !== 'none' && originalMesh ? 'crosshair' : undefined }}
+        style={{ cursor: selectionMode !== 'none' && (originalMesh || placingHoles) ? 'crosshair' : undefined }}
       >
       <Canvas
         camera={{ fov: 50, near: 0.1, far: 10000, up: [0, 0, 1] }}
@@ -1176,6 +1185,7 @@ export function Viewer3D() {
             onStrokeStart={beginSelectionStroke}
             onStrokeEnd={endSelectionStroke}
             onPaintingChange={setPainting}
+            onPlaceHole={placingHoles ? placeHole : undefined}
           />
         )}
         {viewMode === 'original' && sphereMode && !originalMesh && sampleShape && (
@@ -1184,6 +1194,7 @@ export function Viewer3D() {
             radius={sphereRadius}
             keepOutTris={keepOutTris}
             keepInTris={keepInTris}
+            onPlaceHole={placingHoles ? placeHole : undefined}
           />
         )}
         {viewMode === 'original' && <EscapeHolePreview bounds={escapeHolePreviewBounds} params={params} />}
