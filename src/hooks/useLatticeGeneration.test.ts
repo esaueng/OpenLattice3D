@@ -7,6 +7,7 @@ import { DEFAULT_PARAMS, type ValidationResult } from '../types/project';
 import type { WorkerMessage } from '../workers/lattice-worker';
 import type { ValidationWorkerMessage } from '../workers/validation-worker';
 import { useLatticeGeneration, type LatticeGenerationControls } from './useLatticeGeneration';
+import { computeStaleness, selectGenerationInputs } from '../store/useResultStaleness';
 
 type ViewMode = ReturnType<typeof useStore.getState>['viewMode'];
 
@@ -67,20 +68,22 @@ afterEach(() => {
 });
 
 describe('generation inputs and validation lifecycle', () => {
-  const edits = [
+  const modelEdits = [
     ['sample', () => useStore.getState().setSampleShape('cube')],
     ['import', () => useStore.getState().setOriginalMesh(mesh, analyzeMesh(mesh), 'cube.stl')],
-    ['parameters', () => useStore.getState().updateParams({ wallThickness: 2 })],
-    ['seed', () => useStore.getState().reseedGeneration()],
-    ['constraints', () => useStore.getState().toggleKeepIn(1)],
     ['reset', () => useStore.getState().resetProject()],
     ['project restore', () => useStore.getState().restoreProject({
       params: DEFAULT_PARAMS, generationSeed: 12, originalMesh: null, meshInfo: null,
       meshFileName: 'Cube', sampleShape: 'cube', sphereRadius: 25, keepOutTris: [], keepInTris: [],
     })],
   ] as const;
+  const settingEdits = [
+    ['parameters', () => useStore.getState().updateParams({ wallThickness: 2 }), 'wall thickness'],
+    ['seed', () => useStore.getState().reseedGeneration(), 'seed'],
+    ['constraints', () => useStore.getState().toggleKeepIn(1), 'painted faces'],
+  ] as const;
 
-  it.each(edits)('invalidates generation on %s edits and ignores late replies', (_name, edit) => {
+  it.each(modelEdits)('cancels the run when the model changes (%s) and ignores late replies', (_name, edit) => {
     controls.startGeneration();
     const worker = FakeWorker.instances[0];
     edit();
@@ -94,7 +97,7 @@ describe('generation inputs and validation lifecycle', () => {
     expect(FakeWorker.instances).toHaveLength(1);
   });
 
-  it.each(edits)('invalidates pending validation on %s edits', (_name, edit) => {
+  it.each(modelEdits)('terminates pending validation when the model changes (%s)', (_name, edit) => {
     controls.startGeneration();
     const worker = finishGeneration();
     edit();
@@ -102,6 +105,32 @@ describe('generation inputs and validation lifecycle', () => {
     worker.emit({ type: 'result', validation });
     expect(useStore.getState().resultMesh).toBeNull();
     expect(useStore.getState().validation).toBeNull();
+  });
+
+  it.each(settingEdits)('lets the run finish across %s edits and lands the result as out of date', (_name, edit, change) => {
+    controls.startGeneration();
+    const worker = FakeWorker.instances[0];
+    edit();
+    expect(worker.terminated).toBe(false);
+    expect(useStore.getState().generating).toBe(true);
+    const validationWorker = finishGeneration(worker);
+    expect(useStore.getState().resultMesh?.triCount).toBe(mesh.triCount);
+    const state = useStore.getState();
+    expect(computeStaleness(state.resultSnapshot, selectGenerationInputs(state))).toEqual({ stale: true, changes: [change] });
+    validationWorker.emit({ type: 'result', validation });
+    expect(useStore.getState().validation).toEqual(validation);
+  });
+
+  it('keeps the previous result and verdict while a new run is in flight and after cancel', () => {
+    useStore.getState().setResultMesh(mesh);
+    useStore.getState().setValidation(validation);
+    controls.startGeneration();
+    expect(useStore.getState().resultMesh).toBe(mesh);
+    expect(useStore.getState().validation).toEqual(validation);
+    controls.cancelGeneration();
+    expect(useStore.getState().resultMesh).toBe(mesh);
+    expect(useStore.getState().validation).toEqual(validation);
+    expect(useStore.getState().generating).toBe(false);
   });
 
   it('can generate again after invalidation without accepting an older result', () => {
@@ -144,17 +173,27 @@ describe('generation inputs and validation lifecycle', () => {
     expect(useStore.getState().validation).toBeNull();
   });
 
-  it('rejects empty generation results instead of enabling exports', () => {
+  it('rejects empty generation results and keeps the previous result', () => {
     useStore.getState().setResultMesh(mesh);
+    useStore.getState().setValidation(validation);
     controls.startGeneration();
     FakeWorker.instances[0].emit({
       type: 'result', positions: new Float32Array(0), normals: new Float32Array(0), triCount: 0,
     });
     expect(useStore.getState().generating).toBe(false);
-    expect(useStore.getState().resultMesh).toBeNull();
-    expect(useStore.getState().validation).toBeNull();
+    expect(useStore.getState().resultMesh).toBe(mesh);
+    expect(useStore.getState().validation).toEqual(validation);
     expect(useStore.getState().generationError).toMatch(/empty mesh/);
     expect(FakeWorker.instances).toHaveLength(1);
+  });
+
+  it('rejects empty generation results without inventing a result', () => {
+    controls.startGeneration();
+    FakeWorker.instances[0].emit({
+      type: 'result', positions: new Float32Array(0), normals: new Float32Array(0), triCount: 0,
+    });
+    expect(useStore.getState().resultMesh).toBeNull();
+    expect(useStore.getState().generationError).toMatch(/empty mesh/);
   });
 });
 

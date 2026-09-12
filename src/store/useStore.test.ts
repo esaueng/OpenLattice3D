@@ -385,7 +385,7 @@ describe('workspace transitions', () => {
   });
 });
 
-describe('completed result invalidation', () => {
+describe('completed result staleness', () => {
   const mesh = generateCubeMesh(10);
   const validation: ValidationResult = {
     passed: true,
@@ -396,52 +396,64 @@ describe('completed result invalidation', () => {
     warnings: [],
   };
 
+  function staleness() {
+    const state = useStore.getState();
+    return computeStaleness(state.resultSnapshot, selectGenerationInputs(state));
+  }
+
   beforeEach(() => {
     useStore.getState().resetProject();
     useStore.getState().setSampleShape('cube');
-    useStore.getState().setResultMesh(mesh);
+    useStore.getState().setResultMesh(mesh, buildGenerationSnapshot(selectGenerationInputs(useStore.getState())));
     useStore.getState().setValidation(validation);
+    useStore.getState().setViewMode('xray');
   });
 
   const edits = [
-    ['cell size', () => useStore.getState().updateParams({ cellSize: 12 })],
-    ['validation tolerance', () => useStore.getState().updateParams({ toleranceMm: 0.4 })],
-    ['lattice type', () => useStore.getState().setLatticeType('bcc')],
-    ['process preset', () => useStore.getState().setProcessPreset('SLA_DLP')],
-    ['variant', () => useStore.getState().setVariant('implicit_conformal')],
-    ['seed', () => useStore.getState().reseedGeneration()],
-    ['face constraints', () => useStore.getState().toggleKeepIn(1)],
+    ['cell size', () => useStore.getState().updateParams({ cellSize: 12 }), 'cell size'],
+    ['validation tolerance', () => useStore.getState().updateParams({ toleranceMm: 0.4 }), 'tolerance'],
+    ['lattice type', () => useStore.getState().setLatticeType('bcc'), 'lattice type'],
+    ['process preset', () => useStore.getState().setProcessPreset('SLA_DLP'), 'process preset'],
+    ['variant', () => useStore.getState().setVariant('implicit_conformal'), 'generation variant'],
+    ['seed', () => useStore.getState().reseedGeneration(), 'seed'],
+    ['face constraints', () => useStore.getState().toggleKeepIn(1), 'painted faces'],
   ] as const;
 
-  it.each(edits)('removes completed geometry and validation atomically on %s changes', (_name, edit) => {
-    const observed: boolean[] = [];
-    const unsubscribe = useStore.subscribe((state) => {
-      observed.push(state.resultMesh === null && state.validation === null);
-    });
-    try {
-      edit();
-    } finally {
-      unsubscribe();
-    }
-    expect(observed).toEqual([true]);
-    expect(useStore.getState().viewMode).toBe('original');
+  it.each(edits)('keeps completed geometry and its verdict, marked out of date, on %s changes', (_name, edit, change) => {
+    expect(staleness().stale).toBe(false);
+    edit();
+    const state = useStore.getState();
+    expect(state.resultMesh).toBe(mesh);
+    expect(state.validation).toBe(validation);
+    expect(state.viewMode).toBe('xray');
+    expect(staleness().stale).toBe(true);
+    expect(staleness().changes).toContain(change);
   });
 
-  it.each(edits)('does not restore a stale multiview result after %s changes', (_name, edit) => {
+  it.each(edits)('restores a parked multiview result as out of date after %s changes', (_name, edit) => {
     useStore.getState().startDemoRun();
     edit();
     useStore.getState().setDemoModeActive(false);
-    expect(useStore.getState().resultMesh).toBeNull();
-    expect(useStore.getState().validation).toBeNull();
+    expect(useStore.getState().resultMesh).toBe(mesh);
+    expect(useStore.getState().validation).toBe(validation);
     expect(useStore.getState().demoSuspended).toBeNull();
+    expect(staleness().stale).toBe(true);
   });
 
-  it('preserves completed results for unchanged inputs and display-only edits', () => {
+  it('stays current for unchanged inputs and display-only edits', () => {
     useStore.getState().updateParams({ cellSize: 8, materialDensityGPerCm3: 1.2 });
     useStore.getState().setLatticeType('gyroid');
     useStore.getState().setViewerBackground('#112233');
     useStore.getState().setClipPlane({ axis: 'x' });
     expect(useStore.getState().resultMesh).toBe(mesh);
     expect(useStore.getState().validation).toBe(validation);
+    expect(staleness().stale).toBe(false);
+  });
+
+  it('drops a completed result only when the model itself changes', () => {
+    useStore.getState().setSampleShape('torus');
+    expect(useStore.getState().resultMesh).toBeNull();
+    expect(useStore.getState().resultSnapshot).toBeNull();
+    expect(useStore.getState().viewMode).toBe('original');
   });
 });
