@@ -84,7 +84,15 @@ export interface ValidationResult {
     sampled: number;
   };
   manifold: { passed: boolean; details: string };
-  disconnected: { passed: boolean; fragmentCount: number };
+  disconnected: {
+    passed: boolean;
+    /** Separate solid bodies (closed surfaces enclosing positive volume). */
+    fragmentCount: number;
+    /** Enclosed void networks (closed surfaces enclosing negative volume). */
+    voidCount?: number;
+    /** Closed surfaces enclosing no measurable volume. */
+    sliverCount?: number;
+  };
   warnings: string[];
 }
 

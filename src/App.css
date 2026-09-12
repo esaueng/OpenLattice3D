@@ -317,8 +317,13 @@ textarea:focus-visible,
 .workspace {
   min-height: 0;
   display: grid;
-  grid-template-columns: 344px minmax(360px, 1fr);
+  grid-template-columns: 344px minmax(360px, 1fr) 320px;
   background: var(--color-bg);
+}
+
+/* Tabs only exist in the stacked layout; the three-column workbench hides them. */
+.panel-tabs {
+  display: none;
 }
 
 .panel-eyebrow {
@@ -380,9 +385,24 @@ textarea:focus-visible,
   border-bottom: var(--border-thin);
 }
 
-.left-inspection-panel {
-  margin-top: auto;
-  border-top: var(--border-thin);
+.preflight-summary {
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}
+
+.preflight-block {
+  color: #ffd5d8;
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.48);
+}
+
+.import-notice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
 }
 
 .panel-section h3 {
@@ -509,8 +529,6 @@ textarea:focus-visible,
 
 .viewer-shell canvas {
   display: block;
-  width: 100% !important;
-  height: 100% !important;
 }
 
 .boot-panel-placeholder {
@@ -1584,7 +1602,8 @@ textarea:focus-visible,
   grid-template-columns: repeat(4, minmax(0, 1fr));
   grid-template-rows: repeat(3, minmax(0, 1fr));
   gap: 8px;
-  padding: 8px;
+  /* Leave the view-mode bar its own strip so it never covers the bottom row. */
+  padding: 8px 8px 48px;
 }
 
 .demo-window {
@@ -1660,7 +1679,7 @@ textarea:focus-visible,
 
 @media (max-width: 1440px) {
   .workspace {
-    grid-template-columns: 316px minmax(320px, 1fr);
+    grid-template-columns: 316px minmax(320px, 1fr) 300px;
   }
 
   .row label {
@@ -1696,16 +1715,61 @@ textarea:focus-visible,
     min-height: var(--statusbar-h);
   }
 
+  /* Stacked: viewer first, then a tab strip, then one panel at a time. */
   .workspace {
     display: grid;
     grid-template-columns: 1fr;
-    grid-template-rows: auto minmax(360px, 58vh);
+    grid-template-rows: minmax(320px, 55vh) auto auto;
   }
 
-  .tool-panel,
-  .side-panel {
+  .workspace > .viewer-shell {
+    order: 1;
+  }
+
+  .panel-tabs {
+    order: 2;
+    display: flex;
+    gap: 6px;
+    padding: 8px var(--sp-3);
+    background: var(--color-surface);
+    border-top: var(--border-thin);
+    border-bottom: var(--border-thin);
+  }
+
+  .panel-tabs button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 30px;
+    padding: 0 12px;
+    color: var(--color-text-muted);
+    background: transparent;
+    border: 1px solid var(--color-control-border);
+    border-radius: var(--radius-md);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-medium);
+  }
+
+  .panel-tabs button.active {
+    color: var(--color-accent);
+    background: var(--color-accent-dim);
+    border-color: var(--color-accent-border);
+  }
+
+  .workspace > .tool-panel,
+  .workspace > .side-panel {
+    order: 3;
     border: 0;
     border-bottom: var(--border-thin);
+  }
+
+  .workspace[data-active-panel='setup'] > .side-panel,
+  .workspace[data-active-panel='inspect'] > .tool-panel {
+    display: none;
+  }
+
+  .row select {
+    max-width: 360px;
   }
 
   .panel-content {

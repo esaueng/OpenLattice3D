@@ -12,6 +12,8 @@ import {
 } from '../geometry/deterministic-random';
 import type { GenerationSnapshot } from './generation-snapshot';
 import { defaultBrushRadius } from '../utils/model-summary';
+import { analyzeMesh } from '../geometry/mesh-analysis';
+import { closeBoundaryLoops } from '../geometry/mesh-repair';
 
 export type ViewMode = 'original' | 'lattice' | 'cross_section' | 'xray';
 
@@ -36,6 +38,19 @@ export interface ImportNotice {
   level: 'info' | 'warn' | 'error';
   message: string;
   detail?: string;
+  /** Offer unit/scale choices for a suspiciously small or large import. */
+  scalePrompt?: boolean;
+}
+
+/** Fields the polygon surface types (hexagon, triangle) overwrite when selected. */
+const POLYGON_OVERRIDE_KEYS = [
+  'cellSize', 'surfaceDepth', 'strutDiameter', 'minFeatureSize', 'toleranceMm',
+  'exportResolution', 'thinSectionFilter', 'variant', 'surfaceOnly', 'noShell',
+] as const satisfies readonly (keyof LatticeParams)[];
+type PolygonOverrideBackup = Pick<LatticeParams, (typeof POLYGON_OVERRIDE_KEYS)[number]>;
+
+function isPolygonSurfaceType(type: LatticeType): boolean {
+  return type === 'hexagon' || type === 'triangle';
 }
 
 /** Progress of the multiview queue, mirrored from DemoGridView for the statusbar. */
@@ -386,6 +401,8 @@ interface AppState {
   params: LatticeParams;
   generationSeed: number;
   demoParamsByType: DemoParamsByType;
+  /** The user's values before a polygon type overwrote them; restored on switching back. */
+  polygonOverrideBackup: PolygonOverrideBackup | null;
 
   // Generation
   generating: boolean;
@@ -423,6 +440,10 @@ interface AppState {
   setSampleShape: (shape: SampleShape) => void;
   setSphereMode: (radius: number) => void;
   setSelectionMode: (mode: SelectionMode) => void;
+  /** Multiply the imported mesh by a factor (unit fix); masks are kept. */
+  scaleOriginalMesh: (factor: number) => void;
+  /** Fill boundary loops of the imported mesh. Returns boundary edges before and after. */
+  closeMeshHoles: () => { before: number; after: number } | null;
   setBrushRadius: (radius: number) => void;
   beginSelectionStroke: () => void;
   endSelectionStroke: () => void;
@@ -494,7 +515,7 @@ interface SuspendedResult {
   viewMode: ViewMode;
 }
 
-export const useStore = create<AppState>((set) => ({
+export const useStore = create<AppState>((set, get) => ({
   originalMesh: null,
   meshInfo: null,
   meshRepaired: false,
@@ -512,6 +533,7 @@ export const useStore = create<AppState>((set) => ({
   params: persisted?.params ? { ...DEFAULT_PARAMS, ...persisted.params } : { ...DEFAULT_PARAMS },
   generationSeed: persisted?.generationSeed ?? DEFAULT_GENERATION_SEED,
   demoParamsByType: {},
+  polygonOverrideBackup: null,
   generating: false,
   progress: 0,
   progressMessage: '',
@@ -590,15 +612,7 @@ export const useStore = create<AppState>((set) => ({
     viewerCameraState: null,
     demoModeActive: false,
     demoSuspended: null,
-    params: {
-      ...DEFAULT_PARAMS,
-      toleranceMm: 0.2,
-      shellThickness: 1.5,
-      cellSize: 8,
-      wallThickness: 1.0,
-      strutDiameter: 1.0,
-      processPreset: 'SLS_MJF',
-    },
+    // The user's parameters survive a model change; only the model is replaced.
   }),
 
   setSphereMode: (radius) => set({
@@ -635,6 +649,43 @@ export const useStore = create<AppState>((set) => ({
   }),
 
   setSelectionMode: (mode) => set({ selectionMode: mode }),
+
+  scaleOriginalMesh: (factor) => set((s) => {
+    if (!s.originalMesh || !Number.isFinite(factor) || factor <= 0 || factor === 1) return {};
+    const positions = new Float32Array(s.originalMesh.positions.length);
+    for (let i = 0; i < positions.length; i++) positions[i] = s.originalMesh.positions[i] * factor;
+    const mesh: TriangleMesh = { positions, normals: s.originalMesh.normals, triCount: s.originalMesh.triCount };
+    const info = { ...analyzeMesh(mesh), repaired: s.meshInfo?.repaired ?? false };
+    return {
+      originalMesh: mesh,
+      meshInfo: info,
+      brushRadius: s.brushRadius > 0 ? Math.round(s.brushRadius * factor * 10) / 10 : s.brushRadius,
+      resultMesh: null,
+      resultSnapshot: null,
+      validation: null,
+      viewMode: legalViewMode({ ...s, resultMesh: null }, s.viewMode),
+      viewerCameraState: null,
+      demoSuspended: null,
+    };
+  }),
+
+  closeMeshHoles: () => {
+    const s = get();
+    if (!s.originalMesh || !s.meshInfo || s.meshInfo.isWatertight) return null;
+    const closed = closeBoundaryLoops(s.originalMesh).result;
+    const info = { ...analyzeMesh(closed), repaired: true };
+    set({
+      originalMesh: closed,
+      meshInfo: info,
+      meshRepaired: true,
+      resultMesh: null,
+      resultSnapshot: null,
+      validation: null,
+      viewMode: legalViewMode({ ...s, resultMesh: null }, s.viewMode),
+      demoSuspended: null,
+    });
+    return { before: s.meshInfo.boundaryEdges, after: info.boundaryEdges };
+  },
 
   setBrushRadius: (radius) => set({ brushRadius: Math.max(0, radius) }),
 
@@ -742,16 +793,17 @@ export const useStore = create<AppState>((set) => ({
     };
   }),
 
+  // In multiview an edit applies to every tile, so the comparison stays like-for-like.
   updateParams: (partial) => set((s) => {
     const nextParams = { ...s.params, ...partial };
     if (!s.demoModeActive) return { params: nextParams };
-    return {
-      params: nextParams,
-      demoParamsByType: {
-        ...s.demoParamsByType,
-        [nextParams.latticeType]: nextParams,
-      },
-    };
+    const shared: DemoParamsByType = {};
+    for (const type of ALL_LATTICE_TYPES) {
+      const existing = s.demoParamsByType[type] ?? defaultParamsForType(type);
+      shared[type] = { ...existing, ...partial, latticeType: type };
+    }
+    shared[nextParams.latticeType] = nextParams;
+    return { params: nextParams, demoParamsByType: shared };
   }),
 
   // The seed is a generation input, so the current result simply becomes out of
@@ -786,6 +838,24 @@ export const useStore = create<AppState>((set) => ({
         params: nextParams,
         demoParamsByType: nextMap,
       };
+    }
+    const wasPolygon = isPolygonSurfaceType(s.params.latticeType);
+    const willBePolygon = isPolygonSurfaceType(type);
+    // Hexagon <-> Triangle share the surface-mode defaults; keep the user's values.
+    if (willBePolygon && wasPolygon) return { params: { ...s.params, latticeType: type } };
+    if (willBePolygon && !wasPolygon) {
+      const backup = {} as PolygonOverrideBackup;
+      for (const key of POLYGON_OVERRIDE_KEYS) (backup as Record<string, unknown>)[key] = s.params[key];
+      return { params: paramsForType(s.params, type), polygonOverrideBackup: backup };
+    }
+    if (!willBePolygon && wasPolygon && s.polygonOverrideBackup) {
+      // Restore what the polygon defaults overwrote, unless the user changed it since.
+      const polygonDefaults = paramsForType(DEFAULT_PARAMS, s.params.latticeType);
+      const restored: Partial<LatticeParams> = {};
+      for (const key of POLYGON_OVERRIDE_KEYS) {
+        if (s.params[key] === polygonDefaults[key]) (restored as Record<string, unknown>)[key] = s.polygonOverrideBackup[key];
+      }
+      return { params: { ...s.params, ...restored, latticeType: type }, polygonOverrideBackup: null };
     }
     return { params: paramsForType(s.params, type) };
   }),
@@ -895,7 +965,8 @@ export const useStore = create<AppState>((set) => ({
       resultMesh: null,
       resultSnapshot: null,
       validation: null,
-      viewMode: 'lattice',
+      // A cut view is the only one in which twelve shells look different.
+      viewMode: 'cross_section',
       params: activeParams,
       demoParamsByType: nextMap,
     };
@@ -936,6 +1007,7 @@ export const useStore = create<AppState>((set) => ({
     params: { ...project.params },
     generationSeed: normalizeGenerationSeed(project.generationSeed),
     demoParamsByType: {},
+    polygonOverrideBackup: null,
     generating: false,
     progress: 0,
     progressMessage: '',
@@ -982,6 +1054,7 @@ export const useStore = create<AppState>((set) => ({
       params: { ...DEFAULT_PARAMS },
       generationSeed: DEFAULT_GENERATION_SEED,
       demoParamsByType: {},
+    polygonOverrideBackup: null,
       generating: false,
       progress: 0,
       progressMessage: '',
@@ -1042,6 +1115,7 @@ export function hydrateFromSnapshot(snapshot: Partial<PersistedAppState>): Parti
     params: persistedState.params,
     generationSeed: persistedState.generationSeed,
     demoParamsByType: {},
+    polygonOverrideBackup: null,
     generating: false,
     progress: 0,
     progressMessage: '',
