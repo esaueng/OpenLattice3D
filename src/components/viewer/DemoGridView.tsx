@@ -312,10 +312,11 @@ export function DemoGridView({ params, demoParamsByType, generationSeed, runId, 
     };
   }, [generateTiles, keepInTris, keepOutTris, runId, sampleShape, sourceMesh, sphereMode, sphereRadius, stopWorker]);
 
+  // Parameters are shared across tiles; signatures decide which tiles actually rerun.
   useEffect(() => {
     if (!completedInitialRunRef.current || (!sourceMesh && !sphereMode)) return;
-    queueMicrotask(() => generateTiles([selectedLatticeType], params, false));
-  }, [generateTiles, params, selectedLatticeType, sourceMesh, sphereMode]);
+    queueMicrotask(() => generateTiles(DEMO_TILE_ITEMS.map((item) => item.type), params, false));
+  }, [demoParamsByType, generateTiles, params, sourceMesh, sphereMode]);
 
   useEffect(() => () => {
     queuedJobsRef.current.clear();

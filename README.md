@@ -110,9 +110,11 @@ COEP compatibility problems with third-party form resources.
 ### 1. Import a Model
 
 - **Import STL**: load any STL file (binary or ASCII). The model card shows its size,
-  volume, and how many lattice cells fit across the shortest side. Open or non-manifold
-  meshes get their face normals recomputed, and the card says so plainly: the surface
-  stays open and generated geometry from it is unreliable.
+  volume, and how many lattice cells fit across the shortest side. STL carries no units, so
+  a part under 5 mm or over 1 m across gets a prompt to keep it as millimetres or convert
+  (from inches, ×10, ×0.1). Open or non-manifold meshes get their face normals recomputed
+  and the card says so plainly; **Close holes** fills the boundary loops so the mesh can be
+  used. Your lattice parameters survive a model change.
 - **Open JSON**: resume a versioned project with its parameters, embedded source mesh,
   selection masks, validation results, and viewer state. Legacy parameter-only JSON files
   remain supported; malformed or out-of-range values are ignored.
@@ -139,12 +141,20 @@ COEP compatibility problems with third-party form resources.
 ### 3. Compare
 
 Enable "Compare all 12 lattice types" to render every lattice type side-by-side for the
-current model. Tiles show "Queued" until their run starts and the status bar reports how
+current model, opening in the cross-section view so the tiles actually differ. Parameters
+are shared across tiles, so an edit re-queues every tile and the comparison stays
+like-for-like. Tiles show "Queued" until their run starts and the status bar reports how
 many of the twelve are done. Click a tile to make that lattice type active.
+
+Choosing Hexagon or Triangle switches to surface mode with its own recommended values;
+switching back restores what you had unless you changed it in the meantime.
 
 ### 4. Generate
 
-Click "Generate Lattice" (or press `G`). Computation runs in background Web Workers with
+The **Before you generate** block under the parameters shows the grid, voxel size, and
+rough triangle, time and memory estimates for the current settings, plus any sanity
+warnings (cell larger than the part, shell filling it, walls thinner than two voxels, open
+mesh). Click "Generate Lattice" (or press `G`). Computation runs in background Web Workers with
 progress, time estimates, and run logs (drawer in the status bar). Hotkeys `1`–`4` switch
 viewer modes (Original, Solid, Cross-Section, X-Ray); `H` resets the viewport. Selection edits
 support `Ctrl/Cmd+Z` and `Ctrl/Cmd+Shift+Z` undo/redo.
@@ -159,7 +169,10 @@ After generation, the validation panel shows:
 - **Outer Deviation**: max deviation from original surface vs. tolerance
 - **Min Thickness**: thinnest feature measured (must exceed min feature size)
 - **Manifold/Watertight**: printability check
-- **Connectivity**: disconnected fragment detection
+- **Connectivity**: counts separate solid bodies by the volume each closed surface encloses.
+  A shell around a sheet lattice legitimately has one outer skin plus one inner surface per
+  enclosed void network; those are reported as enclosed voids (with a trapped-powder warning
+  when escape holes are off), not as fragments. Zero-volume slivers are listed as negligible.
 
 ### 6. Export
 
@@ -168,7 +181,8 @@ After generation, the validation panel shows:
 - **Export OBJ**: indexed Wavefront OBJ geometry (the format does not declare units)
 - **Save Project JSON**: a resumable project with its source geometry and workspace state
 
-Export lives in the setup panel below the validation results.
+Validation, part statistics and export live in the **Inspect** column on the right; below
+1120 px the viewer sits on top and Setup / Inspect become tabs.
 
 Every project carries a versioned 32-bit generation seed. Repeated generation with the same
 project, seed, application version, parameters, and resolution is byte-deterministic even when
