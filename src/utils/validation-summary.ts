@@ -33,8 +33,18 @@ export function summarizeValidation(
   hasResult: boolean,
   generating: boolean,
   stale = false,
+  validationProgress: number | null = null,
 ): ValidationSummary {
   const base = { failedCount: 0, totalCount: VALIDATION_CHECK_COUNT, failedLabels: [] as string[] };
+
+  if (!generating && hasResult && validationProgress !== null) {
+    return {
+      ...base,
+      tone: 'running',
+      label: `Checks: validating ${Math.round(validationProgress * 100)}%`,
+      detail: 'Measuring thickness, deviation and topology of the new result.',
+    };
+  }
 
   if (generating) {
     return {

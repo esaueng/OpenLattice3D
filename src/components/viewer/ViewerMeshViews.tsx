@@ -14,7 +14,7 @@ import {
   generateSphereMesh,
   generateTorusMesh,
 } from '../../geometry/mesh-analysis';
-import { escapeHoleCenters, shouldApplyEscapeHoles } from '../../geometry/escape-holes';
+import { resolveEscapeHoleCenters, shouldApplyEscapeHoles } from '../../geometry/escape-holes';
 import { computeTriangleCentroids, facesWithinBrush } from '../../geometry/constraint-painting';
 import {
   generateCylinderDisplayMesh,
@@ -31,13 +31,40 @@ const SAMPLE_CYLINDER_EDGE_CENTERS: ReadonlyArray<readonly [number, number, numb
 ];
 const PROCEDURAL_EDGE_COLOR = '#101820';
 
+const boundsCache = new WeakMap<MarchingCubesResult, THREE.Box3>();
+
+/** Bounds of a result, computed once per result object (several views ask for it). */
 export function resultBounds(result: MarchingCubesResult): THREE.Box3 {
+  const cached = boundsCache.get(result);
+  if (cached) return cached.clone();
   const box = new THREE.Box3();
   const point = new THREE.Vector3();
   for (let i = 0; i < result.positions.length; i += 3) {
     box.expandByPoint(point.set(result.positions[i], result.positions[i + 1], result.positions[i + 2]));
   }
-  return box;
+  boundsCache.set(result, box);
+  return box.clone();
+}
+
+// One display geometry per result, shared by the Solid, Cross-Section and X-Ray
+// views so switching views or toggling overlays never rebuilds 100 MB of
+// attributes. Kept for the last few results; older ones are disposed.
+const GEOMETRY_CACHE_LIMIT = 3;
+const geometryCache: Array<{ result: MarchingCubesResult; geometry: THREE.BufferGeometry }> = [];
+
+export function resultGeometry(result: MarchingCubesResult): THREE.BufferGeometry {
+  const hit = geometryCache.find((entry) => entry.result === result);
+  if (hit) return hit.geometry;
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(result.positions, 3));
+  if (result.vertexNormals && result.vertexNormals.length >= result.triCount * 9) {
+    geometry.setAttribute('normal', new THREE.BufferAttribute(result.vertexNormals, 3));
+  } else {
+    geometry.computeVertexNormals();
+  }
+  geometryCache.push({ result, geometry });
+  while (geometryCache.length > GEOMETRY_CACHE_LIMIT) geometryCache.shift()!.geometry.dispose();
+  return geometry;
 }
 
 export function meshBounds(mesh: TriangleMesh): THREE.Box3 {
@@ -76,7 +103,14 @@ export function EscapeHolePreview({ bounds, params }: { bounds: THREE.Box3; para
       min: [bounds.min.x, bounds.min.y, bounds.min.z] as [number, number, number],
       max: [bounds.max.x, bounds.max.y, bounds.max.z] as [number, number, number],
     };
-    const centers = escapeHoleCenters(modelBounds, params.escapeHoleAxis, params.escapeHoleCount);
+    // Clicked points carry the surface height; the preview cylinder spans the whole part.
+    const axisIndex = 'xyz'.indexOf(params.escapeHoleAxis);
+    const axisMid = (modelBounds.min[axisIndex] + modelBounds.max[axisIndex]) / 2;
+    const centers = resolveEscapeHoleCenters(modelBounds, params).map((center) => {
+      const snapped: [number, number, number] = [center[0], center[1], center[2]];
+      snapped[axisIndex] = axisMid;
+      return snapped;
+    });
     const length = params.escapeHoleAxis === 'x'
       ? bounds.max.x - bounds.min.x
       : params.escapeHoleAxis === 'y'
@@ -199,9 +233,11 @@ function faceColors(
 function CylinderSampleView({
   keepOutTris,
   keepInTris,
+  onPlaceHole,
 }: {
   keepOutTris: Set<number>;
   keepInTris: Set<number>;
+  onPlaceHole?: (point: [number, number, number]) => void;
 }) {
   const radialSegments = useAdaptiveRadialSegments(
     SAMPLE_CYLINDER_RADIUS_MM,
@@ -266,7 +302,7 @@ function CylinderSampleView({
 
   return (
     <group>
-      <mesh geometry={surfaceGeometry}>
+      <mesh geometry={surfaceGeometry} onPointerDown={placeHoleHandler(onPlaceHole)}>
         <meshPhongMaterial
           vertexColors
           side={THREE.DoubleSide}
@@ -291,6 +327,7 @@ export function OriginalMeshView({
   onStrokeStart,
   onStrokeEnd,
   onPaintingChange,
+  onPlaceHole,
 }: {
   mesh: TriangleMesh;
   keepOutTris: Set<number>;
@@ -301,6 +338,7 @@ export function OriginalMeshView({
   onStrokeStart: () => void;
   onStrokeEnd: () => void;
   onPaintingChange: (painting: boolean) => void;
+  onPlaceHole?: (point: [number, number, number]) => void;
 }) {
   const paintingRef = useRef(false);
   const geometry = useDisposable(useMemo(() => {
@@ -342,12 +380,17 @@ export function OriginalMeshView({
 
   const handlePointerDown = useCallback((event: ThreeEvent<PointerEvent>) => {
     if (selectionMode === 'none') return;
+    if (selectionMode === 'place_hole') {
+      event.stopPropagation();
+      onPlaceHole?.([event.point.x, event.point.y, event.point.z]);
+      return;
+    }
     event.stopPropagation();
     paintingRef.current = true;
     onStrokeStart();
     onPaintingChange(true);
     paintAt(event);
-  }, [onPaintingChange, onStrokeStart, paintAt, selectionMode]);
+  }, [onPaintingChange, onPlaceHole, onStrokeStart, paintAt, selectionMode]);
 
   const handlePointerMove = useCallback((event: ThreeEvent<PointerEvent>) => {
     if (!paintingRef.current) return;
@@ -377,11 +420,21 @@ export function OriginalMeshView({
   );
 }
 
-function GenericSampleMeshView({ shape, radius, keepOutTris, keepInTris }: {
+/** Pointer handler that reports a click on the model as a hole position, when placing. */
+function placeHoleHandler(onPlaceHole?: (point: [number, number, number]) => void) {
+  if (!onPlaceHole) return undefined;
+  return (event: ThreeEvent<PointerEvent>) => {
+    event.stopPropagation();
+    onPlaceHole([event.point.x, event.point.y, event.point.z]);
+  };
+}
+
+function GenericSampleMeshView({ shape, radius, keepOutTris, keepInTris, onPlaceHole }: {
   shape: SampleShape;
   radius: number;
   keepOutTris: Set<number>;
   keepInTris: Set<number>;
+  onPlaceHole?: (point: [number, number, number]) => void;
 }) {
   const projectedRadius = shape === 'torus' ? 28 : shape === 'capsule' ? 12 : radius;
   const radialSegments = Math.min(useAdaptiveRadialSegments(projectedRadius), 128);
@@ -407,7 +460,7 @@ function GenericSampleMeshView({ shape, radius, keepOutTris, keepInTris }: {
   }, [keepInTris, keepOutTris, minorSegments, radialSegments, radius, shape]));
 
   return (
-    <mesh geometry={geometry}>
+    <mesh geometry={geometry} onPointerDown={placeHoleHandler(onPlaceHole)}>
       <meshPhongMaterial vertexColors side={THREE.DoubleSide} />
     </mesh>
   );
@@ -418,20 +471,16 @@ export function SampleMeshView(props: {
   radius: number;
   keepOutTris: Set<number>;
   keepInTris: Set<number>;
+  onPlaceHole?: (point: [number, number, number]) => void;
 }) {
   if (props.shape === 'cylinder') {
-    return <CylinderSampleView keepOutTris={props.keepOutTris} keepInTris={props.keepInTris} />;
+    return <CylinderSampleView keepOutTris={props.keepOutTris} keepInTris={props.keepInTris} onPlaceHole={props.onPlaceHole} />;
   }
   return <GenericSampleMeshView {...props} />;
 }
 
 export function ResultMeshView({ result }: { result: MarchingCubesResult }) {
-  const geometry = useDisposable(useMemo(() => {
-    const next = new THREE.BufferGeometry();
-    next.setAttribute('position', new THREE.BufferAttribute(result.positions, 3));
-    next.computeVertexNormals();
-    return next;
-  }, [result]));
+  const geometry = useMemo(() => resultGeometry(result), [result]);
   return <mesh geometry={geometry}><meshPhongMaterial color="#4a9eff" side={THREE.DoubleSide} /></mesh>;
 }
 
@@ -450,12 +499,7 @@ function clipPlane(clip: ClipPlaneState, bounds: THREE.Box3): THREE.Plane {
 }
 
 export function CrossSectionView({ result, clip }: { result: MarchingCubesResult; clip: ClipPlaneState }) {
-  const geometry = useDisposable(useMemo(() => {
-    const next = new THREE.BufferGeometry();
-    next.setAttribute('position', new THREE.BufferAttribute(result.positions, 3));
-    next.computeVertexNormals();
-    return next;
-  }, [result]));
+  const geometry = useMemo(() => resultGeometry(result), [result]);
   const bounds = useMemo(() => resultBounds(result), [result]);
   const plane = useMemo(() => clipPlane(clip, bounds), [bounds, clip]);
   return (
@@ -466,12 +510,7 @@ export function CrossSectionView({ result, clip }: { result: MarchingCubesResult
 }
 
 export function XRayView({ result }: { result: MarchingCubesResult }) {
-  const geometry = useDisposable(useMemo(() => {
-    const next = new THREE.BufferGeometry();
-    next.setAttribute('position', new THREE.BufferAttribute(result.positions, 3));
-    next.computeVertexNormals();
-    return next;
-  }, [result]));
+  const geometry = useMemo(() => resultGeometry(result), [result]);
   const material = useDisposable(useMemo(() => new THREE.MeshBasicMaterial({
     color: '#3388cc',
     side: THREE.DoubleSide,
@@ -481,6 +520,25 @@ export function XRayView({ result }: { result: MarchingCubesResult }) {
     blending: THREE.AdditiveBlending,
   }), []));
   return <mesh geometry={geometry} material={material} />;
+}
+
+/** Red dots where the validation measured a feature thinner than the target. */
+export function ThinFeatureMarkers({ points, bounds }: { points: number[]; bounds: THREE.Box3 }) {
+  const geometry = useDisposable(useMemo(() => {
+    const next = new THREE.BufferGeometry();
+    next.setAttribute('position', new THREE.BufferAttribute(new Float32Array(points), 3));
+    return next;
+  }, [points]));
+  const size = Math.max(0.4, bounds.getSize(new THREE.Vector3()).length() * 0.012);
+  const material = useDisposable(useMemo(() => new THREE.PointsMaterial({
+    color: '#ff5a5f',
+    size,
+    sizeAttenuation: true,
+    depthTest: false,
+    transparent: true,
+    opacity: 0.95,
+  }), [size]));
+  return <points geometry={geometry} material={material} renderOrder={10} />;
 }
 
 export function normalizeDemoResult(result: MarchingCubesResult, targetRadius: number): MarchingCubesResult {

@@ -46,6 +46,8 @@ const PARAM_LABELS: Record<keyof LatticeParams, string> = {
   escapeHoleDiameter: 'hole diameter',
   escapeHoleCount: 'hole count',
   escapeHoleAxis: 'hole axis',
+  escapeHolePlacement: 'hole placement',
+  escapeHoleManualCenters: 'hole positions',
   materialDensityGPerCm3: 'material density',
   toleranceMm: 'tolerance',
 };

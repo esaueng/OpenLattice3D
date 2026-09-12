@@ -62,6 +62,13 @@ export interface DemoQueueState {
 
 const IDLE_DEMO_QUEUE: DemoQueueState = { done: 0, running: 0, total: 0 };
 
+export interface PinnedRun {
+  resultMesh: MarchingCubesResult;
+  snapshot: GenerationSnapshot | null;
+  validation: ValidationResult | null;
+  pinnedAt: number;
+}
+
 export interface ViewerCameraState {
   position: ViewerVector3;
   target: ViewerVector3;
@@ -91,10 +98,18 @@ interface PersistedState {
 
 type DemoParamsByType = Partial<Record<LatticeType, LatticeParams>>;
 
+/** One undo step: painted faces plus the parameters and seed at that moment. */
 type SelectionSnapshot = {
   keepOut: number[];
   keepIn: number[];
+  params: LatticeParams;
+  generationSeed: number;
+  /** Set for parameter edits so rapid edits of one field collapse into one step. */
+  key?: string;
+  time?: number;
 };
+
+const HISTORY_COALESCE_MS = 1200;
 
 const MAX_SELECTION_HISTORY = 100;
 
@@ -112,16 +127,30 @@ export interface ProjectRestoreState {
   viewerBackground?: string;
 }
 
-function currentSelection(state: Pick<AppState, 'keepOutTris' | 'keepInTris'>): SelectionSnapshot {
+function currentSelection(
+  state: Pick<AppState, 'keepOutTris' | 'keepInTris' | 'params' | 'generationSeed'>,
+): SelectionSnapshot {
   return {
     keepOut: Array.from(state.keepOutTris),
     keepIn: Array.from(state.keepInTris),
+    params: state.params,
+    generationSeed: state.generationSeed,
   };
 }
 
-function pushSelectionHistory(state: AppState): Pick<AppState, 'selectionUndo' | 'selectionRedo'> {
+/**
+ * Record the state before an edit. With a key, consecutive edits of the same
+ * field within a short window keep the first snapshot instead of stacking one
+ * per keystroke.
+ */
+function pushSelectionHistory(state: AppState, key?: string): Pick<AppState, 'selectionUndo' | 'selectionRedo'> {
+  const now = Date.now();
+  const last = state.selectionUndo[state.selectionUndo.length - 1];
+  if (key && last?.key === key && last.time !== undefined && now - last.time < HISTORY_COALESCE_MS) {
+    return { selectionUndo: [...state.selectionUndo.slice(0, -1), { ...last, time: now }], selectionRedo: [] };
+  }
   return {
-    selectionUndo: [...state.selectionUndo.slice(-(MAX_SELECTION_HISTORY - 1)), currentSelection(state)],
+    selectionUndo: [...state.selectionUndo.slice(-(MAX_SELECTION_HISTORY - 1)), { ...currentSelection(state), key, time: now }],
     selectionRedo: [],
   };
 }
@@ -132,6 +161,15 @@ function selectionsMatch(a: SelectionSnapshot, b: SelectionSnapshot): boolean {
   const keepIn = new Set(a.keepIn);
   return b.keepOut.every((triangle) => keepOut.has(triangle))
     && b.keepIn.every((triangle) => keepIn.has(triangle));
+}
+
+function restoreSnapshot(snapshot: SelectionSnapshot): Pick<AppState, 'keepOutTris' | 'keepInTris' | 'params' | 'generationSeed'> {
+  return {
+    keepOutTris: new Set(snapshot.keepOut),
+    keepInTris: new Set(snapshot.keepIn),
+    params: snapshot.params,
+    generationSeed: snapshot.generationSeed,
+  };
 }
 
 interface PersistedAppState extends PersistedState {
@@ -414,6 +452,14 @@ interface AppState {
   resultSnapshot: GenerationSnapshot | null;
   importNotice: ImportNotice | null;
   demoQueue: DemoQueueState;
+  /** 0..1 while the validation worker runs, null otherwise. */
+  validationProgress: number | null;
+  /** Draw the validation's thin-feature samples over the result. */
+  showThinFeatures: boolean;
+  /** A result kept for side-by-side comparison with later runs. */
+  pinnedRun: PinnedRun | null;
+  /** Show the pinned run in the result views instead of the current one. */
+  showPinnedRun: boolean;
 
   // Validation
   validation: ValidationResult | null;
@@ -464,6 +510,11 @@ interface AppState {
   setGenerationError: (message: string | null) => void;
   setResultMesh: (result: MarchingCubesResult | null, snapshot?: GenerationSnapshot | null) => void;
   setImportNotice: (notice: ImportNotice | null) => void;
+  setValidationProgress: (progress: number | null) => void;
+  setShowThinFeatures: (show: boolean) => void;
+  pinCurrentResult: () => void;
+  unpinResult: () => void;
+  setShowPinnedRun: (show: boolean) => void;
   setDemoQueue: (queue: DemoQueueState) => void;
   setValidation: (validation: ValidationResult | null) => void;
   setViewMode: (mode: ViewMode) => void;
@@ -542,6 +593,10 @@ export const useStore = create<AppState>((set, get) => ({
   resultSnapshot: null,
   importNotice: null,
   demoQueue: IDLE_DEMO_QUEUE,
+  validationProgress: null,
+  showThinFeatures: false,
+  pinnedRun: null,
+  showPinnedRun: false,
   validation: null,
   // A persisted result view has no result to show after a reload.
   viewMode: legalViewMode(
@@ -582,6 +637,8 @@ export const useStore = create<AppState>((set, get) => ({
     viewerCameraState: null,
     demoModeActive: false,
     demoSuspended: null,
+    pinnedRun: null,
+    showPinnedRun: false,
     demoQueue: IDLE_DEMO_QUEUE,
   })),
 
@@ -612,6 +669,8 @@ export const useStore = create<AppState>((set, get) => ({
     viewerCameraState: null,
     demoModeActive: false,
     demoSuspended: null,
+    pinnedRun: null,
+    showPinnedRun: false,
     // The user's parameters survive a model change; only the model is replaced.
   }),
 
@@ -775,8 +834,7 @@ export const useStore = create<AppState>((set, get) => ({
     const previous = s.selectionUndo[s.selectionUndo.length - 1];
     if (!previous) return {};
     return {
-      keepOutTris: new Set(previous.keepOut),
-      keepInTris: new Set(previous.keepIn),
+      ...restoreSnapshot(previous),
       selectionUndo: s.selectionUndo.slice(0, -1),
       selectionRedo: [...s.selectionRedo, currentSelection(s)].slice(-MAX_SELECTION_HISTORY),
     };
@@ -786,8 +844,7 @@ export const useStore = create<AppState>((set, get) => ({
     const next = s.selectionRedo[s.selectionRedo.length - 1];
     if (!next) return {};
     return {
-      keepOutTris: new Set(next.keepOut),
-      keepInTris: new Set(next.keepIn),
+      ...restoreSnapshot(next),
       selectionUndo: [...s.selectionUndo, currentSelection(s)].slice(-MAX_SELECTION_HISTORY),
       selectionRedo: s.selectionRedo.slice(0, -1),
     };
@@ -796,14 +853,17 @@ export const useStore = create<AppState>((set, get) => ({
   // In multiview an edit applies to every tile, so the comparison stays like-for-like.
   updateParams: (partial) => set((s) => {
     const nextParams = { ...s.params, ...partial };
-    if (!s.demoModeActive) return { params: nextParams };
+    const keys = Object.keys(partial) as (keyof LatticeParams)[];
+    if (keys.every((key) => s.params[key] === partial[key])) return {};
+    const history = pushSelectionHistory(s, `params:${keys.join(',')}`);
+    if (!s.demoModeActive) return { params: nextParams, ...history };
     const shared: DemoParamsByType = {};
     for (const type of ALL_LATTICE_TYPES) {
       const existing = s.demoParamsByType[type] ?? defaultParamsForType(type);
       shared[type] = { ...existing, ...partial, latticeType: type };
     }
     shared[nextParams.latticeType] = nextParams;
-    return { params: nextParams, demoParamsByType: shared };
+    return { params: nextParams, demoParamsByType: shared, ...history };
   }),
 
   // The seed is a generation input, so the current result simply becomes out of
@@ -811,13 +871,16 @@ export const useStore = create<AppState>((set, get) => ({
   reseedGeneration: () => set((state) => ({
     generationSeed: createReseedValue(state.generationSeed),
     generationError: null,
+    ...pushSelectionHistory(state),
   })),
 
   setProcessPreset: (preset) => set((s) => {
     const nextParams = { ...s.params, processPreset: preset, ...PROCESS_DEFAULTS[preset] };
-    if (!s.demoModeActive) return { params: nextParams };
+    const history = pushSelectionHistory(s);
+    if (!s.demoModeActive) return { params: nextParams, ...history };
     return {
       params: nextParams,
+      ...history,
       demoParamsByType: {
         ...s.demoParamsByType,
         [nextParams.latticeType]: nextParams,
@@ -826,6 +889,8 @@ export const useStore = create<AppState>((set, get) => ({
   }),
 
   setLatticeType: (type) => set((s) => {
+    if (type === s.params.latticeType) return {};
+    const history = pushSelectionHistory(s);
     if (s.demoModeActive) {
       const currentType = s.params.latticeType;
       const nextMap: DemoParamsByType = {
@@ -837,16 +902,17 @@ export const useStore = create<AppState>((set, get) => ({
       return {
         params: nextParams,
         demoParamsByType: nextMap,
+        ...history,
       };
     }
     const wasPolygon = isPolygonSurfaceType(s.params.latticeType);
     const willBePolygon = isPolygonSurfaceType(type);
     // Hexagon <-> Triangle share the surface-mode defaults; keep the user's values.
-    if (willBePolygon && wasPolygon) return { params: { ...s.params, latticeType: type } };
+    if (willBePolygon && wasPolygon) return { params: { ...s.params, latticeType: type }, ...history };
     if (willBePolygon && !wasPolygon) {
       const backup = {} as PolygonOverrideBackup;
       for (const key of POLYGON_OVERRIDE_KEYS) (backup as Record<string, unknown>)[key] = s.params[key];
-      return { params: paramsForType(s.params, type), polygonOverrideBackup: backup };
+      return { params: paramsForType(s.params, type), polygonOverrideBackup: backup, ...history };
     }
     if (!willBePolygon && wasPolygon && s.polygonOverrideBackup) {
       // Restore what the polygon defaults overwrote, unless the user changed it since.
@@ -855,9 +921,9 @@ export const useStore = create<AppState>((set, get) => ({
       for (const key of POLYGON_OVERRIDE_KEYS) {
         if (s.params[key] === polygonDefaults[key]) (restored as Record<string, unknown>)[key] = s.polygonOverrideBackup[key];
       }
-      return { params: { ...s.params, ...restored, latticeType: type }, polygonOverrideBackup: null };
+      return { params: { ...s.params, ...restored, latticeType: type }, polygonOverrideBackup: null, ...history };
     }
-    return { params: paramsForType(s.params, type) };
+    return { params: paramsForType(s.params, type), ...history };
   }),
 
   setVariant: (variant) => set((s) => {
@@ -867,9 +933,11 @@ export const useStore = create<AppState>((set, get) => ({
       surfaceOnly: variant === 'implicit_conformal' ? true : s.params.surfaceOnly,
       noShell: variant === 'implicit_conformal' ? false : s.params.noShell,
     };
-    if (!s.demoModeActive) return { params: nextParams };
+    const history = pushSelectionHistory(s);
+    if (!s.demoModeActive) return { params: nextParams, ...history };
     return {
       params: nextParams,
+      ...history,
       demoParamsByType: {
         ...s.demoParamsByType,
         [nextParams.latticeType]: nextParams,
@@ -904,9 +972,23 @@ export const useStore = create<AppState>((set, get) => ({
     };
   }),
 
-  setValidation: (validation) => set({ validation }),
+  setValidation: (validation) => set({ validation, validationProgress: null }),
 
   setImportNotice: (notice) => set({ importNotice: notice }),
+
+  setValidationProgress: (progress) => set({ validationProgress: progress }),
+
+  setShowThinFeatures: (show) => set({ showThinFeatures: show }),
+
+  pinCurrentResult: () => set((s) => (
+    s.resultMesh
+      ? { pinnedRun: { resultMesh: s.resultMesh, snapshot: s.resultSnapshot, validation: s.validation, pinnedAt: Date.now() }, showPinnedRun: false }
+      : {}
+  )),
+
+  unpinResult: () => set({ pinnedRun: null, showPinnedRun: false }),
+
+  setShowPinnedRun: (show) => set((s) => ({ showPinnedRun: show && s.pinnedRun !== null })),
 
   setDemoQueue: (queue) => set((s) => (
     s.demoQueue.done === queue.done && s.demoQueue.running === queue.running && s.demoQueue.total === queue.total
@@ -980,9 +1062,11 @@ export const useStore = create<AppState>((set, get) => ({
   // reads as out of date until the next run.
   importParams: (imported) => set((s) => {
     const nextParams = { ...s.params, ...imported };
-    if (!s.demoModeActive) return { params: nextParams };
+    const history = pushSelectionHistory(s);
+    if (!s.demoModeActive) return { params: nextParams, ...history };
     return {
       params: nextParams,
+      ...history,
       demoParamsByType: {
         ...s.demoParamsByType,
         [nextParams.latticeType]: nextParams,
@@ -1016,6 +1100,10 @@ export const useStore = create<AppState>((set, get) => ({
     resultSnapshot: null,
     importNotice: null,
     demoQueue: IDLE_DEMO_QUEUE,
+    validationProgress: null,
+    showThinFeatures: false,
+    pinnedRun: null,
+    showPinnedRun: false,
     validation: null,
     viewMode: 'original',
     clipPlane: project.clipPlane ?? { axis: 'z', position: 0.5, flipped: false },
@@ -1044,6 +1132,10 @@ export const useStore = create<AppState>((set, get) => ({
       resultSnapshot: null,
       importNotice: null,
       demoQueue: IDLE_DEMO_QUEUE,
+      validationProgress: null,
+      showThinFeatures: false,
+      pinnedRun: null,
+      showPinnedRun: false,
       validation: null,
       keepOutTris: new Set(),
       keepInTris: new Set(),
@@ -1124,6 +1216,10 @@ export function hydrateFromSnapshot(snapshot: Partial<PersistedAppState>): Parti
     resultSnapshot: null,
     importNotice: null,
     demoQueue: IDLE_DEMO_QUEUE,
+    validationProgress: null,
+    showThinFeatures: false,
+    pinnedRun: null,
+    showPinnedRun: false,
     validation: null,
     // Nothing generated survives a reload, so a result view would show an empty canvas.
     viewMode: legalViewMode(
