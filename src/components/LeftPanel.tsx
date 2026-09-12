@@ -18,15 +18,30 @@ import { SAMPLE_SHAPE_INFO } from '../store/useStore';
 import type { LatticeGenerationControls } from '../hooks/useLatticeGeneration';
 import { NumericInput } from './NumericInput';
 import { RightPanel } from './RightPanel';
+import { ExportControls } from './ExportControls';
 import { formatGenerationSeed } from '../geometry/deterministic-random';
+import {
+  cellsAcrossShortestSide,
+  describeMeshCondition,
+  formatDimensions,
+  formatVolume,
+  modelExtents,
+} from '../utils/model-summary';
+import { useResultStaleness } from '../store/useResultStaleness';
 
 type LeftPanelProps = {
   generationControls: LatticeGenerationControls;
 };
 
+function errorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message.replace(/^Error:\s*/, '');
+  return String(err);
+}
+
 export function LeftPanel({ generationControls }: LeftPanelProps) {
   const { startGeneration, cancelGeneration } = generationControls;
   const store = useStore();
+  const staleness = useResultStaleness();
   const fileRef = useRef<HTMLInputElement>(null);
   const jsonRef = useRef<HTMLInputElement>(null);
   const [clearAllArmed, setClearAllArmed] = useState(false);
@@ -39,6 +54,8 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
 
   const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    // Reset the input so the same file can be re-imported after a fix.
+    e.target.value = '';
     if (!file) return;
     store.addLog(`Importing ${file.name}...`);
     try {
@@ -47,7 +64,7 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
       assertFileSizeWithinBudget(file.size, DEFAULT_IMPORT_LIMITS.maxStlBytes, `STL file ${file.name}`);
       const buffer = await file.arrayBuffer();
       let mesh = parseSTL(buffer);
-      const info = analyzeMesh(mesh);
+      let info = analyzeMesh(mesh);
       store.addLog(`Loaded: ${info.triangleCount} triangles, ${info.vertexCount} vertices`);
       store.addLog(`Bounding box: [${info.boundingBox.min.map(v => v.toFixed(1))}] to [${info.boundingBox.max.map(v => v.toFixed(1))}]`);
 
@@ -74,29 +91,50 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
         store.addLog('Mesh is not closed - skipped orientation check', 'warn');
       }
 
+      const dims = formatDimensions(modelExtents(info, null, 25)!.size);
       if (!info.isManifold || !info.isWatertight) {
-        store.addLog('Mesh is not watertight/manifold. Attempting repair...', 'warn');
+        // "Repair" here only recomputes face normals; the surface stays open.
         const { mesh: repairedMesh, repaired } = repairMesh(mesh);
-        store.setOriginalMesh(repairedMesh, { ...info, repaired }, file.name);
+        info = { ...info, repaired };
+        const condition = describeMeshCondition(info);
+        store.setOriginalMesh(repairedMesh, info, file.name);
         store.setMeshRepaired(repaired);
-        store.addLog('Basic repair applied (normals recalculated)', 'warn');
+        store.addLog(condition.message, 'warn');
+        store.setImportNotice({
+          level: 'warn',
+          message: `Imported ${file.name} (${dims}), but it is not closed.`,
+          detail: condition.message,
+        });
       } else {
-        store.addLog('Mesh is watertight and manifold', 'info');
+        store.addLog('Mesh is closed and manifold', 'info');
         store.setOriginalMesh(mesh, info, file.name);
+        store.setImportNotice({
+          level: 'info',
+          message: `Imported ${file.name}: ${info.triangleCount.toLocaleString()} triangles, ${dims}.`,
+        });
       }
     } catch (err) {
-      store.addLog(`Import failed: ${err}`, 'error');
+      const message = errorMessage(err);
+      store.addLog(`Import failed: ${message}`, 'error');
+      store.setImportNotice({
+        level: 'error',
+        message: `Could not import ${file.name}: ${message}`,
+        detail: store.originalMesh || store.sphereMode ? 'The previous model is still loaded.' : undefined,
+      });
     }
   }, [store]);
 
   const handleSampleShape = useCallback((shape: SampleShape) => {
     store.setSampleShape(shape);
+    store.setImportNotice(null);
     store.addLog(`Sample loaded: ${SAMPLE_SHAPE_INFO[shape].fileName}`);
     store.addLog('Pre-configured: tolerance 0.2mm, shell 1.5mm, cell 8mm, SLS/MJF');
   }, [store]);
 
   const handleJsonImport = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    // Reset the input so the same file can be re-imported
+    e.target.value = '';
     if (!file) return;
     try {
       assertFileSizeWithinBudget(file.size, DEFAULT_IMPORT_LIMITS.maxProjectBytes, `Project file ${file.name}`);
@@ -104,22 +142,38 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
       const data: unknown = JSON.parse(text);
       const parsed = parseProjectFile(data);
       for (const warning of parsed.warnings) store.addLog(`JSON import: ${warning}`, 'warn');
+      const detail = parsed.warnings.length > 0 ? parsed.warnings.join(' ') : undefined;
       if (parsed.kind === 'project') {
         store.restoreProject(parsed);
         store.addLog(`Restored project from ${file.name}; regenerate to refresh geometry and validation`);
+        store.setImportNotice({
+          level: parsed.warnings.length > 0 ? 'warn' : 'info',
+          message: `Opened project ${file.name}. Generate to rebuild the lattice.`,
+          detail,
+        });
       } else {
         if (parsed.accepted.length === 0) {
           store.addLog('JSON import: no valid parameters found', 'error');
+          store.setImportNotice({
+            level: 'error',
+            message: `${file.name} contains no usable lattice parameters.`,
+            detail,
+          });
           return;
         }
         store.importParams(parsed.params);
         store.addLog(`Imported ${parsed.accepted.length} parameter(s) from ${file.name}`);
+        store.setImportNotice({
+          level: parsed.warnings.length > 0 ? 'warn' : 'info',
+          message: `Applied ${parsed.accepted.length} parameter(s) from ${file.name}: ${parsed.accepted.join(', ')}.`,
+          detail,
+        });
       }
     } catch (err) {
-      store.addLog(`JSON import failed: ${err}`, 'error');
+      const message = errorMessage(err);
+      store.addLog(`JSON import failed: ${message}`, 'error');
+      store.setImportNotice({ level: 'error', message: `Could not read ${file.name}: ${message}` });
     }
-    // Reset the input so the same file can be re-imported
-    e.target.value = '';
   }, [store]);
 
   const handleReset = useCallback(() => {
@@ -146,12 +200,20 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
 
   const handleReseed = useCallback(() => {
     store.reseedGeneration();
-    store.addLog(`Generation reseeded to ${formatGenerationSeed(useStore.getState().generationSeed)}`);
+    store.addLog(`Generation reseeded to ${formatGenerationSeed(useStore.getState().generationSeed)}; regenerate to apply`);
   }, [store]);
 
   const hasModel = store.originalMesh || store.sphereMode;
   const hasModelOrDemo = hasModel || store.demoModeActive;
   const generateDisabledByMultiview = store.demoModeActive;
+  const extents = modelExtents(store.meshInfo, store.sampleShape, store.sphereRadius);
+  const cellsAcross = extents ? cellsAcrossShortestSide(extents.size, store.params.cellSize) : 0;
+  const meshCondition = store.meshInfo ? describeMeshCondition(store.meshInfo) : null;
+  const generateLabel = generateDisabledByMultiview
+    ? 'Generate (close compare first)'
+    : staleness.stale
+      ? 'Regenerate Lattice'
+      : 'Generate Lattice';
 
   return (
     <div className="panel-content">
@@ -182,8 +244,8 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
           <button className="btn btn-primary" title="Upload an STL mesh to generate a lattice from." onClick={() => fileRef.current?.click()}>
             Import STL
           </button>
-          <button className="btn btn-small" title="Import saved lattice parameters from a JSON file." onClick={() => jsonRef.current?.click()}>
-            Import JSON
+          <button className="btn btn-small" title="Open a saved project, or apply a parameter-only JSON file." onClick={() => jsonRef.current?.click()}>
+            Open JSON
           </button>
           <button
             className={`btn btn-small btn-danger ${clearAllArmed ? 'btn-danger-confirm' : ''}`}
@@ -196,6 +258,26 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
             {clearAllArmed ? 'Confirm' : 'Clear All'}
           </button>
         </div>
+        {store.importNotice && (
+          <div
+            className={`import-notice level-${store.importNotice.level}`}
+            role={store.importNotice.level === 'error' ? 'alert' : 'status'}
+          >
+            <div className="import-notice-body">
+              <div>{store.importNotice.message}</div>
+              {store.importNotice.detail && <div className="import-notice-detail">{store.importNotice.detail}</div>}
+            </div>
+            <button
+              type="button"
+              className="import-notice-dismiss"
+              aria-label="Dismiss import message"
+              title="Dismiss"
+              onClick={() => store.setImportNotice(null)}
+            >
+              ×
+            </button>
+          </div>
+        )}
         <div className="row" style={{ marginTop: '8px' }}>
           <label htmlFor="sample-part">Sample Part:</label>
           <select
@@ -212,22 +294,30 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
         </div>
 
 
-        {store.meshInfo && (
+        {store.meshInfo && extents && (
           <div className="info-block">
             <div><strong>File:</strong> {store.meshFileName}</div>
+            <div><strong>Size:</strong> {formatDimensions(extents.size)}</div>
+            <div><strong>Volume:</strong> {formatVolume(extents.volumeMm3)}</div>
             <div><strong>Triangles:</strong> {store.meshInfo.triangleCount.toLocaleString()}</div>
             <div><strong>Vertices:</strong> {store.meshInfo.vertexCount.toLocaleString()}</div>
             <div><strong>Watertight:</strong> {store.meshInfo.isWatertight ? 'Yes' : 'No'}</div>
             <div><strong>Manifold:</strong> {store.meshInfo.isManifold ? 'Yes' : 'No'}</div>
-            {store.meshInfo.repaired && (
-              <div className="warning">Mesh was auto-repaired</div>
+            {hasModelOrDemo && (
+              <div><strong>Cells across:</strong> {cellsAcross.toFixed(1)} at {store.params.cellSize} mm on the shortest side</div>
+            )}
+            {meshCondition?.level === 'warn' && (
+              <div className="warning">{meshCondition.message}</div>
             )}
           </div>
         )}
-        {store.sphereMode && store.sampleShape && (
+        {store.sphereMode && store.sampleShape && extents && (
           <div className="info-block">
             <div><strong>Model:</strong> {store.meshFileName}</div>
+            <div><strong>Size:</strong> {formatDimensions(extents.size)}</div>
+            <div><strong>Volume:</strong> {formatVolume(extents.volumeMm3)}</div>
             <div><strong>Mode:</strong> Procedural (analytic SDF)</div>
+            <div><strong>Cells across:</strong> {cellsAcross.toFixed(1)} at {store.params.cellSize} mm on the shortest side</div>
           </div>
         )}
       </section>
@@ -250,6 +340,13 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
             >
               Keep-in
             </button>
+            <button
+              className={`btn btn-small ${store.selectionMode === 'erase' ? 'btn-primary' : ''}`}
+              onClick={() => store.setSelectionMode('erase')}
+              title="Remove keep-out and keep-in marks under the brush."
+            >
+              Erase
+            </button>
             <button className="btn btn-small" onClick={() => store.setSelectionMode('none')}>Stop</button>
           </div>
           <div className="row" style={{ gap: '6px', flexWrap: 'wrap', marginTop: '6px' }}>
@@ -270,7 +367,11 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
                   onCommit={(next) => store.setBrushRadius(next)}
                 />
               </div>
-              <div className="info-block">Drag on the imported model to paint. Hold Alt to erase.</div>
+              <div className="info-block">
+                {store.selectionMode === 'erase'
+                  ? 'Drag on the imported model to remove marks.'
+                  : 'Drag on the imported model to paint. Erase, or hold Alt while dragging, removes marks.'}
+              </div>
             </>
           )}
           {store.keepInTris.size > 0 && (
@@ -292,17 +393,17 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
       )}
 
       <section className="panel-section">
-        <h3>Multiview</h3>
+        <h3>Compare</h3>
         <div className="row checkbox-row multiview-toggle-row">
           <label className="multiview-toggle-label">
             <input
               type="checkbox"
-              title="Show all 12 lattice viewers in a tiled multiview layout for the current model."
+              title="Show all 12 lattice types side by side for the current model."
               checked={store.demoModeActive}
               onChange={(e) => toggleDemoGrid(e.target.checked)}
               disabled={store.generating}
             />
-            Show all 12 windows
+            Compare all 12 lattice types
           </label>
         </div>
       </section>
@@ -410,15 +511,17 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
 
           {!store.params.noShell && !store.params.surfaceOnly && store.params.variant === 'shell_core' && (
             <>
-              <div className="row">
-                <label htmlFor="escape-holes">Escape Holes:</label>
-                <input
-                  id="escape-holes"
-                  type="checkbox"
-                  title="Subtract through-holes along the selected build axis to release trapped powder or resin."
-                  checked={store.params.escapeHoles}
-                  onChange={(e) => store.updateParams({ escapeHoles: e.target.checked })}
-                />
+              <div className="row checkbox-row param-toggle-row">
+                <label className="param-toggle-label">
+                  <input
+                    id="escape-holes"
+                    type="checkbox"
+                    title="Subtract through-holes along the selected build axis to release trapped powder or resin."
+                    checked={store.params.escapeHoles}
+                    onChange={(e) => store.updateParams({ escapeHoles: e.target.checked })}
+                  />
+                  Escape holes (drain trapped powder or resin)
+                </label>
               </div>
               {store.params.escapeHoles && (
                 <>
@@ -555,12 +658,31 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
             </select>
           </div>
 
-
+          <details className="advanced-section">
+            <summary>Advanced</summary>
+            <div className="row" style={{ gap: '6px', flexWrap: 'wrap', marginTop: '8px' }}>
+              <span className="seed-readout" title="Persisted deterministic generation seed">
+                Seed {formatGenerationSeed(store.generationSeed)}
+              </span>
+              <button
+                className="btn btn-small"
+                title="Choose a new seed for stochastic lattices. The current result stays until you regenerate."
+                onClick={handleReseed}
+                disabled={store.generating}
+              >
+                Reseed
+              </button>
+            </div>
+            <p className="info-text" style={{ marginTop: '6px' }}>
+              Runs with the same seed and settings are byte-identical. Reseeding only changes Voronoi and Spinodal results.
+            </p>
+          </details>
         </section>
       )}
 
       <div className="left-inspection-panel">
         <RightPanel />
+        <ExportControls />
       </div>
 
       {/* Generate: last child so the pinned bar un-sticks at max scroll instead
@@ -572,41 +694,31 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
           aria-label="Generate lattice"
           tabIndex={-1}
         >
-          <div className="row" style={{ gap: '6px', flexWrap: 'wrap' }}>
-            <span title="Persisted deterministic generation seed">
-              Seed {formatGenerationSeed(store.generationSeed)}
-            </span>
-            <button
-              className="btn btn-small"
-              title="Choose a new explicit seed and invalidate the current generated result."
-              onClick={handleReseed}
-              disabled={store.generating}
-            >
-              Reseed
-            </button>
-          </div>
           {store.generationError && (
             <div className="warning" role="alert">{store.generationError}</div>
           )}
           {!store.generating ? (
             <button
-              className={`btn btn-primary btn-large ${generateDisabledByMultiview ? 'btn-generate-muted' : ''}`}
+              className="btn btn-primary btn-large"
               title={generateDisabledByMultiview
-                ? 'Disabled while 12-window multiview is enabled.'
-                : 'Start generating the lattice with the current settings (G).'}
+                ? 'Close the comparison grid to generate a full-resolution lattice.'
+                : staleness.stale
+                  ? `Settings changed (${staleness.changes.join(', ') || 'settings'}). Regenerate with the current settings (G).`
+                  : 'Start generating the lattice with the current settings (G).'}
               onClick={startGeneration}
               disabled={generateDisabledByMultiview}
-              aria-disabled={generateDisabledByMultiview}
             >
-              Generate Lattice
+              {generateLabel}
             </button>
           ) : (
             <div className="generate-progress-track">
-              <div className="progress-text">{store.progressMessage}</div>
+              <div className="progress-line">
+                <span className="progress-text" title={store.progressMessage}>{store.progressMessage}</span>
+                <button className="btn btn-small" title="Stop the current generation job. The previous result stays." onClick={cancelGeneration}>Cancel</button>
+              </div>
               <div className="progress-bar">
                 <div className="progress-fill" style={{ width: `${store.progress * 100}%` }} />
               </div>
-              <button className="btn btn-small" title="Stop the current generation job." onClick={cancelGeneration}>Cancel</button>
             </div>
           )}
         </section>

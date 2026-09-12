@@ -16,6 +16,8 @@ import {
   type GenerationResultResponse,
   type GenerationWorkerLike,
 } from './generation-worker-controller';
+import { buildGenerationSnapshot } from '../store/generation-snapshot';
+import { selectGenerationInputs } from '../store/useResultStaleness';
 
 function proceduralMaxSpan(shape: SampleShape | null, sphereRadius: number): number {
   switch (shape) {
@@ -97,6 +99,9 @@ export function useLatticeGeneration(): LatticeGenerationControls {
     if (!canGenerate()) return;
     stopRun();
 
+    // Freeze the inputs now so the result can be compared with later edits.
+    const snapshot = buildGenerationSnapshot(selectGenerationInputs(store));
+
     void requestNotificationPermission();
     store.setGenerating(true);
     store.setProgress(0, 'Starting...');
@@ -106,8 +111,8 @@ export function useLatticeGeneration(): LatticeGenerationControls {
     const browserFeatureSummary = formatBrowserFeatureFlags(browserFeatures);
     store.addLog(`Browser features: ${browserFeatureSummary}`, browserFeatures.threadedWasmReady ? 'info' : 'warn');
     console.info('[OpenLattice3D] Browser features at generation start', browserFeatures);
-    // Clear previous result without changing viewMode - view is preserved for regeneration.
-    store.setValidation(null);
+    // The previous result and its verdict stay on screen (marked as running in the
+    // statusbar) until the new mesh lands, so a cancelled run loses nothing.
     store.setDemoModeActive(false);
 
     const runId = generationRunRef.current;
@@ -272,7 +277,7 @@ export function useLatticeGeneration(): LatticeGenerationControls {
           positions: resp.positions,
           normals: resp.normals,
           triCount: resp.triCount,
-        });
+        }, snapshot);
         current.setGenerating(false);
         current.setProgress(1, 'Complete');
         current.setGenerationError(null);
