@@ -130,7 +130,10 @@ COEP compatibility problems with third-party form resources.
 - **Shell / No shell / Surface only**: keep an outer shell of given thickness, generate a pure
   lattice, or confine the lattice to a band near the surface (hollow inside).
 - **Escape Holes**: subtract one or more axis-aligned drainage cylinders from shell-bearing
-  parts, with a live translucent placement preview.
+  parts, with a live translucent placement preview. Placement is automatic (spread over the
+  part) or **Click on the model**: choose "Place holes", click the part in the Original view,
+  and a hole runs along the build axis through each click; the list under the control removes
+  individual holes.
 - **Wall Thickness / Strut Diameter**: lattice feature size depending on type.
 - **Min Feature Size & Tolerance**: validation targets.
 - **Export Resolution**: marching cubes sampling density (1–10).

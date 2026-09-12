@@ -757,6 +757,20 @@ textarea:focus-visible,
   margin-top: 0;
 }
 
+.hole-list {
+  display: grid;
+  gap: 4px;
+}
+
+.hole-list-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+}
+
 /* Seed and reseed live behind a disclosure; most runs never need them. */
 .advanced-section {
   margin-top: var(--sp-3);

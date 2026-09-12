@@ -18,7 +18,9 @@ export type LatticeType =
 
 export type SampleShape = 'sphere' | 'cube' | 'cylinder' | 'torus' | 'capsule';
 
-export type SelectionMode = 'keep_out' | 'keep_in' | 'erase' | 'none';
+export type SelectionMode = 'keep_out' | 'keep_in' | 'erase' | 'place_hole' | 'none';
+
+export type EscapeHolePlacement = 'auto' | 'manual';
 
 export type GenerationVariant = 'shell_core' | 'implicit_conformal';
 
@@ -69,6 +71,10 @@ export interface LatticeParams {
   escapeHoleDiameter: number;  // mm
   escapeHoleCount: number;
   escapeHoleAxis: EscapeHoleAxis;
+  /** 'auto' spreads escapeHoleCount holes over the part; 'manual' uses clicked points. */
+  escapeHolePlacement: EscapeHolePlacement;
+  /** World-space xyz triples of clicked hole positions; the cylinder runs along the axis through each. */
+  escapeHoleManualCenters: number[];
   materialDensityGPerCm3: number; // 0 disables mass estimation
   toleranceMm: number;         // outer deviation tolerance
 }
@@ -130,6 +136,8 @@ export const DEFAULT_PARAMS: LatticeParams = {
   escapeHoleDiameter: 5.0,
   escapeHoleCount: 2,
   escapeHoleAxis: 'z',
+  escapeHolePlacement: 'auto',
+  escapeHoleManualCenters: [],
   materialDensityGPerCm3: 0,
   toleranceMm: 0.2,
 };
@@ -149,6 +157,14 @@ const LATTICE_TYPES: readonly LatticeType[] = [
 const VARIANTS: readonly GenerationVariant[] = ['shell_core', 'implicit_conformal'];
 const PROCESS_PRESETS: readonly ProcessPreset[] = ['SLS_MJF', 'SLA_DLP', 'FDM'];
 const ESCAPE_HOLE_AXES: readonly EscapeHoleAxis[] = ['x', 'y', 'z'];
+const ESCAPE_HOLE_PLACEMENTS: readonly EscapeHolePlacement[] = ['auto', 'manual'];
+const MAX_MANUAL_HOLES = 100;
+
+const isManualCenterList: ParamValidator = (value) =>
+  Array.isArray(value)
+  && value.length % 3 === 0
+  && value.length <= MAX_MANUAL_HOLES * 3
+  && value.every((entry) => typeof entry === 'number' && Number.isFinite(entry) && Math.abs(entry) <= 1_000_000);
 
 type ParamValidator = (value: unknown) => boolean;
 
@@ -185,6 +201,8 @@ const PARAM_VALIDATORS: Record<keyof LatticeParams, ParamValidator> = {
   escapeHoleDiameter: isFiniteNumberIn(0.1, 100),
   escapeHoleCount: isFiniteNumberIn(0, 100),
   escapeHoleAxis: isOneOf(ESCAPE_HOLE_AXES),
+  escapeHolePlacement: isOneOf(ESCAPE_HOLE_PLACEMENTS),
+  escapeHoleManualCenters: isManualCenterList,
   materialDensityGPerCm3: isFiniteNumberIn(0, 100),
   toleranceMm: isFiniteNumberIn(0.001, 50),
 };

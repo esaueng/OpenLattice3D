@@ -115,3 +115,20 @@ describe('escape-hole channels', () => {
     expect(crossings[1] - crossings[0]).toBeCloseTo(diameter, 6);
   });
 });
+
+describe('manual hole placement', () => {
+  it('uses clicked centres instead of the automatic spread and needs at least one', async () => {
+    const { DEFAULT_PARAMS } = await import('../types/project');
+    const { resolveEscapeHoleCenters, shouldApplyEscapeHoles } = await import('./escape-holes');
+    const bounds = { min: [-10, -10, -10] as [number, number, number], max: [10, 10, 10] as [number, number, number] };
+    const manualEmpty = { ...DEFAULT_PARAMS, escapeHoles: true, escapeHolePlacement: 'manual' as const, escapeHoleManualCenters: [] };
+    expect(shouldApplyEscapeHoles(manualEmpty)).toBe(false);
+
+    const manual = { ...manualEmpty, escapeHoleManualCenters: [1, 2, 3, -4, 5, 6] };
+    expect(shouldApplyEscapeHoles(manual)).toBe(true);
+    expect(resolveEscapeHoleCenters(bounds, manual)).toEqual([[1, 2, 3], [-4, 5, 6]]);
+
+    const auto = { ...DEFAULT_PARAMS, escapeHoles: true, escapeHoleCount: 2 };
+    expect(resolveEscapeHoleCenters(bounds, auto)).toHaveLength(2);
+  });
+});
