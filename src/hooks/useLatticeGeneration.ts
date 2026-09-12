@@ -77,6 +77,7 @@ export function useLatticeGeneration(): LatticeGenerationControls {
     workerController.dispose();
     validationWorkerRef.current?.terminate();
     validationWorkerRef.current = null;
+    if (useStore.getState().validationProgress !== null) useStore.getState().setValidationProgress(null);
   }, [releaseModelSubscription, workerController]);
 
   const canGenerate = useCallback(() => {
@@ -195,8 +196,9 @@ export function useLatticeGeneration(): LatticeGenerationControls {
 
       const validationMsg: ValidationWorkerMessage = {
         type: 'validate',
-        positions: new Float32Array(resp.positions),
-        normals: new Float32Array(resp.normals),
+        // The worker ships an independent copy; copying 100 MB here stalled the UI.
+        positions: resp.validationPositions ?? new Float32Array(resp.positions),
+        normals: resp.validationNormals ?? new Float32Array(resp.normals),
         triCount: resp.triCount,
         params: store.params,
         generationSeed,
@@ -223,6 +225,7 @@ export function useLatticeGeneration(): LatticeGenerationControls {
         const validationResp = event.data;
         if (validationResp.type === 'progress') {
           if (validationResp.message) current.addLog(validationResp.message);
+          if (typeof validationResp.progress === 'number') current.setValidationProgress(validationResp.progress);
         } else if (validationResp.type === 'result') {
           releaseModelSubscription();
           current.setValidation(validationResp.validation || null);
@@ -231,6 +234,7 @@ export function useLatticeGeneration(): LatticeGenerationControls {
           if (validationWorkerRef.current === validationWorker) validationWorkerRef.current = null;
         } else if (validationResp.type === 'error') {
           releaseModelSubscription();
+          current.setValidationProgress(null);
           current.addLog(`Validation error: ${validationResp.message}`, 'error');
           validationWorker.terminate();
           if (validationWorkerRef.current === validationWorker) validationWorkerRef.current = null;
@@ -240,6 +244,7 @@ export function useLatticeGeneration(): LatticeGenerationControls {
         if (generationRunRef.current !== runId || validationWorkerRef.current !== validationWorker) return;
         const current = useStore.getState();
         releaseModelSubscription();
+        current.setValidationProgress(null);
         current.addLog('Validation worker failed', 'error');
         validationWorker.terminate();
         if (validationWorkerRef.current === validationWorker) validationWorkerRef.current = null;
@@ -253,6 +258,7 @@ export function useLatticeGeneration(): LatticeGenerationControls {
         validationWorkerRef.current = null;
       };
 
+      useStore.getState().setValidationProgress(0);
       validationWorker.postMessage(validationMsg, buildValidationTransferList(validationMsg));
     };
 
@@ -278,6 +284,7 @@ export function useLatticeGeneration(): LatticeGenerationControls {
           positions: resp.positions,
           normals: resp.normals,
           triCount: resp.triCount,
+          vertexNormals: resp.vertexNormals,
         }, snapshot);
         current.setGenerating(false);
         current.setProgress(1, 'Complete');

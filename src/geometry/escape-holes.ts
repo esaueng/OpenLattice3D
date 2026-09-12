@@ -5,8 +5,11 @@ import type { BoundingBox, EscapeHoleAxis, LatticeParams } from '../types/projec
 export type SampledSdf = ((x: number, y: number, z: number) => number) & Partial<GridSdfSampler>;
 
 export function shouldApplyEscapeHoles(params: LatticeParams): boolean {
+  const hasHoles = params.escapeHolePlacement === 'manual'
+    ? params.escapeHoleManualCenters.length >= 3
+    : params.escapeHoleCount > 0;
   return params.escapeHoles
-    && params.escapeHoleCount > 0
+    && hasHoles
     && params.escapeHoleDiameter > 0
     && params.variant === 'shell_core'
     && !params.noShell
@@ -54,6 +57,17 @@ export function escapeHoleCenters(
   return points;
 }
 
+/** Hole centres for the current parameters: clicked points in manual mode, spread otherwise. */
+export function resolveEscapeHoleCenters(bounds: BoundingBox, params: LatticeParams): Vec3[] {
+  if (params.escapeHolePlacement === 'manual') {
+    const centers: Vec3[] = [];
+    const list = params.escapeHoleManualCenters;
+    for (let i = 0; i + 2 < list.length; i += 3) centers.push([list[i], list[i + 1], list[i + 2]]);
+    return centers;
+  }
+  return escapeHoleCenters(bounds, params.escapeHoleAxis, params.escapeHoleCount);
+}
+
 /** Signed distance to the union of infinite cylinders along the build axis. */
 export function escapeHolesSdf(
   x: number,
@@ -83,11 +97,7 @@ export function cutEscapeHolesInField(
   params: LatticeParams,
 ): void {
   if (!shouldApplyEscapeHoles(params)) return;
-  const centers = escapeHoleCenters(
-    bounds,
-    params.escapeHoleAxis,
-    params.escapeHoleCount,
-  );
+  const centers = resolveEscapeHoleCenters(bounds, params);
   const [nx, ny, nz] = cells;
   const dx = (bounds.max[0] - bounds.min[0]) / nx;
   const dy = (bounds.max[1] - bounds.min[1]) / ny;
@@ -120,7 +130,7 @@ export function withEscapeHoles(
   bounds: BoundingBox | null,
 ): SampledSdf {
   if (!bounds || !shouldApplyEscapeHoles(params)) return base;
-  const centers = escapeHoleCenters(bounds, params.escapeHoleAxis, params.escapeHoleCount);
+  const centers = resolveEscapeHoleCenters(bounds, params);
   const result: SampledSdf = (x, y, z) => Math.max(
     base(x, y, z),
     -escapeHolesSdf(x, y, z, centers, params.escapeHoleAxis, params.escapeHoleDiameter),
