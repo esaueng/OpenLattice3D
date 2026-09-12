@@ -109,6 +109,8 @@ const CORNER_Z = new Uint8Array([0, 0, 0, 0, 1, 1, 1, 1]);
 const TRI_COUNTS = new Uint8Array(TRI_TABLE.map((triList) => triList.length / 3));
 
 export interface MarchingCubesResult {
+  /** Optional per-vertex normals (9 per triangle) prepared off the main thread for display. */
+  vertexNormals?: Float32Array;
   positions: Float32Array;
   normals: Float32Array;
   triCount: number;
