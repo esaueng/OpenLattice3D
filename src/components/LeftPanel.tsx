@@ -597,15 +597,83 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
                     />
                   </div>
                   <div className="row">
-                    <label htmlFor="escape-hole-count">Hole Count:</label>
-                    <NumericInput
-                      id="escape-hole-count"
-                      title="Number of powder-escape holes."
-                      value={store.params.escapeHoleCount}
-                      min={1} max={100} step={1}
-                      onCommit={(next) => store.updateParams({ escapeHoleCount: Math.trunc(next) })}
-                    />
+                    <label htmlFor="escape-hole-placement">Placement:</label>
+                    <select
+                      id="escape-hole-placement"
+                      title="Spread holes automatically, or click the model where each hole should pass through."
+                      value={store.params.escapeHolePlacement}
+                      onChange={(e) => {
+                        const placement = e.target.value as 'auto' | 'manual';
+                        store.updateParams({ escapeHolePlacement: placement });
+                        if (placement !== 'manual' && store.selectionMode === 'place_hole') store.setSelectionMode('none');
+                      }}
+                    >
+                      <option value="auto">Automatic</option>
+                      <option value="manual">Click on the model</option>
+                    </select>
                   </div>
+                  {store.params.escapeHolePlacement === 'auto' ? (
+                    <div className="row">
+                      <label htmlFor="escape-hole-count">Hole Count:</label>
+                      <NumericInput
+                        id="escape-hole-count"
+                        title="Number of powder-escape holes."
+                        value={store.params.escapeHoleCount}
+                        min={1} max={100} step={1}
+                        onCommit={(next) => store.updateParams({ escapeHoleCount: Math.trunc(next) })}
+                      />
+                    </div>
+                  ) : (
+                    <>
+                      <div className="row" style={{ gap: '6px', flexWrap: 'wrap' }}>
+                        <button
+                          type="button"
+                          className={`btn btn-small ${store.selectionMode === 'place_hole' ? 'btn-primary' : ''}`}
+                          aria-pressed={store.selectionMode === 'place_hole'}
+                          title="Then click the model in the Original view; a hole runs along the build axis through each click."
+                          onClick={() => {
+                            const placing = store.selectionMode === 'place_hole';
+                            store.setSelectionMode(placing ? 'none' : 'place_hole');
+                            if (!placing) store.setViewMode('original');
+                          }}
+                        >
+                          {store.selectionMode === 'place_hole' ? 'Placing… (click model)' : 'Place holes'}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-small"
+                          disabled={store.params.escapeHoleManualCenters.length === 0}
+                          onClick={() => store.updateParams({ escapeHoleManualCenters: [] })}
+                        >
+                          Clear holes
+                        </button>
+                      </div>
+                      <div className="info-block hole-list">
+                        {store.params.escapeHoleManualCenters.length === 0
+                          ? 'No holes placed yet. Each click adds one hole; the cylinder runs along the build axis through that point.'
+                          : Array.from({ length: store.params.escapeHoleManualCenters.length / 3 }, (_, index) => {
+                            const c = store.params.escapeHoleManualCenters;
+                            const [x, y, z] = [c[index * 3], c[index * 3 + 1], c[index * 3 + 2]];
+                            return (
+                              <div key={index} className="hole-list-row">
+                                <span>Hole {index + 1}: {x.toFixed(1)}, {y.toFixed(1)}, {z.toFixed(1)} mm</span>
+                                <button
+                                  type="button"
+                                  className="import-notice-dismiss"
+                                  aria-label={`Remove hole ${index + 1}`}
+                                  title="Remove this hole"
+                                  onClick={() => store.updateParams({
+                                    escapeHoleManualCenters: c.filter((_, i) => Math.floor(i / 3) !== index),
+                                  })}
+                                >
+                                  ×
+                                </button>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    </>
+                  )}
                 </>
               )}
             </>

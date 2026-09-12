@@ -14,7 +14,7 @@ import {
   generateSphereMesh,
   generateTorusMesh,
 } from '../../geometry/mesh-analysis';
-import { escapeHoleCenters, shouldApplyEscapeHoles } from '../../geometry/escape-holes';
+import { resolveEscapeHoleCenters, shouldApplyEscapeHoles } from '../../geometry/escape-holes';
 import { computeTriangleCentroids, facesWithinBrush } from '../../geometry/constraint-painting';
 import {
   generateCylinderDisplayMesh,
@@ -103,7 +103,14 @@ export function EscapeHolePreview({ bounds, params }: { bounds: THREE.Box3; para
       min: [bounds.min.x, bounds.min.y, bounds.min.z] as [number, number, number],
       max: [bounds.max.x, bounds.max.y, bounds.max.z] as [number, number, number],
     };
-    const centers = escapeHoleCenters(modelBounds, params.escapeHoleAxis, params.escapeHoleCount);
+    // Clicked points carry the surface height; the preview cylinder spans the whole part.
+    const axisIndex = 'xyz'.indexOf(params.escapeHoleAxis);
+    const axisMid = (modelBounds.min[axisIndex] + modelBounds.max[axisIndex]) / 2;
+    const centers = resolveEscapeHoleCenters(modelBounds, params).map((center) => {
+      const snapped: [number, number, number] = [center[0], center[1], center[2]];
+      snapped[axisIndex] = axisMid;
+      return snapped;
+    });
     const length = params.escapeHoleAxis === 'x'
       ? bounds.max.x - bounds.min.x
       : params.escapeHoleAxis === 'y'
@@ -226,9 +233,11 @@ function faceColors(
 function CylinderSampleView({
   keepOutTris,
   keepInTris,
+  onPlaceHole,
 }: {
   keepOutTris: Set<number>;
   keepInTris: Set<number>;
+  onPlaceHole?: (point: [number, number, number]) => void;
 }) {
   const radialSegments = useAdaptiveRadialSegments(
     SAMPLE_CYLINDER_RADIUS_MM,
@@ -293,7 +302,7 @@ function CylinderSampleView({
 
   return (
     <group>
-      <mesh geometry={surfaceGeometry}>
+      <mesh geometry={surfaceGeometry} onPointerDown={placeHoleHandler(onPlaceHole)}>
         <meshPhongMaterial
           vertexColors
           side={THREE.DoubleSide}
@@ -318,6 +327,7 @@ export function OriginalMeshView({
   onStrokeStart,
   onStrokeEnd,
   onPaintingChange,
+  onPlaceHole,
 }: {
   mesh: TriangleMesh;
   keepOutTris: Set<number>;
@@ -328,6 +338,7 @@ export function OriginalMeshView({
   onStrokeStart: () => void;
   onStrokeEnd: () => void;
   onPaintingChange: (painting: boolean) => void;
+  onPlaceHole?: (point: [number, number, number]) => void;
 }) {
   const paintingRef = useRef(false);
   const geometry = useDisposable(useMemo(() => {
@@ -369,12 +380,17 @@ export function OriginalMeshView({
 
   const handlePointerDown = useCallback((event: ThreeEvent<PointerEvent>) => {
     if (selectionMode === 'none') return;
+    if (selectionMode === 'place_hole') {
+      event.stopPropagation();
+      onPlaceHole?.([event.point.x, event.point.y, event.point.z]);
+      return;
+    }
     event.stopPropagation();
     paintingRef.current = true;
     onStrokeStart();
     onPaintingChange(true);
     paintAt(event);
-  }, [onPaintingChange, onStrokeStart, paintAt, selectionMode]);
+  }, [onPaintingChange, onPlaceHole, onStrokeStart, paintAt, selectionMode]);
 
   const handlePointerMove = useCallback((event: ThreeEvent<PointerEvent>) => {
     if (!paintingRef.current) return;
@@ -404,11 +420,21 @@ export function OriginalMeshView({
   );
 }
 
-function GenericSampleMeshView({ shape, radius, keepOutTris, keepInTris }: {
+/** Pointer handler that reports a click on the model as a hole position, when placing. */
+function placeHoleHandler(onPlaceHole?: (point: [number, number, number]) => void) {
+  if (!onPlaceHole) return undefined;
+  return (event: ThreeEvent<PointerEvent>) => {
+    event.stopPropagation();
+    onPlaceHole([event.point.x, event.point.y, event.point.z]);
+  };
+}
+
+function GenericSampleMeshView({ shape, radius, keepOutTris, keepInTris, onPlaceHole }: {
   shape: SampleShape;
   radius: number;
   keepOutTris: Set<number>;
   keepInTris: Set<number>;
+  onPlaceHole?: (point: [number, number, number]) => void;
 }) {
   const projectedRadius = shape === 'torus' ? 28 : shape === 'capsule' ? 12 : radius;
   const radialSegments = Math.min(useAdaptiveRadialSegments(projectedRadius), 128);
@@ -434,7 +460,7 @@ function GenericSampleMeshView({ shape, radius, keepOutTris, keepInTris }: {
   }, [keepInTris, keepOutTris, minorSegments, radialSegments, radius, shape]));
 
   return (
-    <mesh geometry={geometry}>
+    <mesh geometry={geometry} onPointerDown={placeHoleHandler(onPlaceHole)}>
       <meshPhongMaterial vertexColors side={THREE.DoubleSide} />
     </mesh>
   );
@@ -445,9 +471,10 @@ export function SampleMeshView(props: {
   radius: number;
   keepOutTris: Set<number>;
   keepInTris: Set<number>;
+  onPlaceHole?: (point: [number, number, number]) => void;
 }) {
   if (props.shape === 'cylinder') {
-    return <CylinderSampleView keepOutTris={props.keepOutTris} keepInTris={props.keepInTris} />;
+    return <CylinderSampleView keepOutTris={props.keepOutTris} keepInTris={props.keepInTris} onPlaceHole={props.onPlaceHole} />;
   }
   return <GenericSampleMeshView {...props} />;
 }

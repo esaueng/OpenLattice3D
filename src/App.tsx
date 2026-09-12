@@ -143,7 +143,7 @@ function HydratedApp() {
       ? `Comparing ${demoQueue.done} of ${demoQueue.total}`
       : hasModel ? 'Ready' : 'Idle';
   const viewportMode = demoModeActive ? 'Multiview' : hasModel ? 'Interactive' : 'Standby';
-  const showFaceLegend = keepOutTris.size > 0 || keepInTris.size > 0 || selectionMode !== 'none';
+  const showFaceLegend = keepOutTris.size > 0 || keepInTris.size > 0 || (selectionMode !== 'none' && selectionMode !== 'place_hole');
   const checks = summarizeValidation(validation, Boolean(resultMesh), generating, staleness.stale, validationProgress);
 
   // The statusbar verdict is a route to the detail, not another dead readout.
