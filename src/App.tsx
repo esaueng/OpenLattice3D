@@ -2,6 +2,7 @@ import { forwardRef, useCallback, useEffect, useLayoutEffect, useRef, useState, 
 import { LeftPanel } from './components/LeftPanel';
 import { Viewer3D } from './components/Viewer3D';
 import { ViewerControls } from './components/ViewerControls';
+import { InspectPanel } from './components/InspectPanel';
 import { useStore, type LogEntry } from './store/useStore';
 import { registerNotificationServiceWorker } from './utils/notifications';
 import { escapeControlCharacters } from './utils/text-safety';
@@ -95,6 +96,8 @@ function HydratedApp() {
   const generationControls = useLatticeGeneration();
   const staleness = useResultStaleness();
   const [logsExpanded, setLogsExpanded] = useState(false);
+  // Below the stacked breakpoint only one panel shows at a time, beneath the viewer.
+  const [activePanel, setActivePanel] = useState<'setup' | 'inspect'>('setup');
   const logsTabRef = useRef<HTMLButtonElement>(null);
   const logsDrawerRef = useRef<HTMLDivElement>(null);
   const logsToggledRef = useRef(false);
@@ -170,20 +173,48 @@ function HydratedApp() {
         </div>
       </header>
 
-      <main className="workspace" id="main-content" tabIndex={-1}>
-        <section className="tool-panel left-panel" aria-label="Lattice setup">
+      <main className="workspace" id="main-content" tabIndex={-1} data-active-panel={activePanel}>
+        <div className="panel-tabs" role="tablist" aria-label="Panels">
+          <button
+            type="button"
+            role="tab"
+            id="panel-tab-setup"
+            aria-selected={activePanel === 'setup'}
+            aria-controls="setup-panel"
+            className={activePanel === 'setup' ? 'active' : ''}
+            onClick={() => setActivePanel('setup')}
+          >
+            Setup
+          </button>
+          <button
+            type="button"
+            role="tab"
+            id="panel-tab-inspect"
+            aria-selected={activePanel === 'inspect'}
+            aria-controls="inspect-panel"
+            className={activePanel === 'inspect' ? 'active' : ''}
+            onClick={() => setActivePanel('inspect')}
+          >
+            Inspect
+            {checks.tone === 'fail' && <span className="count-pill">{checks.failedCount}</span>}
+          </button>
+        </div>
+
+        <section className="tool-panel left-panel" id="setup-panel" aria-label="Lattice setup" aria-labelledby="panel-tab-setup">
           <LeftPanel generationControls={generationControls} />
         </section>
 
         <section className="viewer-shell" aria-label="3D lattice viewer">
-          <div className="viewer-hud">
-            <div className="viewer-readout">
-              <span>{hasModel ? modelLabel : 'No model loaded'}</span>
-              <strong>{resultMesh ? resultStats : 'Viewport ready'}</strong>
+          {!demoModeActive && (
+            <div className="viewer-hud">
+              <div className="viewer-readout">
+                <span>{hasModel ? modelLabel : 'No model loaded'}</span>
+                <strong>{resultMesh ? resultStats : 'Viewport ready'}</strong>
+              </div>
             </div>
-          </div>
+          )}
           <Viewer3D />
-          {showFaceLegend && (
+          {showFaceLegend && !demoModeActive && (
             <div className="viewer-legend" role="group" aria-label="Face marking legend">
               <span className="viewer-legend-item">
                 <span className="viewer-legend-swatch" style={{ background: '#3399ff' }} aria-hidden="true" />
@@ -198,6 +229,10 @@ function HydratedApp() {
           <div className="viewer-controls-overlay">
             <ViewerControls />
           </div>
+        </section>
+
+        <section className="side-panel inspect-panel" id="inspect-panel" aria-label="Inspect result" aria-labelledby="panel-tab-inspect">
+          <InspectPanel />
         </section>
       </main>
 

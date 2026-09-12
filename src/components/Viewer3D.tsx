@@ -855,6 +855,35 @@ function applyViewportKeyboardAction(key: string, shiftKey: boolean, api: Viewpo
 }
 
 
+/**
+ * Keep the drawing buffer in step with the viewer's box. R3F measures its own
+ * wrapper, which has lagged a layout behind when the shell's grid row changed
+ * (log drawer) or the Canvas remounted (leaving multiview), leaving a squashed
+ * or 300×150 render until the next window resize.
+ */
+function ViewportResizeSync() {
+  const { gl, setSize } = useThree();
+
+  useEffect(() => {
+    const host = gl.domElement.parentElement?.parentElement ?? gl.domElement.parentElement;
+    if (!host || typeof ResizeObserver === 'undefined') return;
+
+    const sync = () => {
+      const rect = host.getBoundingClientRect();
+      const width = Math.round(rect.width);
+      const height = Math.round(rect.height);
+      if (width > 0 && height > 0) setSize(width, height);
+    };
+
+    const observer = new ResizeObserver(sync);
+    observer.observe(host);
+    sync();
+    return () => observer.disconnect();
+  }, [gl, setSize]);
+
+  return null;
+}
+
 function AutoFit() {
   const { camera, controls, size: canvasSize } = useThree();
   const store = useStore(useShallow((s) => ({
@@ -1121,6 +1150,7 @@ export function Viewer3D() {
         <directionalLight position={[50, 50, 50]} intensity={0.8} />
         <directionalLight position={[-30, -20, 40]} intensity={0.3} />
 
+        <ViewportResizeSync />
         <AutoFit />
         <GizmoCameraReset view={gizmoViewRequest.view} signal={gizmoViewRequest.signal} />
 
