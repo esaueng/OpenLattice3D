@@ -411,10 +411,18 @@ textarea:focus-visible,
 }
 
 /* Progress messages are unbounded worker strings; wrapping one would grow the
-   pinned bar mid-run and shove the scroll content under it. */
+   pinned bar mid-run and shove the scroll content under it. The text gets the
+   whole row and the bar sits beneath it, so the block still matches .btn-large. */
 .generate-progress-track {
-  /* Matches .btn-large so the pinned bar is the same height in both states. */
+  /* 28px cancel row + 4px gap + 8px bar = 40px, the same as .btn-large. */
   min-height: 40px;
+  display: grid;
+  grid-template-rows: 28px 8px;
+  gap: 4px;
+}
+
+.generate-progress-track .progress-line {
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: var(--sp-2);
@@ -430,7 +438,6 @@ textarea:focus-visible,
 }
 
 .generate-progress-track .progress-bar {
-  flex: 0 0 72px;
   margin: 0;
 }
 
@@ -450,6 +457,7 @@ textarea:focus-visible,
 
 .validation-chip.is-pass { color: var(--color-success); }
 .validation-chip.is-fail { color: #ff9aa1; }
+.validation-chip.is-stale { color: #f8d798; }
 .validation-chip.is-running { color: var(--color-text-muted); }
 
 .validation-chip:not(:disabled):hover {
@@ -467,12 +475,28 @@ textarea:focus-visible,
   border-color: rgba(245, 158, 11, 0.75);
 }
 
-.export-warning {
+.export-section .export-warning {
+  margin: 0 0 10px;
+}
+
+.export-section .export-simplify {
+  margin-bottom: 10px;
+}
+
+.export-section .export-simplify label {
   flex: 0 0 auto;
-  color: #f8d798;
-  font-family: var(--font-mono);
-  font-size: var(--fs-mini);
-  white-space: nowrap;
+}
+
+.export-section .export-simplify select {
+  flex: 1 1 120px;
+}
+
+.export-section .export-controls-actions {
+  justify-content: flex-start;
+}
+
+.export-section .export-controls-actions .btn {
+  min-height: 28px;
 }
 
 .viewer-shell {
@@ -629,51 +653,104 @@ textarea:focus-visible,
   border: 1px solid rgba(230, 237, 243, 0.35);
 }
 
-.export-controls-panel {
-  min-width: 0;
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  color: var(--color-text-muted);
-}
-
 .export-controls-actions {
   display: flex;
   flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 5px;
+  gap: 6px;
 }
 
-.export-controls-actions .btn {
-  min-height: 24px;
-  padding: 4px 8px;
-  font-size: var(--fs-xs);
-}
-
-.export-simplify {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  color: var(--color-text-muted);
-  font-size: var(--fs-xs);
-  white-space: nowrap;
-}
-
-.export-simplify select {
-  min-height: 26px;
-  padding: 3px 6px;
-  color: var(--color-text);
-  background: var(--color-surface-2);
-  border: var(--border-thin);
-  border-radius: var(--radius-md);
-  font-size: var(--fs-xs);
-}
-
-.export-estimate {
+.export-simplify .export-estimate {
+  flex: 0 0 auto;
+  min-width: 0;
   color: var(--color-text-subtle);
   font-family: var(--font-mono);
   font-size: var(--fs-mini);
+  white-space: nowrap;
+}
+
+/* Inline outcome of the last import; the log keeps the full history. */
+.import-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  margin-top: 10px;
+  padding: 8px 6px 8px 10px;
+  color: var(--color-text);
+  background: rgba(77, 163, 255, 0.08);
+  border: 1px solid rgba(77, 163, 255, 0.35);
+  border-left-width: 3px;
+  border-radius: var(--radius-md);
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+}
+
+.import-notice.level-warn {
+  background: rgba(245, 158, 11, 0.1);
+  border-color: rgba(245, 158, 11, 0.45);
+}
+
+.import-notice.level-error {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.5);
+}
+
+.import-notice-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.import-notice-detail {
+  margin-top: 3px;
+  color: var(--color-text-muted);
+}
+
+.import-notice-dismiss {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  margin: -3px 0 0;
+  padding: 0;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-md);
+  line-height: 1;
+}
+
+.import-notice-dismiss:hover {
+  color: var(--color-text);
+  background: var(--color-surface-hover);
+}
+
+.stale-banner {
+  margin: 0 0 var(--sp-3);
+}
+
+/* Seed and reseed live behind a disclosure; most runs never need them. */
+.advanced-section {
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-2);
+  border-top: 1px solid rgba(42, 52, 65, 0.72);
+}
+
+.advanced-section summary {
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  cursor: pointer;
+}
+
+.advanced-section summary:hover {
+  color: var(--color-text);
+}
+
+.advanced-section .seed-readout {
+  min-width: 0;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
 }
 
 .viewer-controls-overlay {
@@ -928,10 +1005,6 @@ textarea:focus-visible,
   color: var(--color-accent);
   background: var(--color-accent-dim);
   border-color: var(--color-accent-border);
-}
-
-.btn-generate-muted {
-  opacity: 0.35 !important;
 }
 
 .row {
@@ -1708,28 +1781,6 @@ textarea:focus-visible,
 
   .viewer-controls-panel {
     width: min(420px, 100%);
-  }
-
-  .export-controls-panel {
-    order: 4;
-    width: 100%;
-    margin-left: 0;
-    justify-content: flex-start;
-    flex-wrap: wrap;
-  }
-
-  .export-simplify {
-    min-width: 0;
-    flex-wrap: wrap;
-  }
-
-  .export-controls-actions {
-    width: 100%;
-    justify-content: flex-start;
-  }
-
-  .export-controls-actions .btn {
-    flex: 1 1 auto;
   }
 
   .demo-grid-view {

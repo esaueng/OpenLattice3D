@@ -52,4 +52,21 @@ describe('summarizeValidation', () => {
     expect(s.failedLabels).toEqual(['min thickness', 'manifold/watertight', 'connectivity']);
     expect(s.detail).toContain('may not be printable');
   });
+
+  it('reports an out-of-date result ahead of its previous verdict', () => {
+    const s = summarizeValidation(makeValidation({ connected: false }), true, false, true);
+    expect(s.tone).toBe('stale');
+    expect(s.label).toBe('Checks: out of date');
+    expect(s.detail).toContain('exports still use the previous result');
+    expect(s.detail).toContain('failed 1 of 4 checks (connectivity)');
+    expect(s.failedCount).toBe(1);
+
+    const unvalidated = summarizeValidation(null, true, false, true);
+    expect(unvalidated.tone).toBe('stale');
+    expect(unvalidated.detail).toContain('never validated');
+  });
+
+  it('lets a running generation outrank a stale flag', () => {
+    expect(summarizeValidation(makeValidation(), true, true, true).tone).toBe('running');
+  });
 });

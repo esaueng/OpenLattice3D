@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { analyzeMesh, generateCubeMesh } from '../geometry/mesh-analysis';
 import { DEFAULT_PARAMS, type ValidationResult } from '../types/project';
 import { buildPersistedAppState, hydrateFromSnapshot, useStore } from './useStore';
+import { buildGenerationSnapshot } from './generation-snapshot';
+import { computeStaleness, selectGenerationInputs } from './useResultStaleness';
 
 describe('persistence hydration', () => {
   it('releases the boot gate when browser storage is unavailable', async () => {
@@ -44,6 +46,135 @@ describe('persistence hydration', () => {
     expect(hydrated.params?.exportResolution).toBe(DEFAULT_PARAMS.exportResolution);
     expect(hydrated.generationSeed).toBe(0);
     expect(hydrated.viewerBackground).toBe('#000000');
+  });
+
+  it('never restores a result-only view mode, which would show an empty canvas', () => {
+    const hydrated = hydrateFromSnapshot({
+      version: 3,
+      savedAt: Date.now(),
+      params: { ...DEFAULT_PARAMS },
+      sampleShape: 'sphere',
+      sphereMode: true,
+      viewMode: 'xray',
+    } as unknown as Parameters<typeof hydrateFromSnapshot>[0]);
+    expect(hydrated.resultMesh).toBeNull();
+    expect(hydrated.viewMode).toBe('original');
+  });
+});
+
+describe('result record', () => {
+  beforeEach(() => {
+    useStore.getState().resetProject();
+  });
+
+  function generateSphere() {
+    const store = useStore.getState();
+    store.setSampleShape('sphere');
+    const snapshot = buildGenerationSnapshot(selectGenerationInputs(useStore.getState()));
+    useStore.getState().setResultMesh(generateCubeMesh(10), snapshot);
+    useStore.getState().setValidation({
+      passed: true,
+      outerDeviation: { passed: true, maxDeviation: 0, tolerance: 0.2 },
+      minThickness: { passed: true, minMeasured: 1, required: 0.8, absoluteMin: 1, sampled: 10 },
+      manifold: { passed: true, details: 'ok' },
+      disconnected: { passed: true, fragmentCount: 1 },
+      warnings: [],
+    });
+  }
+
+  function staleness() {
+    const state = useStore.getState();
+    return computeStaleness(state.resultSnapshot, selectGenerationInputs(state));
+  }
+
+  it('matches the form right after generation and goes out of date on any edit', () => {
+    generateSphere();
+    expect(staleness()).toEqual({ stale: false, changes: [] });
+
+    useStore.getState().updateParams({ cellSize: 12 });
+    expect(staleness()).toEqual({ stale: true, changes: ['cell size'] });
+
+    useStore.getState().updateParams({ cellSize: 8 });
+    expect(staleness().stale).toBe(false);
+  });
+
+  it('keeps the previous result and verdict when the seed or parameters change', () => {
+    generateSphere();
+    useStore.getState().reseedGeneration();
+    expect(useStore.getState().resultMesh).not.toBeNull();
+    expect(useStore.getState().validation).not.toBeNull();
+    expect(staleness().changes).toEqual(['seed']);
+
+    useStore.getState().importParams({ wallThickness: 2 });
+    expect(useStore.getState().resultMesh).not.toBeNull();
+    expect(staleness().changes).toEqual(['wall thickness', 'seed']);
+  });
+
+  it('starts a new result without a verdict and legalises the view when cleared', () => {
+    generateSphere();
+    useStore.getState().setViewMode('xray');
+    useStore.getState().setResultMesh(generateCubeMesh(12), null);
+    expect(useStore.getState().validation).toBeNull();
+    expect(useStore.getState().viewMode).toBe('xray');
+
+    useStore.getState().setResultMesh(null);
+    expect(useStore.getState().resultSnapshot).toBeNull();
+    expect(useStore.getState().viewMode).toBe('original');
+  });
+
+  it('carries the record through a multiview round trip', () => {
+    generateSphere();
+    const snapshot = useStore.getState().resultSnapshot;
+    useStore.getState().startDemoRun();
+    expect(useStore.getState().resultSnapshot).toBeNull();
+    useStore.getState().setDemoModeActive(false);
+    expect(useStore.getState().resultSnapshot).toBe(snapshot);
+    expect(useStore.getState().validation).not.toBeNull();
+  });
+
+  it('mirrors the multiview queue and resets it on exit', () => {
+    useStore.getState().setSampleShape('cube');
+    useStore.getState().startDemoRun();
+    useStore.getState().setDemoQueue({ done: 3, running: 1, total: 12 });
+    expect(useStore.getState().demoQueue).toEqual({ done: 3, running: 1, total: 12 });
+    useStore.getState().setDemoModeActive(false);
+    expect(useStore.getState().demoQueue).toEqual({ done: 0, running: 0, total: 0 });
+  });
+});
+
+describe('painting defaults and erase mode', () => {
+  beforeEach(() => {
+    useStore.getState().resetProject();
+  });
+
+  it('sizes the brush to the part on import unless the user already chose one', () => {
+    const mesh = generateCubeMesh(30);
+    useStore.getState().setOriginalMesh(mesh, analyzeMesh(mesh), 'cube.stl');
+    expect(useStore.getState().brushRadius).toBe(2.1);
+
+    useStore.getState().setBrushRadius(5);
+    useStore.getState().setOriginalMesh(mesh, analyzeMesh(mesh), 'cube-again.stl');
+    expect(useStore.getState().brushRadius).toBe(5);
+  });
+
+  it('erases from both masks as one undoable action', () => {
+    const mesh = generateCubeMesh(10);
+    useStore.getState().setOriginalMesh(mesh, analyzeMesh(mesh), 'cube.stl');
+    useStore.getState().setSelectionMode('keep_out');
+    useStore.getState().paintTriangles([1, 2], true);
+    useStore.getState().setSelectionMode('keep_in');
+    useStore.getState().paintTriangles([3], true);
+
+    useStore.getState().setSelectionMode('erase');
+    useStore.getState().paintTriangles([2, 3, 9], true);
+    expect(Array.from(useStore.getState().keepOutTris)).toEqual([1]);
+    expect(useStore.getState().keepInTris.size).toBe(0);
+
+    useStore.getState().paintTriangles([7], true);
+    expect(useStore.getState().selectionUndo).toHaveLength(3);
+    useStore.getState().undoSelection();
+    expect(Array.from(useStore.getState().keepOutTris)).toEqual([1, 2]);
+    expect(Array.from(useStore.getState().keepInTris)).toEqual([3]);
   });
 });
 
@@ -254,7 +385,7 @@ describe('workspace transitions', () => {
   });
 });
 
-describe('completed result invalidation', () => {
+describe('completed result staleness', () => {
   const mesh = generateCubeMesh(10);
   const validation: ValidationResult = {
     passed: true,
@@ -265,52 +396,64 @@ describe('completed result invalidation', () => {
     warnings: [],
   };
 
+  function staleness() {
+    const state = useStore.getState();
+    return computeStaleness(state.resultSnapshot, selectGenerationInputs(state));
+  }
+
   beforeEach(() => {
     useStore.getState().resetProject();
     useStore.getState().setSampleShape('cube');
-    useStore.getState().setResultMesh(mesh);
+    useStore.getState().setResultMesh(mesh, buildGenerationSnapshot(selectGenerationInputs(useStore.getState())));
     useStore.getState().setValidation(validation);
+    useStore.getState().setViewMode('xray');
   });
 
   const edits = [
-    ['cell size', () => useStore.getState().updateParams({ cellSize: 12 })],
-    ['validation tolerance', () => useStore.getState().updateParams({ toleranceMm: 0.4 })],
-    ['lattice type', () => useStore.getState().setLatticeType('bcc')],
-    ['process preset', () => useStore.getState().setProcessPreset('SLA_DLP')],
-    ['variant', () => useStore.getState().setVariant('implicit_conformal')],
-    ['seed', () => useStore.getState().reseedGeneration()],
-    ['face constraints', () => useStore.getState().toggleKeepIn(1)],
+    ['cell size', () => useStore.getState().updateParams({ cellSize: 12 }), 'cell size'],
+    ['validation tolerance', () => useStore.getState().updateParams({ toleranceMm: 0.4 }), 'tolerance'],
+    ['lattice type', () => useStore.getState().setLatticeType('bcc'), 'lattice type'],
+    ['process preset', () => useStore.getState().setProcessPreset('SLA_DLP'), 'process preset'],
+    ['variant', () => useStore.getState().setVariant('implicit_conformal'), 'generation variant'],
+    ['seed', () => useStore.getState().reseedGeneration(), 'seed'],
+    ['face constraints', () => useStore.getState().toggleKeepIn(1), 'painted faces'],
   ] as const;
 
-  it.each(edits)('removes completed geometry and validation atomically on %s changes', (_name, edit) => {
-    const observed: boolean[] = [];
-    const unsubscribe = useStore.subscribe((state) => {
-      observed.push(state.resultMesh === null && state.validation === null);
-    });
-    try {
-      edit();
-    } finally {
-      unsubscribe();
-    }
-    expect(observed).toEqual([true]);
-    expect(useStore.getState().viewMode).toBe('original');
+  it.each(edits)('keeps completed geometry and its verdict, marked out of date, on %s changes', (_name, edit, change) => {
+    expect(staleness().stale).toBe(false);
+    edit();
+    const state = useStore.getState();
+    expect(state.resultMesh).toBe(mesh);
+    expect(state.validation).toBe(validation);
+    expect(state.viewMode).toBe('xray');
+    expect(staleness().stale).toBe(true);
+    expect(staleness().changes).toContain(change);
   });
 
-  it.each(edits)('does not restore a stale multiview result after %s changes', (_name, edit) => {
+  it.each(edits)('restores a parked multiview result as out of date after %s changes', (_name, edit) => {
     useStore.getState().startDemoRun();
     edit();
     useStore.getState().setDemoModeActive(false);
-    expect(useStore.getState().resultMesh).toBeNull();
-    expect(useStore.getState().validation).toBeNull();
+    expect(useStore.getState().resultMesh).toBe(mesh);
+    expect(useStore.getState().validation).toBe(validation);
     expect(useStore.getState().demoSuspended).toBeNull();
+    expect(staleness().stale).toBe(true);
   });
 
-  it('preserves completed results for unchanged inputs and display-only edits', () => {
+  it('stays current for unchanged inputs and display-only edits', () => {
     useStore.getState().updateParams({ cellSize: 8, materialDensityGPerCm3: 1.2 });
     useStore.getState().setLatticeType('gyroid');
     useStore.getState().setViewerBackground('#112233');
     useStore.getState().setClipPlane({ axis: 'x' });
     expect(useStore.getState().resultMesh).toBe(mesh);
     expect(useStore.getState().validation).toBe(validation);
+    expect(staleness().stale).toBe(false);
+  });
+
+  it('drops a completed result only when the model itself changes', () => {
+    useStore.getState().setSampleShape('torus');
+    expect(useStore.getState().resultMesh).toBeNull();
+    expect(useStore.getState().resultSnapshot).toBeNull();
+    expect(useStore.getState().viewMode).toBe('original');
   });
 });
