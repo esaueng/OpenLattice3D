@@ -399,8 +399,8 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
           </div>
           <div className="row" style={{ gap: '6px', flexWrap: 'wrap', marginTop: '6px' }}>
             <button className="btn btn-small" onClick={store.selectAllKeepOut}>Select all keep-out</button>
-            <button className="btn btn-small" onClick={store.undoSelection} disabled={store.selectionUndo.length === 0}>Undo</button>
-            <button className="btn btn-small" onClick={store.redoSelection} disabled={store.selectionRedo.length === 0}>Redo</button>
+            <button className="btn btn-small" title="Undo the last edit: painting, a parameter, or the seed (Ctrl/Cmd+Z)." onClick={store.undoSelection} disabled={store.selectionUndo.length === 0}>Undo</button>
+            <button className="btn btn-small" title="Redo (Ctrl/Cmd+Shift+Z)." onClick={store.redoSelection} disabled={store.selectionRedo.length === 0}>Redo</button>
             <button className="btn btn-small" onClick={store.clearSelection}>Clear</button>
           </div>
           {store.selectionMode !== 'none' && (

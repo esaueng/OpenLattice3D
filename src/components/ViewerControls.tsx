@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { resultBounds } from './viewer/ViewerMeshViews';
 import { useShallow } from 'zustand/react/shallow';
 import { canSelectView, useStore } from '../store/useStore';
 import type { ViewMode } from '../store/useStore';
@@ -41,6 +42,15 @@ export function ViewerControls() {
     clipPlane,
   } = store;
   const crossSectionDisabled = !demoModeActive && !resultMesh;
+  // Position in millimetres along the cut axis, so the slider means something physical.
+  const cutMm = useMemo(() => {
+    if (!resultMesh) return null;
+    const bounds = resultBounds(resultMesh);
+    const axisIndex = 'xyz'.indexOf(clipPlane.axis);
+    const min = bounds.min.getComponent(axisIndex);
+    const max = bounds.max.getComponent(axisIndex);
+    return { value: min + clipPlane.position * (max - min), min, max };
+  }, [clipPlane.axis, clipPlane.position, resultMesh]);
 
   // Dismiss the cross-section popover on Escape (returning focus to its trigger)
   // or on an outside click (WCAG 2.1.2 / 2.4.3).
@@ -148,8 +158,16 @@ export function ViewerControls() {
                       value={clipPlane.position}
                       onChange={(e) => store.setClipPlane({ position: Number(e.target.value) })}
                     />
-                    <strong>{Math.round(clipPlane.position * 100)}%</strong>
+                    <strong>
+                      {cutMm ? `${cutMm.value.toFixed(1)} mm` : `${Math.round(clipPlane.position * 100)}%`}
+                    </strong>
                   </label>
+                  {cutMm && (
+                    <div className="popover-row popover-note">
+                      <span>{clipPlane.axis.toUpperCase()} range</span>
+                      <span>{cutMm.min.toFixed(1)} to {cutMm.max.toFixed(1)} mm · {Math.round(clipPlane.position * 100)}%</span>
+                    </div>
+                  )}
                   <label className="popover-row popover-checkbox-row">
                     <input
                       type="checkbox"

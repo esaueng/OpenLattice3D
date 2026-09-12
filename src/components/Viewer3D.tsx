@@ -17,6 +17,7 @@ import {
   OriginalMeshView,
   resultBounds,
   ResultMeshView,
+  ThinFeatureMarkers,
   XRayView,
   SampleMeshView,
 } from './viewer/ViewerMeshViews';
@@ -1051,6 +1052,7 @@ export function Viewer3D() {
     keepOutTris, keepInTris, selectionMode, resultMesh, brushRadius,
     paintTriangles, beginSelectionStroke, endSelectionStroke, viewerBackground, demoModeActive,
     demoRunId, params, generationSeed, demoParamsByType, setLatticeType, viewportResetSignal,
+    validation, showThinFeatures, pinnedRun, showPinnedRun,
   } = useStore(useShallow((s) => ({
     originalMesh: s.originalMesh,
     sphereMode: s.sphereMode,
@@ -1074,7 +1076,16 @@ export function Viewer3D() {
     demoParamsByType: s.demoParamsByType,
     setLatticeType: s.setLatticeType,
     viewportResetSignal: s.viewportResetSignal,
+    validation: s.validation,
+    showThinFeatures: s.showThinFeatures,
+    pinnedRun: s.pinnedRun,
+    showPinnedRun: s.showPinnedRun,
   })));
+  // The result views can show the pinned run instead of the current one.
+  const displayedResult = showPinnedRun && pinnedRun ? pinnedRun.resultMesh : resultMesh;
+  const displayedValidation = showPinnedRun && pinnedRun ? pinnedRun.validation : validation;
+  const thinPoints = displayedValidation?.minThickness.thinPoints ?? [];
+  const thinBounds = useMemo(() => (displayedResult ? resultBounds(displayedResult) : new THREE.Box3()), [displayedResult]);
   const [gizmoViewRequest, setGizmoViewRequest] = useState<{ view: GizmoViewRequest | null; signal: number }>({ view: null, signal: 0 });
   const [painting, setPainting] = useState(false);
   const r3fStateRef = useRef<RootState | null>(null);
@@ -1177,9 +1188,12 @@ export function Viewer3D() {
         )}
         {viewMode === 'original' && <EscapeHolePreview bounds={escapeHolePreviewBounds} params={params} />}
 
-        {viewMode === 'lattice' && resultMesh && <ResultMeshView result={resultMesh} />}
-        {viewMode === 'cross_section' && resultMesh && <CrossSectionView result={resultMesh} clip={clipPlane} />}
-        {viewMode === 'xray' && resultMesh && <XRayView result={resultMesh} />}
+        {viewMode === 'lattice' && displayedResult && <ResultMeshView result={displayedResult} />}
+        {viewMode === 'cross_section' && displayedResult && <CrossSectionView result={displayedResult} clip={clipPlane} />}
+        {viewMode === 'xray' && displayedResult && <XRayView result={displayedResult} />}
+        {viewMode !== 'original' && displayedResult && showThinFeatures && thinPoints.length > 0 && (
+          <ThinFeatureMarkers points={thinPoints} bounds={thinBounds} />
+        )}
 
         <OrbitControls makeDefault enabled={!painting} target={[0, 0, 0]} />
         <ViewerCameraSession />
