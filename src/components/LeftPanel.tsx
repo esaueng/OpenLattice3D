@@ -17,8 +17,6 @@ import { isSheetType } from '../geometry/lattice';
 import { SAMPLE_SHAPE_INFO } from '../store/useStore';
 import type { LatticeGenerationControls } from '../hooks/useLatticeGeneration';
 import { NumericInput } from './NumericInput';
-import { RightPanel } from './RightPanel';
-import { ExportControls } from './ExportControls';
 import { formatGenerationSeed } from '../geometry/deterministic-random';
 import {
   cellsAcrossShortestSide,
@@ -28,6 +26,7 @@ import {
   modelExtents,
 } from '../utils/model-summary';
 import { useResultStaleness } from '../store/useResultStaleness';
+import { buildPreflight, formatPreflight } from '../utils/preflight';
 
 type LeftPanelProps = {
   generationControls: LatticeGenerationControls;
@@ -91,7 +90,11 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
         store.addLog('Mesh is not closed - skipped orientation check', 'warn');
       }
 
-      const dims = formatDimensions(modelExtents(info, null, 25)!.size);
+      const extents = modelExtents(info, null, 25)!;
+      const dims = formatDimensions(extents.size);
+      const largest = Math.max(...extents.size);
+      // STL carries no units: a 1-unit part is almost always inches read as mm.
+      const scalePrompt = largest > 0 && (largest < 5 || largest > 1000);
       if (!info.isManifold || !info.isWatertight) {
         // "Repair" here only recomputes face normals; the surface stays open.
         const { mesh: repairedMesh, repaired } = repairMesh(mesh);
@@ -104,13 +107,17 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
           level: 'warn',
           message: `Imported ${file.name} (${dims}), but it is not closed.`,
           detail: condition.message,
+          scalePrompt,
         });
       } else {
         store.addLog('Mesh is closed and manifold', 'info');
         store.setOriginalMesh(mesh, info, file.name);
         store.setImportNotice({
-          level: 'info',
-          message: `Imported ${file.name}: ${info.triangleCount.toLocaleString()} triangles, ${dims}.`,
+          level: scalePrompt ? 'warn' : 'info',
+          message: scalePrompt
+            ? `Imported ${file.name} at ${dims}. STL files carry no units; is that right?`
+            : `Imported ${file.name}: ${info.triangleCount.toLocaleString()} triangles, ${dims}.`,
+          scalePrompt,
         });
       }
     } catch (err) {
@@ -128,7 +135,6 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
     store.setSampleShape(shape);
     store.setImportNotice(null);
     store.addLog(`Sample loaded: ${SAMPLE_SHAPE_INFO[shape].fileName}`);
-    store.addLog('Pre-configured: tolerance 0.2mm, shell 1.5mm, cell 8mm, SLS/MJF');
   }, [store]);
 
   const handleJsonImport = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -198,6 +204,27 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
     }
   }, [store]);
 
+  const applyScale = useCallback((factor: number, label: string) => {
+    store.scaleOriginalMesh(factor);
+    const info = useStore.getState().meshInfo;
+    const dims = info ? formatDimensions(modelExtents(info, null, 25)!.size) : '';
+    store.addLog(`Model rescaled ${label}: now ${dims}`);
+    store.setImportNotice({ level: 'info', message: `Rescaled ${label}. The model is now ${dims}.` });
+  }, [store]);
+
+  const handleCloseHoles = useCallback(() => {
+    const report = store.closeMeshHoles();
+    if (!report) return;
+    const closed = report.after === 0;
+    store.addLog(`Closed boundary loops: ${report.before} → ${report.after} boundary edges`, closed ? 'info' : 'warn');
+    store.setImportNotice({
+      level: closed ? 'info' : 'warn',
+      message: closed
+        ? 'Holes closed; the mesh is now watertight.'
+        : `Filled what could be matched; ${report.after} boundary edges remain.`,
+    });
+  }, [store]);
+
   const handleReseed = useCallback(() => {
     store.reseedGeneration();
     store.addLog(`Generation reseeded to ${formatGenerationSeed(useStore.getState().generationSeed)}; regenerate to apply`);
@@ -209,11 +236,15 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
   const extents = modelExtents(store.meshInfo, store.sampleShape, store.sphereRadius);
   const cellsAcross = extents ? cellsAcrossShortestSide(extents.size, store.params.cellSize) : 0;
   const meshCondition = store.meshInfo ? describeMeshCondition(store.meshInfo) : null;
+  const preflight = hasModel ? buildPreflight(store.params, extents, store.meshInfo) : null;
+  const blocked = preflight?.warnings.some((w) => w.level === 'block') ?? false;
   const generateLabel = generateDisabledByMultiview
     ? 'Generate (close compare first)'
-    : staleness.stale
-      ? 'Regenerate Lattice'
-      : 'Generate Lattice';
+    : blocked
+      ? 'Generate anyway'
+      : staleness.stale
+        ? 'Regenerate Lattice'
+        : 'Generate Lattice';
 
   return (
     <div className="panel-content">
@@ -266,6 +297,14 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
             <div className="import-notice-body">
               <div>{store.importNotice.message}</div>
               {store.importNotice.detail && <div className="import-notice-detail">{store.importNotice.detail}</div>}
+              {store.importNotice.scalePrompt && store.originalMesh && (
+                <div className="import-notice-actions">
+                  <button type="button" className="btn btn-tiny" onClick={() => store.setImportNotice(null)}>It is millimetres</button>
+                  <button type="button" className="btn btn-tiny" onClick={() => applyScale(25.4, 'from inches (×25.4)')}>Convert from inches</button>
+                  <button type="button" className="btn btn-tiny" onClick={() => applyScale(10, '×10')}>×10</button>
+                  <button type="button" className="btn btn-tiny" onClick={() => applyScale(0.1, '×0.1')}>×0.1</button>
+                </div>
+              )}
             </div>
             <button
               type="button"
@@ -307,7 +346,16 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
               <div><strong>Cells across:</strong> {cellsAcross.toFixed(1)} at {store.params.cellSize} mm on the shortest side</div>
             )}
             {meshCondition?.level === 'warn' && (
-              <div className="warning">{meshCondition.message}</div>
+              <div className="warning">
+                {meshCondition.message}
+                {!store.meshInfo.isWatertight && (
+                  <div style={{ marginTop: '6px' }}>
+                    <button type="button" className="btn btn-tiny" onClick={handleCloseHoles} title="Fill each open boundary loop with triangles.">
+                      Close holes
+                    </button>
+                  </div>
+                )}
+              </div>
             )}
           </div>
         )}
@@ -680,10 +728,19 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
         </section>
       )}
 
-      <div className="left-inspection-panel">
-        <RightPanel />
-        <ExportControls />
-      </div>
+      {hasModel && preflight && (
+        <section className="panel-section preflight-section" aria-label="Before you generate">
+          <h3>Before you generate</h3>
+          <div className="preflight-summary" title="Estimated from the grid size; actual counts vary with the lattice.">
+            {formatPreflight(preflight)}
+          </div>
+          {preflight.warnings.map((warning, index) => (
+            <div key={index} className={`warning preflight-${warning.level}`} role={warning.level === 'block' ? 'alert' : undefined}>
+              {warning.message}
+            </div>
+          ))}
+        </section>
+      )}
 
       {/* Generate: last child so the pinned bar un-sticks at max scroll instead
           of permanently covering the validation panel above it. */}
@@ -699,7 +756,7 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
           )}
           {!store.generating ? (
             <button
-              className="btn btn-primary btn-large"
+              className={`btn btn-large ${blocked ? 'btn-caution' : 'btn-primary'}`}
               title={generateDisabledByMultiview
                 ? 'Close the comparison grid to generate a full-resolution lattice.'
                 : staleness.stale
