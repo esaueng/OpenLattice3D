@@ -58,3 +58,15 @@ describe('sanitizeLatticeParams', () => {
     expect(sanitizeLatticeParams(42).accepted).toEqual([]);
   });
 });
+
+describe('manual escape hole sanitization', () => {
+  it('accepts xyz triples and rejects malformed lists', async () => {
+    const { sanitizeLatticeParams } = await import('./project');
+    const good = sanitizeLatticeParams({ escapeHolePlacement: 'manual', escapeHoleManualCenters: [1, 2, 3] });
+    expect(good.accepted).toEqual(['escapeHolePlacement', 'escapeHoleManualCenters']);
+    const bad = sanitizeLatticeParams({ escapeHolePlacement: 'random', escapeHoleManualCenters: [1, 2] });
+    expect(bad.rejected).toEqual(['escapeHolePlacement', 'escapeHoleManualCenters']);
+    const nan = sanitizeLatticeParams({ escapeHoleManualCenters: [1, 2, Number.NaN] });
+    expect(nan.rejected).toEqual(['escapeHoleManualCenters']);
+  });
+});

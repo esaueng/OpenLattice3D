@@ -544,3 +544,86 @@ describe('imported mesh fixes', () => {
     expect(useStore.getState().closeMeshHoles()).toBeNull();
   });
 });
+
+describe('parameter undo', () => {
+  beforeEach(() => {
+    useStore.getState().resetProject();
+    useStore.getState().setSampleShape('cube');
+  });
+
+  it('undoes and redoes parameter edits and seed changes on the shared stack', () => {
+    useStore.getState().updateParams({ cellSize: 12 });
+    useStore.getState().setLatticeType('bcc');
+    const seedBefore = useStore.getState().generationSeed;
+    useStore.getState().reseedGeneration();
+    expect(useStore.getState().selectionUndo).toHaveLength(3);
+
+    useStore.getState().undoSelection();
+    expect(useStore.getState().generationSeed).toBe(seedBefore);
+    useStore.getState().undoSelection();
+    expect(useStore.getState().params.latticeType).toBe('gyroid');
+    useStore.getState().undoSelection();
+    expect(useStore.getState().params.cellSize).toBe(8);
+
+    useStore.getState().redoSelection();
+    expect(useStore.getState().params.cellSize).toBe(12);
+  });
+
+  it('collapses rapid edits of one field into a single undo step', () => {
+    useStore.getState().updateParams({ cellSize: 9 });
+    useStore.getState().updateParams({ cellSize: 9.5 });
+    useStore.getState().updateParams({ cellSize: 10 });
+    expect(useStore.getState().selectionUndo).toHaveLength(1);
+    useStore.getState().updateParams({ wallThickness: 1.2 });
+    expect(useStore.getState().selectionUndo).toHaveLength(2);
+    useStore.getState().undoSelection();
+    useStore.getState().undoSelection();
+    expect(useStore.getState().params.cellSize).toBe(8);
+    expect(useStore.getState().params.wallThickness).toBe(1);
+  });
+
+  it('ignores no-op edits and interleaves with painting history', () => {
+    useStore.getState().updateParams({ cellSize: 8 });
+    expect(useStore.getState().selectionUndo).toHaveLength(0);
+    const mesh = generateCubeMesh(10);
+    useStore.getState().setOriginalMesh(mesh, analyzeMesh(mesh), 'cube.stl');
+    useStore.getState().toggleKeepOut(1);
+    useStore.getState().updateParams({ cellSize: 6 });
+    useStore.getState().undoSelection();
+    expect(useStore.getState().params.cellSize).toBe(8);
+    expect(useStore.getState().keepOutTris.has(1)).toBe(true);
+    useStore.getState().undoSelection();
+    expect(useStore.getState().keepOutTris.has(1)).toBe(false);
+  });
+});
+
+describe('pinned run', () => {
+  beforeEach(() => {
+    useStore.getState().resetProject();
+    useStore.getState().setSampleShape('cube');
+  });
+
+  it('keeps a pinned result across a regeneration and drops it with the model', () => {
+    const first = generateCubeMesh(10);
+    useStore.getState().setResultMesh(first, buildGenerationSnapshot(selectGenerationInputs(useStore.getState())));
+    useStore.getState().pinCurrentResult();
+    expect(useStore.getState().pinnedRun?.resultMesh).toBe(first);
+
+    useStore.getState().updateParams({ cellSize: 12 });
+    const second = generateCubeMesh(12);
+    useStore.getState().setResultMesh(second, buildGenerationSnapshot(selectGenerationInputs(useStore.getState())));
+    expect(useStore.getState().pinnedRun?.resultMesh).toBe(first);
+    expect(useStore.getState().pinnedRun?.snapshot?.params.cellSize).toBe(8);
+
+    useStore.getState().setShowPinnedRun(true);
+    expect(useStore.getState().showPinnedRun).toBe(true);
+    useStore.getState().setSampleShape('torus');
+    expect(useStore.getState().pinnedRun).toBeNull();
+    expect(useStore.getState().showPinnedRun).toBe(false);
+  });
+
+  it('cannot show a pinned run that does not exist', () => {
+    useStore.getState().setShowPinnedRun(true);
+    expect(useStore.getState().showPinnedRun).toBe(false);
+  });
+});

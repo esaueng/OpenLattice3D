@@ -37,10 +37,10 @@ export function useWorkspaceHotkeys({ startGeneration, canGenerate }: LatticeGen
         event.preventDefault();
         if (event.shiftKey) {
           store.redoSelection();
-          store.addLog('Selection redone');
+          store.addLog('Redone');
         } else {
           store.undoSelection();
-          store.addLog('Selection undone');
+          store.addLog('Undone');
         }
         return;
       }

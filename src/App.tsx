@@ -92,6 +92,9 @@ function HydratedApp() {
     keepInTris,
     selectionMode,
     demoQueue,
+    validationProgress,
+    showPinnedRun,
+    pinnedRun,
   } = useStore();
   const generationControls = useLatticeGeneration();
   const staleness = useResultStaleness();
@@ -127,9 +130,11 @@ function HydratedApp() {
 
   const hasModel = Boolean(originalMesh || sphereMode);
   const modelLabel = meshFileName || (sphereMode ? 'Primitive sphere' : 'Untitled lattice study');
-  const resultStats = resultMesh
-    ? `${resultMesh.triCount.toLocaleString()} tris${staleness.stale ? ' · settings changed' : ''}`
-    : 'Mesh pending';
+  const resultStats = showPinnedRun && pinnedRun
+    ? `Pinned run · ${pinnedRun.resultMesh.triCount.toLocaleString()} tris`
+    : resultMesh
+      ? `${resultMesh.triCount.toLocaleString()} tris${staleness.stale ? ' · settings changed' : ''}`
+      : 'Mesh pending';
   const progressLabel = `${Math.round(progress * 100)}%`;
   const comparing = demoModeActive && demoQueue.total > 0;
   const solverStatus = generating
@@ -138,8 +143,8 @@ function HydratedApp() {
       ? `Comparing ${demoQueue.done} of ${demoQueue.total}`
       : hasModel ? 'Ready' : 'Idle';
   const viewportMode = demoModeActive ? 'Multiview' : hasModel ? 'Interactive' : 'Standby';
-  const showFaceLegend = keepOutTris.size > 0 || keepInTris.size > 0 || selectionMode !== 'none';
-  const checks = summarizeValidation(validation, Boolean(resultMesh), generating, staleness.stale);
+  const showFaceLegend = keepOutTris.size > 0 || keepInTris.size > 0 || (selectionMode !== 'none' && selectionMode !== 'place_hole');
+  const checks = summarizeValidation(validation, Boolean(resultMesh), generating, staleness.stale, validationProgress);
 
   // The statusbar verdict is a route to the detail, not another dead readout.
   const revealValidation = () => {

@@ -45,6 +45,8 @@ export interface ValidationWorkerMessage {
 }
 
 export interface ValidationWorkerResponse {
+  /** 0..1 thickness-sampling progress; absent on message-only progress posts. */
+  progress?: number;
   type: 'progress' | 'result' | 'error';
   message?: string;
   validation?: ValidationResult;
@@ -135,7 +137,7 @@ function runProceduralValidation(
   const outerDeviation = shape === 'sphere'
     ? checkSphereDeviation(result, msg.sphereRadius || 25, msg.params.toleranceMm)
     : { passed: true, maxDeviation: 0 };
-  const minThickness = checkMinThickness(sdf, result, msg.params.minFeatureSize, 200);
+  const minThickness = checkMinThickness(sdf, result, msg.params.minFeatureSize, 200, reportValidationProgress);
   const { manifold, disconnected } = checkTopology(result);
   const warnings: string[] = [];
   if (minThickness.sampled === 0) warnings.push('Minimum thickness could not be measured');
@@ -154,6 +156,14 @@ function runProceduralValidation(
     disconnected,
     warnings,
   };
+}
+
+let lastProgressPost = 0;
+function reportValidationProgress(fraction: number) {
+  const now = performance.now();
+  if (fraction < 1 && now - lastProgressPost < 120) return;
+  lastProgressPost = now;
+  postMessage({ type: 'progress', progress: fraction } as ValidationWorkerResponse);
 }
 
 self.onmessage = (event: MessageEvent<ValidationWorkerMessage>) => {
