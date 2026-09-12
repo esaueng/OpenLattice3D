@@ -31,13 +31,40 @@ const SAMPLE_CYLINDER_EDGE_CENTERS: ReadonlyArray<readonly [number, number, numb
 ];
 const PROCEDURAL_EDGE_COLOR = '#101820';
 
+const boundsCache = new WeakMap<MarchingCubesResult, THREE.Box3>();
+
+/** Bounds of a result, computed once per result object (several views ask for it). */
 export function resultBounds(result: MarchingCubesResult): THREE.Box3 {
+  const cached = boundsCache.get(result);
+  if (cached) return cached.clone();
   const box = new THREE.Box3();
   const point = new THREE.Vector3();
   for (let i = 0; i < result.positions.length; i += 3) {
     box.expandByPoint(point.set(result.positions[i], result.positions[i + 1], result.positions[i + 2]));
   }
-  return box;
+  boundsCache.set(result, box);
+  return box.clone();
+}
+
+// One display geometry per result, shared by the Solid, Cross-Section and X-Ray
+// views so switching views or toggling overlays never rebuilds 100 MB of
+// attributes. Kept for the last few results; older ones are disposed.
+const GEOMETRY_CACHE_LIMIT = 3;
+const geometryCache: Array<{ result: MarchingCubesResult; geometry: THREE.BufferGeometry }> = [];
+
+export function resultGeometry(result: MarchingCubesResult): THREE.BufferGeometry {
+  const hit = geometryCache.find((entry) => entry.result === result);
+  if (hit) return hit.geometry;
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(result.positions, 3));
+  if (result.vertexNormals && result.vertexNormals.length >= result.triCount * 9) {
+    geometry.setAttribute('normal', new THREE.BufferAttribute(result.vertexNormals, 3));
+  } else {
+    geometry.computeVertexNormals();
+  }
+  geometryCache.push({ result, geometry });
+  while (geometryCache.length > GEOMETRY_CACHE_LIMIT) geometryCache.shift()!.geometry.dispose();
+  return geometry;
 }
 
 export function meshBounds(mesh: TriangleMesh): THREE.Box3 {
@@ -426,12 +453,7 @@ export function SampleMeshView(props: {
 }
 
 export function ResultMeshView({ result }: { result: MarchingCubesResult }) {
-  const geometry = useDisposable(useMemo(() => {
-    const next = new THREE.BufferGeometry();
-    next.setAttribute('position', new THREE.BufferAttribute(result.positions, 3));
-    next.computeVertexNormals();
-    return next;
-  }, [result]));
+  const geometry = useMemo(() => resultGeometry(result), [result]);
   return <mesh geometry={geometry}><meshPhongMaterial color="#4a9eff" side={THREE.DoubleSide} /></mesh>;
 }
 
@@ -450,12 +472,7 @@ function clipPlane(clip: ClipPlaneState, bounds: THREE.Box3): THREE.Plane {
 }
 
 export function CrossSectionView({ result, clip }: { result: MarchingCubesResult; clip: ClipPlaneState }) {
-  const geometry = useDisposable(useMemo(() => {
-    const next = new THREE.BufferGeometry();
-    next.setAttribute('position', new THREE.BufferAttribute(result.positions, 3));
-    next.computeVertexNormals();
-    return next;
-  }, [result]));
+  const geometry = useMemo(() => resultGeometry(result), [result]);
   const bounds = useMemo(() => resultBounds(result), [result]);
   const plane = useMemo(() => clipPlane(clip, bounds), [bounds, clip]);
   return (
@@ -466,12 +483,7 @@ export function CrossSectionView({ result, clip }: { result: MarchingCubesResult
 }
 
 export function XRayView({ result }: { result: MarchingCubesResult }) {
-  const geometry = useDisposable(useMemo(() => {
-    const next = new THREE.BufferGeometry();
-    next.setAttribute('position', new THREE.BufferAttribute(result.positions, 3));
-    next.computeVertexNormals();
-    return next;
-  }, [result]));
+  const geometry = useMemo(() => resultGeometry(result), [result]);
   const material = useDisposable(useMemo(() => new THREE.MeshBasicMaterial({
     color: '#3388cc',
     side: THREE.DoubleSide,
