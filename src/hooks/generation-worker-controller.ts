@@ -11,6 +11,9 @@ export type GenerationResultResponse = {
   normals: Float32Array;
   triCount: number;
   backend?: 'cpu-single' | 'cpu-tiled';
+  vertexNormals?: Float32Array;
+  validationPositions?: Float32Array;
+  validationNormals?: Float32Array;
   surfaceSamplePositions?: Float32Array;
   surfaceSampleNormals?: Float32Array;
   surfaceSampleHoleScales?: Float32Array;
@@ -77,6 +80,12 @@ export function parseGenerationResponse(value: unknown): GenerationResponse | nu
     || (response.triCount as number) < 0
     || response.positions.length < (response.triCount as number) * 9
     || response.normals.length < (response.triCount as number) * 3
+    || !optionalFloat32Array(response.vertexNormals)
+    || !optionalFloat32Array(response.validationPositions)
+    || !optionalFloat32Array(response.validationNormals)
+    || (response.vertexNormals instanceof Float32Array && response.vertexNormals.length < (response.triCount as number) * 9)
+    || (response.validationPositions instanceof Float32Array && response.validationPositions.length < (response.triCount as number) * 9)
+    || (response.validationNormals instanceof Float32Array && response.validationNormals.length < (response.triCount as number) * 3)
     || !optionalFloat32Array(response.surfaceSamplePositions)
     || !optionalFloat32Array(response.surfaceSampleNormals)
     || !optionalFloat32Array(response.surfaceSampleHoleScales)

@@ -48,6 +48,33 @@ type WorkerPostMessage = (message: unknown, transfer: Transferable[]) => void;
 
 const postWorkerMessage = self.postMessage.bind(self) as WorkerPostMessage;
 
+/** Expand one normal per triangle into one per vertex so the viewer can skip computeVertexNormals. */
+function expandFaceNormals(faceNormals: Float32Array, triCount: number): Float32Array {
+  const out = new Float32Array(triCount * 9);
+  for (let t = 0; t < triCount; t++) {
+    const nx = faceNormals[t * 3], ny = faceNormals[t * 3 + 1], nz = faceNormals[t * 3 + 2];
+    const o = t * 9;
+    out[o] = nx; out[o + 1] = ny; out[o + 2] = nz;
+    out[o + 3] = nx; out[o + 4] = ny; out[o + 5] = nz;
+    out[o + 6] = nx; out[o + 7] = ny; out[o + 8] = nz;
+  }
+  return out;
+}
+
+/**
+ * The UI needs one copy for the viewer and one to hand to the validation worker.
+ * Making the second copy here keeps a ~100 MB memcpy off the main thread.
+ */
+function attachDisplayAndValidationBuffers(response: WorkerResponse): WorkerResponse {
+  if (!response.positions || !response.normals || !response.triCount) return response;
+  return {
+    ...response,
+    vertexNormals: expandFaceNormals(response.normals, response.triCount),
+    validationPositions: response.positions.slice(),
+    validationNormals: response.normals.slice(),
+  };
+}
+
 function generatedResultTransferList(response: WorkerResponse): Transferable[] {
   const transfers: Transferable[] = [];
   // Generated result buffers are worker-owned after marching/cleanup and are
@@ -55,6 +82,9 @@ function generatedResultTransferList(response: WorkerResponse): Transferable[] {
   // copying the large position/normal payloads.
   if (response.positions) transfers.push(response.positions.buffer);
   if (response.normals) transfers.push(response.normals.buffer);
+  if (response.vertexNormals) transfers.push(response.vertexNormals.buffer);
+  if (response.validationPositions) transfers.push(response.validationPositions.buffer);
+  if (response.validationNormals) transfers.push(response.validationNormals.buffer);
   if (response.surfaceSamplePositions) transfers.push(response.surfaceSamplePositions.buffer);
   if (response.surfaceSampleNormals) transfers.push(response.surfaceSampleNormals.buffer);
   if (response.surfaceSampleHoleScales) transfers.push(response.surfaceSampleHoleScales.buffer);
@@ -112,6 +142,11 @@ export interface WorkerResponse {
   positions?: Float32Array;
   normals?: Float32Array;
   triCount?: number;
+  /** Per-vertex normals for display, 9 per triangle. */
+  vertexNormals?: Float32Array;
+  /** Independent copies for the validation worker so the UI never copies them. */
+  validationPositions?: Float32Array;
+  validationNormals?: Float32Array;
   validation?: ValidationResult;
   surfaceSamplePositions?: Float32Array;
   surfaceSampleNormals?: Float32Array;
@@ -688,13 +723,13 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
             progress: 0.95,
             message: `Geometry ready via ${selectedBackend} in ${Math.round(performance.now() - tiledStart)}ms (${tileStats.tilesSkipped}/${tileStats.tilesTotal} tiles skipped)`
           } as WorkerResponse);
-          const response: WorkerResponse = {
+          const response = attachDisplayAndValidationBuffers({
             type: 'result',
             positions: result.positions,
             normals: result.normals,
             triCount: result.triCount,
             backend: selectedBackend,
-          };
+          });
           postWorkerMessage(response, generatedResultTransferList(response));
           return;
         } catch (err: unknown) {
@@ -801,7 +836,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
       // Send generated geometry immediately. positions/normals and optional
       // surface sample buffers are transferred; validation runs separately.
       const packedSamples = packSurfaceSamples(surfaceSamples);
-      const response: WorkerResponse = {
+      const response = attachDisplayAndValidationBuffers({
         type: 'result',
         positions: result.positions,
         normals: result.normals,
@@ -811,7 +846,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         surfaceSampleHoleScales: packedSamples?.holeScales,
         thinFilterSkipped: thinFilterSkipped ?? undefined,
         backend: 'cpu-single',
-      };
+      });
       postWorkerMessage(response, generatedResultTransferList(response));
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Unknown error';

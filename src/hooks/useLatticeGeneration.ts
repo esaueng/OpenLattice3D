@@ -196,8 +196,9 @@ export function useLatticeGeneration(): LatticeGenerationControls {
 
       const validationMsg: ValidationWorkerMessage = {
         type: 'validate',
-        positions: new Float32Array(resp.positions),
-        normals: new Float32Array(resp.normals),
+        // The worker ships an independent copy; copying 100 MB here stalled the UI.
+        positions: resp.validationPositions ?? new Float32Array(resp.positions),
+        normals: resp.validationNormals ?? new Float32Array(resp.normals),
         triCount: resp.triCount,
         params: store.params,
         generationSeed,
@@ -283,6 +284,7 @@ export function useLatticeGeneration(): LatticeGenerationControls {
           positions: resp.positions,
           normals: resp.normals,
           triCount: resp.triCount,
+          vertexNormals: resp.vertexNormals,
         }, snapshot);
         current.setGenerating(false);
         current.setProgress(1, 'Complete');
