@@ -299,7 +299,7 @@ describe('workspace transitions', () => {
   it('returns to the source model when multiview closes', () => {
     useStore.getState().setSampleShape('cube');
     useStore.getState().startDemoRun();
-    expect(useStore.getState().viewMode).toBe('lattice');
+    expect(useStore.getState().viewMode).toBe('cross_section');
 
     useStore.getState().setDemoModeActive(false);
 
@@ -455,5 +455,92 @@ describe('completed result staleness', () => {
     expect(useStore.getState().resultMesh).toBeNull();
     expect(useStore.getState().resultSnapshot).toBeNull();
     expect(useStore.getState().viewMode).toBe('original');
+  });
+});
+
+describe('parameter continuity across model and type changes', () => {
+  beforeEach(() => {
+    useStore.getState().resetProject();
+  });
+
+  it('keeps the user parameters when a sample part is chosen', () => {
+    useStore.getState().updateParams({ cellSize: 6, wallThickness: 1.4, exportResolution: 5 });
+    useStore.getState().setSampleShape('torus');
+    expect(useStore.getState().params.cellSize).toBe(6);
+    expect(useStore.getState().params.wallThickness).toBe(1.4);
+    expect(useStore.getState().params.exportResolution).toBe(5);
+  });
+
+  it('restores the overwritten values when leaving a polygon surface type', () => {
+    useStore.getState().setSampleShape('cube');
+    useStore.getState().updateParams({ cellSize: 9, exportResolution: 3, minFeatureSize: 0.8 });
+
+    useStore.getState().setLatticeType('hexagon');
+    let p = useStore.getState().params;
+    expect([p.cellSize, p.exportResolution, p.minFeatureSize, p.surfaceOnly, p.variant]).toEqual([4, 5, 2, true, 'implicit_conformal']);
+
+    useStore.getState().setLatticeType('gyroid');
+    p = useStore.getState().params;
+    expect([p.cellSize, p.exportResolution, p.minFeatureSize, p.surfaceOnly, p.noShell, p.variant]).toEqual([9, 3, 0.8, false, false, 'shell_core']);
+    expect(useStore.getState().polygonOverrideBackup).toBeNull();
+  });
+
+  it('does not clobber a value the user changed while the polygon type was active', () => {
+    useStore.getState().setSampleShape('cube');
+    useStore.getState().updateParams({ cellSize: 9 });
+    useStore.getState().setLatticeType('triangle');
+    useStore.getState().updateParams({ cellSize: 3 });
+    useStore.getState().setLatticeType('hexagon');
+    useStore.getState().setLatticeType('bcc');
+    expect(useStore.getState().params.cellSize).toBe(3);
+    expect(useStore.getState().params.surfaceOnly).toBe(false);
+  });
+
+  it('applies a multiview edit to every tile', () => {
+    useStore.getState().setSampleShape('cube');
+    useStore.getState().startDemoRun();
+    useStore.getState().updateParams({ cellSize: 11 });
+    const byType = useStore.getState().demoParamsByType;
+    expect(byType.gyroid?.cellSize).toBe(11);
+    expect(byType.bcc?.cellSize).toBe(11);
+    expect(byType.hexagon?.cellSize).toBe(11);
+    expect(byType.hexagon?.surfaceOnly).toBe(true);
+    expect(byType.hexagon?.latticeType).toBe('hexagon');
+  });
+});
+
+describe('imported mesh fixes', () => {
+  beforeEach(() => {
+    useStore.getState().resetProject();
+  });
+
+  it('rescales an imported mesh in place and keeps painted faces', () => {
+    const mesh = generateCubeMesh(1);
+    useStore.getState().setOriginalMesh(mesh, analyzeMesh(mesh), 'inch.stl');
+    useStore.getState().toggleKeepOut(2);
+    useStore.getState().setResultMesh(mesh);
+    useStore.getState().scaleOriginalMesh(25.4);
+    const state = useStore.getState();
+    expect(state.meshInfo?.boundingBox.max[0]).toBeCloseTo(12.7, 5);
+    expect(state.meshInfo?.volumeMm3).toBeCloseTo(25.4 ** 3, 1);
+    expect(state.keepOutTris.has(2)).toBe(true);
+    expect(state.resultMesh).toBeNull();
+    expect(state.viewMode).toBe('original');
+  });
+
+  it('closes boundary loops and reports the edge counts', () => {
+    const cube = generateCubeMesh(30);
+    const open = {
+      positions: cube.positions.slice(0, 10 * 9),
+      normals: cube.normals.slice(0, 10 * 3),
+      triCount: 10,
+    };
+    useStore.getState().setOriginalMesh(open, analyzeMesh(open), 'open.stl');
+    expect(useStore.getState().closeMeshHoles()).toEqual({ before: 4, after: 0 });
+    const state = useStore.getState();
+    expect(state.meshInfo?.isWatertight).toBe(true);
+    expect(state.meshInfo?.repaired).toBe(true);
+    expect(state.originalMesh?.triCount).toBeGreaterThan(10);
+    expect(useStore.getState().closeMeshHoles()).toBeNull();
   });
 });
