@@ -2,13 +2,13 @@ import { forwardRef, useCallback, useEffect, useLayoutEffect, useRef, useState, 
 import { LeftPanel } from './components/LeftPanel';
 import { Viewer3D } from './components/Viewer3D';
 import { ViewerControls } from './components/ViewerControls';
-import { ExportControls } from './components/ExportControls';
 import { useStore, type LogEntry } from './store/useStore';
 import { registerNotificationServiceWorker } from './utils/notifications';
 import { escapeControlCharacters } from './utils/text-safety';
 import { useLatticeGeneration } from './hooks/useLatticeGeneration';
 import { useWorkspaceHotkeys } from './hooks/useWorkspaceHotkeys';
 import { summarizeValidation } from './utils/validation-summary';
+import { useResultStaleness } from './store/useResultStaleness';
 import './App.css';
 
 function App() {
@@ -90,8 +90,10 @@ function HydratedApp() {
     keepOutTris,
     keepInTris,
     selectionMode,
+    demoQueue,
   } = useStore();
   const generationControls = useLatticeGeneration();
+  const staleness = useResultStaleness();
   const [logsExpanded, setLogsExpanded] = useState(false);
   const logsTabRef = useRef<HTMLButtonElement>(null);
   const logsDrawerRef = useRef<HTMLDivElement>(null);
@@ -122,12 +124,19 @@ function HydratedApp() {
 
   const hasModel = Boolean(originalMesh || sphereMode);
   const modelLabel = meshFileName || (sphereMode ? 'Primitive sphere' : 'Untitled lattice study');
-  const resultStats = resultMesh ? `${resultMesh.triCount.toLocaleString()} tris` : 'Mesh pending';
+  const resultStats = resultMesh
+    ? `${resultMesh.triCount.toLocaleString()} tris${staleness.stale ? ' · settings changed' : ''}`
+    : 'Mesh pending';
   const progressLabel = `${Math.round(progress * 100)}%`;
-  const solverStatus = generating ? `Generating ${progressLabel}` : hasModel ? 'Ready' : 'Idle';
+  const comparing = demoModeActive && demoQueue.total > 0;
+  const solverStatus = generating
+    ? `Generating ${progressLabel}`
+    : comparing
+      ? `Comparing ${demoQueue.done} of ${demoQueue.total}`
+      : hasModel ? 'Ready' : 'Idle';
   const viewportMode = demoModeActive ? 'Multiview' : hasModel ? 'Interactive' : 'Standby';
   const showFaceLegend = keepOutTris.size > 0 || keepInTris.size > 0 || selectionMode !== 'none';
-  const checks = summarizeValidation(validation, Boolean(resultMesh), generating);
+  const checks = summarizeValidation(validation, Boolean(resultMesh), generating, staleness.stale);
 
   // The statusbar verdict is a route to the detail, not another dead readout.
   const revealValidation = () => {
@@ -159,7 +168,6 @@ function HydratedApp() {
           <span className="breadcrumb-sep">/</span>
           <span className="chrome-path-leaf">{params.latticeType}</span>
         </div>
-        <ExportControls />
       </header>
 
       <main className="workspace" id="main-content" tabIndex={-1}>

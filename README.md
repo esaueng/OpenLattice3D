@@ -109,9 +109,11 @@ COEP compatibility problems with third-party form resources.
 
 ### 1. Import a Model
 
-- **Import STL**: load any STL file (binary or ASCII). The app analyzes the mesh for
-  watertightness/manifoldness and applies a basic repair (normal recalculation) if needed.
-- **Import JSON**: resume a versioned project with its parameters, embedded source mesh,
+- **Import STL**: load any STL file (binary or ASCII). The model card shows its size,
+  volume, and how many lattice cells fit across the shortest side. Open or non-manifold
+  meshes get their face normals recomputed, and the card says so plainly: the surface
+  stays open and generated geometry from it is unreliable.
+- **Open JSON**: resume a versioned project with its parameters, embedded source mesh,
   selection masks, validation results, and viewer state. Legacy parameter-only JSON files
   remain supported; malformed or out-of-range values are ignored.
 - **Sample Part**: pick a built-in procedural shape (sphere, cube, cylinder, torus, capsule)
@@ -134,10 +136,11 @@ COEP compatibility problems with third-party form resources.
   below the selected width without uniformly thinning geometry that survives.
   The run log reports when the export grid cannot resolve the requested width.
 
-### 3. Multiview
+### 3. Compare
 
-Enable "Show all 12 windows" to render every lattice type side-by-side for the current model.
-Click a tile to make that lattice type active.
+Enable "Compare all 12 lattice types" to render every lattice type side-by-side for the
+current model. Tiles show "Queued" until their run starts and the status bar reports how
+many of the twelve are done. Click a tile to make that lattice type active.
 
 ### 4. Generate
 
@@ -149,6 +152,10 @@ support `Ctrl/Cmd+Z` and `Ctrl/Cmd+Shift+Z` undo/redo.
 ### 5. Validate
 
 After generation, the validation panel shows:
+- **Out of date**: whenever a parameter, the seed, the model, or the painted faces change
+  after a run, the result on screen is kept but marked out of date in the status bar, the
+  validation panel, and the export buttons until you regenerate. Cancelling a run keeps the
+  previous result and its verdict.
 - **Outer Deviation**: max deviation from original surface vs. tolerance
 - **Min Thickness**: thinnest feature measured (must exceed min feature size)
 - **Manifold/Watertight**: printability check
@@ -159,12 +166,15 @@ After generation, the validation panel shows:
 - **Export STL**: binary STL of the lattice result (outward-oriented triangles)
 - **Export 3MF**: indexed triangle mesh in a standards-based, millimetre-unit 3MF package
 - **Export OBJ**: indexed Wavefront OBJ geometry (the format does not declare units)
-- **Export Project JSON**: a resumable project with its source geometry and workspace state
+- **Save Project JSON**: a resumable project with its source geometry and workspace state
+
+Export lives in the setup panel below the validation results.
 
 Every project carries a versioned 32-bit generation seed. Repeated generation with the same
 project, seed, application version, parameters, and resolution is byte-deterministic even when
 tile completion order or the worker-pool size changes. Use **Reseed** for an intentional new
-stochastic result; generation never draws from ambient randomness. Project JSON preserves the
+stochastic result; it lives under **Advanced** in the Lattice section and marks the current
+result out of date rather than discarding it. Generation never draws from ambient randomness. Project JSON preserves the
 seed and PRNG version, while STL, 3MF, and OBJ exports include the seed in their available
 metadata fields.
 
