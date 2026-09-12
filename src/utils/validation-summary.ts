@@ -1,6 +1,6 @@
 import type { ValidationResult } from '../types/project';
 
-export type ValidationTone = 'idle' | 'running' | 'unvalidated' | 'pass' | 'fail';
+export type ValidationTone = 'idle' | 'running' | 'stale' | 'unvalidated' | 'pass' | 'fail';
 
 export interface ValidationSummary {
   tone: ValidationTone;
@@ -32,6 +32,7 @@ export function summarizeValidation(
   validation: ValidationResult | null,
   hasResult: boolean,
   generating: boolean,
+  stale = false,
 ): ValidationSummary {
   const base = { failedCount: 0, totalCount: VALIDATION_CHECK_COUNT, failedLabels: [] as string[] };
 
@@ -50,6 +51,23 @@ export function summarizeValidation(
       tone: 'idle',
       label: 'Checks: no result yet',
       detail: 'No lattice generated yet. Generate a lattice to run the manufacturability checks.',
+    };
+  }
+
+  if (stale) {
+    const failedLabels = validation ? failingChecks(validation) : [];
+    const previous = !validation
+      ? 'It was never validated.'
+      : failedLabels.length === 0
+        ? 'The previous run passed all checks.'
+        : `The previous run failed ${failedLabels.length} of ${VALIDATION_CHECK_COUNT} checks (${failedLabels.join(', ')}).`;
+    return {
+      tone: 'stale',
+      label: 'Checks: out of date',
+      detail: `Settings changed since this result was generated; exports still use the previous result. ${previous} Regenerate to refresh.`,
+      failedCount: failedLabels.length,
+      totalCount: VALIDATION_CHECK_COUNT,
+      failedLabels,
     };
   }
 

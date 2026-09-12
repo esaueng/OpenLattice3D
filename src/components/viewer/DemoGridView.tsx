@@ -16,6 +16,7 @@ import {
   XRayView,
 } from './ViewerMeshViews';
 import { demoGridResolution, demoGridWorkerLimit } from './demo-grid-limits';
+import { useStore } from '../../store/useStore';
 
 const DEMO_VIEW_TARGET_RADIUS = 8;
 const DEMO_TILE_ITEMS: Array<{ type: LatticeType; label: string }> = [
@@ -99,7 +100,7 @@ function DemoTileViewer({ tile, viewMode, clipPlane, placeholder, selectedLattic
         <OrbitControls makeDefault target={[0, 0, 0]} />
       </Canvas>
       {tile.status !== 'done' && (
-        <div className="demo-window-status">{tile.status === 'error' ? (tile.error ?? 'Error') : 'Generating...'}</div>
+        <div className="demo-window-status">{tile.status === 'error' ? (tile.error ?? 'Error') : tile.status === 'running' ? 'Generating…' : 'Queued'}</div>
       )}
     </div>
   );
@@ -122,6 +123,14 @@ export function DemoGridView({ params, demoParamsByType, generationSeed, runId, 
   keepInTris: Set<number>;
 }) {
   const [tiles, setTiles] = useState<DemoTileState[]>(() => DEMO_TILE_ITEMS.map((item) => ({ ...item, status: 'pending', result: null })));
+  const setDemoQueue = useStore((s) => s.setDemoQueue);
+  useEffect(() => {
+    setDemoQueue({
+      done: tiles.filter((tile) => tile.status === 'done' || tile.status === 'error').length,
+      running: tiles.filter((tile) => tile.status === 'running').length,
+      total: tiles.length,
+    });
+  }, [setDemoQueue, tiles]);
   const workersRef = useRef<Map<LatticeType, Worker>>(new Map());
   const queuedJobsRef = useRef<Map<LatticeType, DemoTileJob>>(new Map());
   const drainQueueRef = useRef<() => void>(() => undefined);

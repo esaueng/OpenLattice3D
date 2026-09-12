@@ -18,7 +18,7 @@ export type LatticeType =
 
 export type SampleShape = 'sphere' | 'cube' | 'cylinder' | 'torus' | 'capsule';
 
-export type SelectionMode = 'keep_out' | 'keep_in' | 'none';
+export type SelectionMode = 'keep_out' | 'keep_in' | 'erase' | 'none';
 
 export type GenerationVariant = 'shell_core' | 'implicit_conformal';
 
@@ -36,6 +36,12 @@ export interface MeshInfo {
   isWatertight: boolean;
   isManifold: boolean;
   repaired: boolean;
+  /** Edges owned by exactly one triangle (holes in the surface). */
+  boundaryEdges: number;
+  /** Edges shared by three or more triangles. */
+  nonManifoldEdges: number;
+  /** Enclosed volume in mm³, or null when the mesh is not closed. */
+  volumeMm3: number | null;
 }
 
 export interface LatticeParams {

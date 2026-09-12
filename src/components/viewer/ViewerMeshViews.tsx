@@ -337,8 +337,8 @@ export function OriginalMeshView({
       event.faceIndex,
       brushRadius,
     );
-    onPaint(faces, !event.altKey);
-  }, [brushRadius, centroids, mesh, onPaint]);
+    onPaint(faces, selectionMode !== 'erase' && !event.altKey);
+  }, [brushRadius, centroids, mesh, onPaint, selectionMode]);
 
   const handlePointerDown = useCallback((event: ThreeEvent<PointerEvent>) => {
     if (selectionMode === 'none') return;

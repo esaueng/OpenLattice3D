@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../store/useStore';
 import { summarizeValidation } from '../utils/validation-summary';
+import { useResultStaleness } from '../store/useResultStaleness';
 import {
   download3MF,
   downloadOBJ,
@@ -31,6 +32,7 @@ export function ExportControls() {
     clipPlane,
     viewerBackground,
     generationSeed,
+    generating,
   } = useStore(useShallow((s) => ({
     validation: s.validation,
     resultMesh: s.resultMesh,
@@ -44,7 +46,9 @@ export function ExportControls() {
     clipPlane: s.clipPlane,
     viewerBackground: s.viewerBackground,
     generationSeed: s.generationSeed,
+    generating: s.generating,
   })));
+  const staleness = useResultStaleness();
   const [simplifyRatio, setSimplifyRatio] = useState(1);
   const [busy, setBusy] = useState(false);
 
@@ -64,8 +68,13 @@ export function ExportControls() {
   const estimatedTriangles = resultMesh ? Math.round(resultMesh.triCount * simplifyRatio) : 0;
   // Never blocks the export -- wanting the mesh anyway is legitimate -- but the
   // risk must not be silent on a print-preparation tool.
-  const checks = summarizeValidation(validation, Boolean(resultMesh), false);
-  const checksFailed = checks.tone === 'fail';
+  const checks = summarizeValidation(validation, Boolean(resultMesh), false, staleness.stale);
+  const checksFailed = checks.tone === 'fail' || (checks.tone === 'stale' && checks.failedCount > 0);
+  const previousResult = staleness.stale || generating;
+  const caution = checksFailed || previousResult;
+  const meshLabel = (format: string) => (
+    checksFailed ? `Export ${format} anyway` : previousResult ? `Export previous ${format}` : `Export ${format}`
+  );
   const runExport = async (task: () => void) => {
     setBusy(true);
     try {
@@ -78,9 +87,10 @@ export function ExportControls() {
   };
 
   return (
-    <section className="export-controls-panel" aria-label="Export controls">
+    <section className="panel-section export-section" aria-label="Export">
+      <h3>Export</h3>
       {resultMesh && (
-        <div className="export-simplify">
+        <div className="row export-simplify">
           <label htmlFor="export-simplify">Detail:</label>
           <select
             id="export-simplify"
@@ -98,22 +108,27 @@ export function ExportControls() {
               ? `Target only; the ${params.toleranceMm}mm deviation tolerance may retain more triangles.`
               : 'Full extracted detail.'}
           >
-            ~{estimatedTriangles.toLocaleString()} triangles
+            ~{estimatedTriangles.toLocaleString()} tris
           </span>
         </div>
       )}
-      {resultMesh && checksFailed && (
-        <span className="export-warning" id="export-validation-note">
-          {checks.failedCount} of {checks.totalCount} checks failed
-        </span>
+      {resultMesh && caution && (
+        <div className="warning export-warning" id="export-validation-note" role="status">
+          {checksFailed && `${checks.failedCount} of ${checks.totalCount} checks failed. `}
+          {generating
+            ? 'A new run is in progress; exports use the previous result.'
+            : staleness.stale
+              ? 'Settings changed since this result was generated; exports use the previous result.'
+              : 'The exported mesh may not be printable.'}
+        </div>
       )}
       <div className="export-controls-actions">
         {resultMesh && (
           <>
             <button
-              className={`btn btn-small ${checksFailed ? 'btn-caution' : 'btn-primary'}`}
+              className={`btn btn-small ${caution ? 'btn-caution' : 'btn-primary'}`}
               disabled={busy}
-              aria-describedby={checksFailed ? 'export-validation-note' : undefined}
+              aria-describedby={caution ? 'export-validation-note' : undefined}
               title="Download a 3MF package with millimetre units and indexed vertices."
               onClick={() => void runExport(() => download3MF(
                 resultMesh,
@@ -121,11 +136,12 @@ export function ExportControls() {
                 meshOptions,
               ))}
             >
-              {busy ? 'Working...' : checksFailed ? 'Export 3MF anyway' : 'Export 3MF'}
+              {busy ? 'Working...' : meshLabel('3MF')}
             </button>
             <button
-              className="btn btn-small"
+              className={`btn btn-small ${caution ? 'btn-caution' : ''}`}
               disabled={busy}
+              aria-describedby={caution ? 'export-validation-note' : undefined}
               title="Download as STL. This format does not declare its units."
               onClick={() => void runExport(() => downloadSTL(
                 resultMesh,
@@ -133,11 +149,12 @@ export function ExportControls() {
                 meshOptions,
               ))}
             >
-              Export STL
+              {meshLabel('STL')}
             </button>
             <button
-              className="btn btn-small"
+              className={`btn btn-small ${caution ? 'btn-caution' : ''}`}
               disabled={busy}
+              aria-describedby={caution ? 'export-validation-note' : undefined}
               title="Download as Wavefront OBJ. Indexed, but the format does not declare its units."
               onClick={() => void runExport(() => downloadOBJ(
                 resultMesh,
@@ -146,14 +163,14 @@ export function ExportControls() {
                 meshOptions,
               ))}
             >
-              Export OBJ
+              {meshLabel('OBJ')}
             </button>
           </>
         )}
         <button
           className="btn btn-small"
           disabled={busy}
-          title="Export the source model, current parameters, face constraints, and viewer settings to a project JSON file."
+          title="Save the source model, current parameters, face constraints, and viewer settings to a project JSON file."
           onClick={() => downloadProjectJSON({
             params,
             generationSeed,
@@ -165,7 +182,7 @@ export function ExportControls() {
             viewerBackground,
           })}
         >
-          Export Project JSON
+          Save Project JSON
         </button>
       </div>
     </section>
