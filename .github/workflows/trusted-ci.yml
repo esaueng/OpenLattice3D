@@ -73,7 +73,7 @@ jobs:
     if: needs.authorize.outputs.trusted == 'true' && vars.CI_FLEET_ENABLED == 'true'
     permissions:
       id-token: write
-    uses: esaueng/remus/.github/workflows/select-runner.yml@8cf263108cef108a72156268f0de2db019127de2 # reviewed workflow (unreleased)
+    uses: esaueng/remus/.github/workflows/select-runner.yml@70025f3a8ae00ab29408781b3b576c02f26af8ae # reviewed workflow (unreleased)
     with:
       enabled: true
   quality:
