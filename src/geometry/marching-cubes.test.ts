@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { marchingCubes, marchingCubesFromField } from './marching-cubes';
+import { marchingCubes, marchingCubesFromField, marchingCubesRectangular } from './marching-cubes';
 import { checkTopology } from './validation';
 import type { Vec3 } from './vec3';
 
@@ -57,6 +57,22 @@ describe('marchingCubes', () => {
 });
 
 describe('marchingCubesFromField', () => {
+  it('shares near-zero vertices exactly when neighboring cubes traverse an edge in reverse', () => {
+    const mesh = marchingCubesRectangular(
+      (x) => x - 1e-13,
+      { min: [0, 0, 0], max: [1, 2, 1] },
+      [1, 2, 1],
+    );
+    // The two cells meet at y=1. Their common surface edge must have one
+    // exact x coordinate, so exact welding also works near the origin.
+    const sharedX = new Set<number>();
+    for (let i = 0; i < mesh.positions.length; i += 3) {
+      if (mesh.positions[i + 1] === 1) sharedX.add(mesh.positions[i]);
+    }
+    expect(sharedX.size).toBe(1);
+    expect([...sharedX][0]).toBeCloseTo(1e-13, 18);
+  });
+
   it('rejects fields whose length does not match the cell grid', () => {
     expect(() => marchingCubesFromField(new Float32Array(10), bounds, [4, 4, 4])).toThrow(/does not match/);
   });
