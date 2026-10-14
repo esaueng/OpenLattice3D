@@ -8,6 +8,8 @@ import {
 } from '../geometry/lattice';
 import { marchingCubesRectangular, type MarchingCubesResult } from '../geometry/marching-cubes';
 import { DEFAULT_PARAMS } from '../types/project';
+import { closeBoundaryLoops } from '../geometry/mesh-repair';
+import { analyzeTopology } from '../geometry/__tests__/helpers';
 import type { LatticeTileJob, LatticeTileResponse } from './tile-types';
 import { runTiledGeneration, type TileWorkerLike } from './tiled-generation';
 
@@ -48,7 +50,7 @@ class ComputingTileWorker implements TileWorkerLike {
     };
     setTimeout(() => {
       if (!this.terminated) this.onmessage?.({ data: response });
-    }, (7 - job.tileId) % 4);
+    }, (7 - job.tileId % 8) % 4);
   }
 
   terminate(): void { this.terminated = true; }
@@ -65,6 +67,22 @@ class RejectingTileWorker implements TileWorkerLike {
 }
 
 describe('tiled generation scheduling determinism', () => {
+  it.each([
+    ['gyroid', 96], ['gyroid', 192], ['bcc', 192],
+  ] as const)('keeps a shell-bearing %s torus closed at resolution %i', async (latticeType, resolution) => {
+    const params = { ...DEFAULT_PARAMS, latticeType };
+    const { result } = await runTiledGeneration(
+      params, 0, 'torus', 25,
+      { min: [-32, -32, -12], max: [32, 32, 12] }, resolution,
+      () => undefined, () => false,
+      { workerCount: 1, createWorker: () => new ComputingTileWorker() },
+    );
+    const repaired = closeBoundaryLoops(result);
+    const topology = analyzeTopology(repaired.result);
+    expect(repaired.result.triCount).toBeGreaterThan(100_000);
+    expect(topology.boundaryEdges).toBe(0);
+    expect(topology.nonManifoldEdges).toBe(0);
+  });
   it('keeps geometry byte-identical across supported worker counts and out-of-order tiles', async () => {
     const params = {
       ...DEFAULT_PARAMS,
