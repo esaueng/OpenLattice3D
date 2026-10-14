@@ -101,8 +101,11 @@ const TRI_TABLE: number[][] = [
   [1,3,8,9,1,8], [0,9,1], [0,3,8], []
 ];
 
-const EDGE_START = new Uint8Array([0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3]);
-const EDGE_END = new Uint8Array([1, 2, 3, 0, 5, 6, 7, 4, 4, 5, 6, 7]);
+// Interpolate every edge in the positive grid-axis direction. Adjacent cubes
+// otherwise traverse shared edges in opposite directions, which can round to
+// different Float32 coordinates near zero and split a shared vertex into two.
+const EDGE_START = new Uint8Array([0, 1, 3, 0, 4, 5, 7, 4, 0, 1, 2, 3]);
+const EDGE_END = new Uint8Array([1, 2, 2, 3, 5, 6, 6, 7, 4, 5, 6, 7]);
 const CORNER_X = new Uint8Array([0, 1, 1, 0, 0, 1, 1, 0]);
 const CORNER_Y = new Uint8Array([0, 0, 1, 1, 0, 0, 1, 1]);
 const CORNER_Z = new Uint8Array([0, 0, 0, 0, 1, 1, 1, 1]);
