@@ -1,5 +1,8 @@
+import { countApi, handleGlimpseUsage, type GlimpseEnv } from './glimpse';
+
 export default {
-  async fetch(request: Request) {
+  async fetch(request: Request, env: GlimpseEnv = {}, ctx?: Pick<ExecutionContext, 'waitUntil'>) {
+    const started = performance.now();
     const url = new URL(request.url);
 
     if (url.pathname === '/healthz') {
@@ -26,6 +29,12 @@ export default {
       });
     }
 
-    return new Response('Not found', { status: 404 });
+    if (url.pathname === '/api/glimpse/usage') return handleGlimpseUsage(request, env);
+    const response = new Response('Not found', { status: 404 });
+    // No geometry API exists today. Health, assets and usage relay are excluded.
+    if (url.pathname.startsWith('/api/') && ctx && env.GLIMPSE_BASIC_ENABLED === 'true') {
+      ctx.waitUntil(countApi(env, response.status, performance.now() - started));
+    }
+    return response;
   },
 };

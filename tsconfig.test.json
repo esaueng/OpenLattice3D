@@ -17,5 +17,5 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true
   },
-  "include": ["src/**/__tests__/**/*.ts"]
+  "include": ["src/**/__tests__/**/*.ts", "worker/**/*.ts", "worker-configuration.d.ts"]
 }
