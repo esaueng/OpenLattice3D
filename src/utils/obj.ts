@@ -11,7 +11,9 @@ import { escapeControlCharacters } from './text-safety';
 import { formatGenerationSeed } from '../geometry/deterministic-random';
 
 function coord(value: number): string {
-  return Number(value.toFixed(4)).toString();
+  // Coordinates originate in Float32Array buffers. Preserve their exact value;
+  // fixed decimal rounding can merge nearby vertices and collapse valid faces.
+  return value.toString();
 }
 
 export interface ObjOptions {

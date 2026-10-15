@@ -22,6 +22,7 @@ export function ExportControls() {
   const {
     validation,
     resultMesh,
+    resultSnapshot,
     params,
     meshFileName,
     keepOutTris,
@@ -36,6 +37,7 @@ export function ExportControls() {
   } = useStore(useShallow((s) => ({
     validation: s.validation,
     resultMesh: s.resultMesh,
+    resultSnapshot: s.resultSnapshot,
     params: s.params,
     meshFileName: s.meshFileName,
     keepOutTris: s.keepOutTris,
@@ -50,7 +52,10 @@ export function ExportControls() {
   })));
   const staleness = useResultStaleness();
   const [simplifyRatio, setSimplifyRatio] = useState(1);
-  const [busy, setBusy] = useState(false);
+  const [busyFormat, setBusyFormat] = useState<'3MF' | 'STL' | 'OBJ' | null>(null);
+  const busy = busyFormat !== null;
+  const meshParams = resultSnapshot?.params ?? params;
+  const meshSeed = resultSnapshot?.generationSeed ?? generationSeed;
 
   const source = originalMesh
     ? { kind: 'mesh' as const, fileName: meshFileName, mesh: originalMesh }
@@ -62,8 +67,8 @@ export function ExportControls() {
   const baseName = meshFileName.replace(/\.[^.]+$/i, '') || 'lattice';
   const meshOptions = {
     simplifyRatio,
-    maxError: params.toleranceMm,
-    generationSeed,
+    maxError: meshParams.toleranceMm,
+    generationSeed: meshSeed,
   };
   const estimatedTriangles = resultMesh ? Math.round(resultMesh.triCount * simplifyRatio) : 0;
   // Never blocks the export -- wanting the mesh anyway is legitimate -- but the
@@ -75,14 +80,14 @@ export function ExportControls() {
   const meshLabel = (format: string) => (
     checksFailed ? `Export ${format} anyway` : previousResult ? `Export previous ${format}` : `Export ${format}`
   );
-  const runExport = async (task: () => void) => {
-    setBusy(true);
+  const runExport = async (format: '3MF' | 'STL' | 'OBJ', task: () => void) => {
+    setBusyFormat(format);
     try {
       // Paint the busy state before synchronous decimation starts.
       await new Promise((resolve) => setTimeout(resolve, 0));
       task();
     } finally {
-      setBusy(false);
+      setBusyFormat(null);
     }
   };
 
@@ -94,7 +99,7 @@ export function ExportControls() {
           <label htmlFor="export-simplify">Detail:</label>
           <select
             id="export-simplify"
-            title={`Simplify exports without exceeding the ${params.toleranceMm}mm deviation tolerance. The viewport remains full detail.`}
+            title={`Simplify exports without exceeding the ${meshParams.toleranceMm}mm deviation tolerance. The viewport remains full detail.`}
             value={simplifyRatio}
             onChange={(event) => setSimplifyRatio(Number(event.target.value))}
           >
@@ -105,7 +110,7 @@ export function ExportControls() {
           <span
             className="export-estimate"
             title={simplifyRatio < 1
-              ? `Target only; the ${params.toleranceMm}mm deviation tolerance may retain more triangles.`
+              ? `Target only; the ${meshParams.toleranceMm}mm deviation tolerance may retain more triangles.`
               : 'Full extracted detail.'}
           >
             ~{estimatedTriangles.toLocaleString()} tris
@@ -130,40 +135,40 @@ export function ExportControls() {
               disabled={busy}
               aria-describedby={caution ? 'export-validation-note' : undefined}
               title="Download a 3MF package with millimetre units and indexed vertices."
-              onClick={() => void runExport(() => download3MF(
+              onClick={() => void runExport('3MF', () => download3MF(
                 resultMesh,
                 `${baseName}-lattice.3mf`,
                 meshOptions,
               ))}
             >
-              {busy ? 'Working...' : meshLabel('3MF')}
+              {busyFormat === '3MF' ? 'Working...' : meshLabel('3MF')}
             </button>
             <button
               className={`btn btn-small ${caution ? 'btn-caution' : ''}`}
               disabled={busy}
               aria-describedby={caution ? 'export-validation-note' : undefined}
               title="Download as STL. This format does not declare its units."
-              onClick={() => void runExport(() => downloadSTL(
+              onClick={() => void runExport('STL', () => downloadSTL(
                 resultMesh,
                 `${baseName}-lattice.stl`,
                 meshOptions,
               ))}
             >
-              {meshLabel('STL')}
+              {busyFormat === 'STL' ? 'Working...' : meshLabel('STL')}
             </button>
             <button
               className={`btn btn-small ${caution ? 'btn-caution' : ''}`}
               disabled={busy}
               aria-describedby={caution ? 'export-validation-note' : undefined}
               title="Download as Wavefront OBJ. Indexed, but the format does not declare its units."
-              onClick={() => void runExport(() => downloadOBJ(
+              onClick={() => void runExport('OBJ', () => downloadOBJ(
                 resultMesh,
-                { meshFileName, params },
+                { meshFileName, params: meshParams },
                 `${baseName}-lattice.obj`,
                 meshOptions,
               ))}
             >
-              {meshLabel('OBJ')}
+              {busyFormat === 'OBJ' ? 'Working...' : meshLabel('OBJ')}
             </button>
           </>
         )}
