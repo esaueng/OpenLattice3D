@@ -1908,3 +1908,7 @@ textarea:focus-visible,
     align-self: center;
   }
 }
+
+.analytics-choice { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; }
+.analytics-choice input { flex-shrink: 0; margin-top: 3px; }
+.analytics-description { font-size: 12px; line-height: 1.6; margin: 10px 0 0; }

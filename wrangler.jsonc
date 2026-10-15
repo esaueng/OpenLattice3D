@@ -14,7 +14,11 @@
   ],
   "assets": {
     "directory": "./dist",
-    "run_worker_first": ["/health", "/healthz"]
+    "run_worker_first": [
+      "/health",
+      "/healthz",
+      "/api/*"
+    ]
   },
   "observability": {
     "enabled": false,
@@ -30,5 +34,19 @@
       "persist": true,
       "head_sampling_rate": 1
     }
-  }
+  },
+  "vars": {
+    "GLIMPSE_BASIC_ENABLED": "false",
+    "GLIMPSE_USAGE_ENABLED": "false"
+  },
+  "ratelimits": [
+    {
+      "name": "GLIMPSE_USAGE_LIMITER",
+      "namespace_id": "2026101503",
+      "simple": {
+        "limit": 120,
+        "period": 60
+      }
+    }
+  ]
 }

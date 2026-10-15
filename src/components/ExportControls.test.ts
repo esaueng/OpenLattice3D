@@ -6,7 +6,10 @@ import { buildGenerationSnapshot } from '../store/generation-snapshot';
 import { selectGenerationInputs } from '../store/useResultStaleness';
 import { useStore } from '../store/useStore';
 import { download3MF, downloadOBJ, downloadSTL } from '../utils/export';
+import { trackUsage } from '../analytics';
 import { ExportControls } from './ExportControls';
+
+vi.mock('../analytics', () => ({ trackUsage: vi.fn() }));
 
 const captured = vi.hoisted(() => ({
   buttons: [] as { children?: unknown; disabled?: boolean; onClick?: () => void }[],
@@ -95,5 +98,29 @@ describe('export progress', () => {
     expect(captured.buttons.slice(0, 3).map((button) => button.children))
       .toEqual(formats.map((entry) => entry === format ? 'Working...' : `Export ${entry}`));
     expect(captured.buttons.every((button) => button.disabled)).toBe(true);
+  });
+});
+
+
+describe('export analytics wiring', () => {
+  it('counts successful exports and coarse durations without provenance', async () => {
+    renderToStaticMarkup(createElement(ExportControls));
+    captured.buttons[0].onClick!();
+    await vi.runAllTimersAsync();
+    expect(trackUsage).toHaveBeenCalledWith('export_completed');
+    expect(trackUsage).toHaveBeenCalledWith('operation_latency', expect.any(Number));
+    expect(vi.mocked(trackUsage).mock.calls.every((call) => call.length <= 2)).toBe(true);
+  });
+  it('counts an export failure without sending the error text', async () => {
+    vi.mocked(download3MF).mockImplementationOnce(() => { throw new Error('private-filename.3mf'); });
+    renderToStaticMarkup(createElement(ExportControls));
+    captured.buttons[0].onClick!();
+    await vi.runAllTimersAsync();
+    expect(trackUsage).toHaveBeenCalledExactlyOnceWith('export_failed');
+  });
+  it('counts project saves through the same privacy gate', () => {
+    renderToStaticMarkup(createElement(ExportControls));
+    captured.buttons.at(-1)!.onClick!();
+    expect(trackUsage).toHaveBeenCalledWith('export_completed');
   });
 });
