@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { trackUsage } from '../analytics';
 import { useStore } from '../store/useStore';
 import type { WorkerMessage } from '../workers/lattice-worker';
 import type { ValidationWorkerMessage, ValidationWorkerResponse } from '../workers/validation-worker';
@@ -134,6 +135,7 @@ export function useLatticeGeneration(): LatticeGenerationControls {
       store.setDemoModeActive(false);
       store.setProgress(0, 'Generation failed');
       store.setGenerationError(message);
+      trackUsage('generation_failed');
       return;
     }
     const generationStartedAt = performance.now();
@@ -278,6 +280,7 @@ export function useLatticeGeneration(): LatticeGenerationControls {
           current.setProgress(0, 'Generation failed');
           current.setGenerationError(message);
           current.addLog(message, 'error');
+          trackUsage('generation_failed');
           return;
         }
         current.setResultMesh({
@@ -299,6 +302,8 @@ export function useLatticeGeneration(): LatticeGenerationControls {
           current.addLog(`Could not start validation: ${message}`, 'error');
         }
         const elapsedMs = performance.now() - generationStartedAt;
+        trackUsage('generation_completed');
+        trackUsage('operation_latency', elapsedMs);
         void notifyGenerationComplete(resp.triCount, elapsedMs);
       },
       onFailure: (message) => {
@@ -309,6 +314,7 @@ export function useLatticeGeneration(): LatticeGenerationControls {
         current.setDemoModeActive(false);
         current.setProgress(0, 'Generation failed');
         current.setGenerationError(message);
+        trackUsage('generation_failed');
       },
     });
 

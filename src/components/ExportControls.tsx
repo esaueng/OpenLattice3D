@@ -1,3 +1,4 @@
+import { trackUsage } from '../analytics';
 import { useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../store/useStore';
@@ -80,12 +81,30 @@ export function ExportControls() {
   const meshLabel = (format: string) => (
     checksFailed ? `Export ${format} anyway` : previousResult ? `Export previous ${format}` : `Export ${format}`
   );
+  const saveProject = () => {
+    const started = performance.now();
+    try {
+      downloadProjectJSON({ params, generationSeed, source, keepOutTris, keepInTris, validation, clipPlane, viewerBackground });
+      trackUsage('export_completed');
+      trackUsage('operation_latency', performance.now() - started);
+    } catch {
+      trackUsage('export_failed');
+      useStore.getState().addLog('Project export failed. Try again or free browser memory.', 'error');
+    }
+  };
   const runExport = async (format: '3MF' | 'STL' | 'OBJ', task: () => void) => {
     setBusyFormat(format);
+    const started = performance.now();
     try {
       // Paint the busy state before synchronous decimation starts.
       await new Promise((resolve) => setTimeout(resolve, 0));
       task();
+      trackUsage('export_completed');
+      trackUsage('operation_latency', performance.now() - started);
+    } catch {
+      trackUsage('export_failed');
+      // Event handlers have no caller to catch a rejected promise.
+      useStore.getState().addLog('Mesh export failed; try a lower detail setting.', 'error');
     } finally {
       setBusyFormat(null);
     }
@@ -176,16 +195,7 @@ export function ExportControls() {
           className="btn btn-small"
           disabled={busy}
           title="Save the source model, current parameters, face constraints, and viewer settings to a project JSON file."
-          onClick={() => downloadProjectJSON({
-            params,
-            generationSeed,
-            source,
-            keepOutTris,
-            keepInTris,
-            validation,
-            clipPlane,
-            viewerBackground,
-          })}
+          onClick={saveProject}
         >
           Save Project JSON
         </button>
