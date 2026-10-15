@@ -2,6 +2,7 @@
 import { useStore } from '../store/useStore';
 import { RightPanel } from './RightPanel';
 import { ExportControls } from './ExportControls';
+import { AnalyticsConsent } from './AnalyticsConsent';
 import { PinnedRunPanel } from './PinnedRunPanel';
 
 export function InspectPanel() {
@@ -33,6 +34,7 @@ export function InspectPanel() {
       <PinnedRunPanel />
       <RightPanel />
       <ExportControls />
+      <AnalyticsConsent />
     </div>
   );
 }

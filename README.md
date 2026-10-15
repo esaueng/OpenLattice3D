@@ -45,8 +45,8 @@ with `npm run preview` to inspect the production bundle locally.
 
 Production is a static Cloudflare Workers site. Cloudflare serves the Vite
 bundle from `dist/`; the small Worker in `worker/index.ts` provides the
-uncached `GET /health` response used by uptime monitors. The application has
-no configured runtime bindings or application secrets.
+uncached health responses used by uptime monitors and a strictly allowlisted optional analytics relay. The application has
+no configured application secrets. Optional Glimpse analytics have a rate-limit binding and two collection switches, both disabled by default; the collector service binding is deferred. See [analytics and rollout](docs/glimpse.md).
 
 ```bash
 npm ci
@@ -265,6 +265,10 @@ single-worker paths; see [the backend decision](./docs/performance/backend-decis
 - Min thickness: ray march inward along normals to measure wall/strut width
 - Manifold: edge-count analysis (each edge shared by exactly 2 triangles)
 - Connectivity: flood-fill on triangle adjacency graph
+
+## Privacy & data
+
+Optional usage analytics start off. Opt in or withdraw in **Inspect → Privacy & data**; browser privacy signals suppress sends. Only fixed operation counts and coarse durations can be collected, with no model contents, filenames, URLs or visitor IDs. Collection also requires a deliberately configured and enabled backend. See [the data boundary and rollout](docs/glimpse.md).
 
 ## Testing
 

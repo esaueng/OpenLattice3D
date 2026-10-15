@@ -10,6 +10,7 @@ import { useLatticeGeneration } from './hooks/useLatticeGeneration';
 import { useWorkspaceHotkeys } from './hooks/useWorkspaceHotkeys';
 import { summarizeValidation } from './utils/validation-summary';
 import { useResultStaleness } from './store/useResultStaleness';
+import { trackUsage } from './analytics';
 import './App.css';
 
 function App() {
@@ -97,6 +98,12 @@ function HydratedApp() {
     pinnedRun,
   } = useStore();
   const generationControls = useLatticeGeneration();
+  const countedOpen = useRef(false);
+  useEffect(() => {
+    if (countedOpen.current) return;
+    countedOpen.current = true;
+    trackUsage('workspace_opened');
+  }, []);
   const staleness = useResultStaleness();
   const [logsExpanded, setLogsExpanded] = useState(false);
   // Below the stacked breakpoint only one panel shows at a time, beneath the viewer.
