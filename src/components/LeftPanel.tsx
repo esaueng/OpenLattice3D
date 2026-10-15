@@ -408,6 +408,7 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
               <div className="row" style={{ marginTop: '6px' }}>
                 <label htmlFor="constraint-brush-radius">Brush Radius (mm):</label>
                 <NumericInput
+                  captureUndoCheckpoint={store.captureUndoCheckpoint}
                   id="constraint-brush-radius"
                   title="Radius around the pointer hit. Zero paints one triangle. Hold Alt while dragging to erase."
                   min={0} max={100} step={0.5}
@@ -426,6 +427,7 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
             <div className="row" style={{ marginTop: '6px' }}>
               <label htmlFor="keep-in-depth">Keep-in Depth (mm):</label>
               <NumericInput
+                captureUndoCheckpoint={store.captureUndoCheckpoint}
                 id="keep-in-depth"
                 title="Depth of solid material preserved below painted keep-in faces."
                 min={0.1} max={100} step={0.5}
@@ -493,6 +495,7 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
           <div className="row">
             <label htmlFor="cell-size">Cell Size (mm):</label>
             <NumericInput
+              captureUndoCheckpoint={store.captureUndoCheckpoint}
               id="cell-size"
               title="Controls overall lattice spacing. Larger values create bigger cells."
               value={store.params.cellSize}
@@ -531,6 +534,7 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
             <div className="row">
               <label htmlFor="lattice-depth">Lattice Depth (mm):</label>
               <NumericInput
+                captureUndoCheckpoint={store.captureUndoCheckpoint}
                 id="lattice-depth"
                 title="Depth of the generated lattice band from the outer surface."
                 value={store.params.surfaceDepth}
@@ -546,6 +550,7 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
             <div className="row">
               <label htmlFor="shell-thickness">Shell Thickness (mm):</label>
               <NumericInput
+                captureUndoCheckpoint={store.captureUndoCheckpoint}
                 id="shell-thickness"
                 title="Thickness of the outer shell retained around the lattice."
                 value={store.params.shellThickness}
@@ -589,6 +594,7 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
                   <div className="row">
                     <label htmlFor="escape-hole-diameter">Hole Diameter (mm):</label>
                     <NumericInput
+                      captureUndoCheckpoint={store.captureUndoCheckpoint}
                       id="escape-hole-diameter"
                       title="Diameter of the powder-escape holes."
                       value={store.params.escapeHoleDiameter}
@@ -616,6 +622,7 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
                     <div className="row">
                       <label htmlFor="escape-hole-count">Hole Count:</label>
                       <NumericInput
+                        captureUndoCheckpoint={store.captureUndoCheckpoint}
                         id="escape-hole-count"
                         title="Number of powder-escape holes."
                         value={store.params.escapeHoleCount}
@@ -686,6 +693,7 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
             <div className="row" key="wall-thickness">
               <label htmlFor="wall-thickness">Wall Thickness (mm):</label>
               <NumericInput
+                captureUndoCheckpoint={store.captureUndoCheckpoint}
                 id="wall-thickness"
                 title="Thickness of sheet-style TPMS surfaces."
                 value={store.params.wallThickness}
@@ -699,6 +707,7 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
             <div className="row" key="strut-diameter">
               <label htmlFor="strut-diameter">Strut Diameter (mm):</label>
               <NumericInput
+                captureUndoCheckpoint={store.captureUndoCheckpoint}
                 id="strut-diameter"
                 title="Diameter of strut members for strut-based lattices."
                 value={store.params.strutDiameter}
@@ -713,6 +722,7 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
           <div className="row">
             <label htmlFor="min-feature-size">Min Feature Size (mm):</label>
             <NumericInput
+              captureUndoCheckpoint={store.captureUndoCheckpoint}
               id="min-feature-size"
               title="Minimum manufacturable feature size target used in validation."
               value={store.params.minFeatureSize}
@@ -726,6 +736,7 @@ export function LeftPanel({ generationControls }: LeftPanelProps) {
           <div className="row">
             <label htmlFor="tolerance">Tolerance (mm):</label>
             <NumericInput
+              captureUndoCheckpoint={store.captureUndoCheckpoint}
               id="tolerance"
               title="Maximum allowed outer-surface deviation versus the source mesh."
               value={store.params.toleranceMm}
