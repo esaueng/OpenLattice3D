@@ -1,3 +1,4 @@
+import { trackUsage } from '../analytics';
 import { createElement } from 'react';
 import { renderToString } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -8,6 +9,8 @@ import type { WorkerMessage } from '../workers/lattice-worker';
 import type { ValidationWorkerMessage } from '../workers/validation-worker';
 import { useLatticeGeneration, type LatticeGenerationControls } from './useLatticeGeneration';
 import { computeStaleness, selectGenerationInputs } from '../store/useResultStaleness';
+
+vi.mock('../analytics', () => ({ trackUsage: vi.fn() }));
 
 type ViewMode = ReturnType<typeof useStore.getState>['viewMode'];
 
@@ -52,6 +55,7 @@ function finishGeneration(worker = FakeWorker.instances[0]) {
 }
 
 beforeEach(async () => {
+  vi.clearAllMocks();
   await expect.poll(() => useStore.getState().persistenceHydrated).toBe(true);
   useStore.getState().resetProject();
   useStore.getState().setSampleShape('sphere');
@@ -210,5 +214,28 @@ describe('completed generation view', () => {
     controls.startGeneration();
     finishGeneration();
     expect(useStore.getState().viewMode).toBe(mode);
+  });
+});
+
+
+describe('generation analytics wiring', () => {
+  it('counts a completed generation with only a coarse duration input', () => {
+    controls.startGeneration();
+    finishGeneration();
+    expect(trackUsage).toHaveBeenCalledWith('generation_completed');
+    expect(trackUsage).toHaveBeenCalledWith('operation_latency', expect.any(Number));
+    expect(vi.mocked(trackUsage).mock.calls).toHaveLength(2);
+  });
+  it('ignores cancelled results and never calls them failures', () => {
+    controls.startGeneration();
+    const worker = FakeWorker.instances[0];
+    controls.cancelGeneration();
+    finishGeneration(worker);
+    expect(trackUsage).not.toHaveBeenCalled();
+  });
+  it('counts worker failures without forwarding their private details', () => {
+    controls.startGeneration();
+    FakeWorker.instances[0].onerror?.({ message: 'private.stl' });
+    expect(trackUsage).toHaveBeenCalledExactlyOnceWith('generation_failed');
   });
 });
