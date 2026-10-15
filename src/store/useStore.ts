@@ -500,6 +500,7 @@ interface AppState {
   clearSelection: () => void;
   undoSelection: () => void;
   redoSelection: () => void;
+  captureUndoCheckpoint: () => () => void;
   updateParams: (partial: Partial<LatticeParams>) => void;
   reseedGeneration: () => void;
   setProcessPreset: (preset: ProcessPreset) => void;
@@ -849,6 +850,11 @@ export const useStore = create<AppState>((set, get) => ({
       selectionRedo: s.selectionRedo.slice(0, -1),
     };
   }),
+
+  captureUndoCheckpoint: () => {
+    const { selectionUndo, selectionRedo } = get();
+    return () => set({ selectionUndo, selectionRedo });
+  },
 
   // In multiview an edit applies to every tile, so the comparison stays like-for-like.
   updateParams: (partial) => set((s) => {

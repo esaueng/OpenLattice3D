@@ -9,6 +9,8 @@ type NumericInputProps = {
   max: number;
   step: number;
   onCommit: (value: number) => void;
+  /** Capture undo/redo before a live edit; restore it when Escape cancels. */
+  captureUndoCheckpoint?: () => () => void;
 };
 
 /**
@@ -16,10 +18,11 @@ type NumericInputProps = {
  * the input shows the raw text while it is being edited, so a partial entry is
  * never rewritten under the cursor. The bound is applied on blur.
  */
-export function NumericInput({ id, title, value, min, max, step, onCommit }: NumericInputProps) {
+export function NumericInput({ id, title, value, min, max, step, onCommit, captureUndoCheckpoint }: NumericInputProps) {
   const [draft, setDraft] = useState<string | null>(null);
   const lastCommitted = useRef(value);
   const editStart = useRef<number | null>(null);
+  const restoreUndo = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     // Only a write we did not make (lattice type, preset, import) discards an edit.
@@ -45,10 +48,12 @@ export function NumericInput({ id, title, value, min, max, step, onCommit }: Num
 
   function handleFocus() {
     editStart.current = value;
+    restoreUndo.current = captureUndoCheckpoint?.() ?? null;
   }
 
   function handleBlur(event: FocusEvent<HTMLInputElement>) {
     editStart.current = null;
+    restoreUndo.current = null;
     const bounded = boundedNumberInput(event.target.value, value, min, max);
     setDraft(null);
     if (bounded !== value) commit(bounded);
@@ -64,6 +69,10 @@ export function NumericInput({ id, title, value, min, max, step, onCommit }: Num
     event.stopPropagation();
     setDraft(null);
     if (started !== null && started !== value) commit(started);
+    // The compensating commit above must not become an undoable edit itself,
+    // and cancelling must preserve any redo branch that existed on focus.
+    restoreUndo.current?.();
+    restoreUndo.current = captureUndoCheckpoint?.() ?? null;
   }
 
   return (
