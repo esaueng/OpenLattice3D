@@ -40,6 +40,21 @@ describe('OBJ export', () => {
     expect(text()).toContain('# units: millimeters');
   });
 
+  it('round-trips Float32 coordinates without collapsing distinct vertices', () => {
+    const positions = new Float32Array([
+      0, 0, 0, 0.000001, 0, 0, 0, 0.000001, 0,
+      123.456789, -0.0000000000001, 0.0123456789,
+    ]);
+    const output = new TextDecoder().decode(buildObj({
+      positions, indices: new Uint32Array([0, 1, 2]), vertexCount: 4, triangleCount: 1,
+    }, OPTIONS));
+    const restored = new Float32Array(output.split('\n')
+      .filter((line) => line.startsWith('v '))
+      .flatMap((line) => line.slice(2).split(' ').map(Number)));
+    expect(restored).toEqual(positions);
+    expect(new Set(Array.from({ length: 3 }, (_, i) => Array.from(restored.slice(i * 3, i * 3 + 3)).join(','))).size).toBe(3);
+  });
+
   it('records the deterministic generation seed when provided', () => {
     const seeded = new TextDecoder().decode(buildObj(mesh, { ...OPTIONS, generationSeed: 0x1234abcd }));
     expect(seeded).toContain('# generation-seed: v1:0x1234abcd');
