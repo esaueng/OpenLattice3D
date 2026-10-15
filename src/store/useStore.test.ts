@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { analyzeMesh, generateCubeMesh } from '../geometry/mesh-analysis';
 import { DEFAULT_PARAMS, type ValidationResult } from '../types/project';
 import { buildPersistedAppState, hydrateFromSnapshot, useStore } from './useStore';
@@ -580,6 +580,40 @@ describe('parameter undo', () => {
     useStore.getState().undoSelection();
     expect(useStore.getState().params.cellSize).toBe(8);
     expect(useStore.getState().params.wallThickness).toBe(1);
+  });
+
+  it('discards a cancelled live edit even after the undo coalescing window', () => {
+    const clock = vi.spyOn(Date, 'now');
+    try {
+      clock.mockReturnValue(0);
+      useStore.getState().updateParams({ cellSize: 12 });
+      const restoreUndo = useStore.getState().captureUndoCheckpoint();
+      clock.mockReturnValue(2000);
+      useStore.getState().updateParams({ cellSize: 24 });
+      clock.mockReturnValue(4000);
+      // NumericInput restores the focus-time value before restoring history.
+      useStore.getState().updateParams({ cellSize: 12 });
+      restoreUndo();
+      useStore.getState().undoSelection();
+      expect(useStore.getState().params.cellSize).toBe(8);
+      useStore.getState().redoSelection();
+      expect(useStore.getState().params.cellSize).toBe(12);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it('preserves the pre-edit redo branch when a numeric edit is cancelled', () => {
+    useStore.getState().setLatticeType('bcc');
+    useStore.getState().undoSelection();
+    const restoreUndo = useStore.getState().captureUndoCheckpoint();
+    useStore.getState().updateParams({ cellSize: 24 });
+    useStore.getState().updateParams({ cellSize: 8 });
+    restoreUndo();
+    expect(useStore.getState().selectionUndo).toHaveLength(0);
+    useStore.getState().redoSelection();
+    expect(useStore.getState().params.latticeType).toBe('bcc');
+    expect(useStore.getState().params.cellSize).toBe(8);
   });
 
   it('ignores no-op edits and interleaves with painting history', () => {
