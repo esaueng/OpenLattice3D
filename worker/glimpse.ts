@@ -1,6 +1,5 @@
-// Fixed wire contract. The collector is intentionally unbound until its new
-// entrypoint and schema migration are deployed. No public collector URL.
-export type GlimpseEnv = Partial<Env> & { GLIMPSE?: unknown };
+// Fixed wire contract over the app-specific RPC binding. No public collector URL.
+export type GlimpseEnv = Omit<Partial<Env>, 'GLIMPSE'> & { GLIMPSE?: unknown };
 interface Collector { record(value: { level: 'basic' | 'optional'; event: string; bucket: string }): Promise<void> }
 function collector(value: unknown): Collector | undefined {
   if (!value || (typeof value !== 'object' && typeof value !== 'function')) return undefined;
