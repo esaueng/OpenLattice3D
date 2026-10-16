@@ -208,17 +208,60 @@ class HistoryTests(unittest.TestCase):
         self.assertNotIn(REMOVED, result.stdout + result.stderr)
         self.assertNotIn(self.oid().encode(), result.stdout + result.stderr)
 
-    def test_event_selection_uses_pr_head_and_checks_tag_object(self):
+    def test_trusted_events_select_exact_head(self):
         head = "b" * 40
         event = {"pull_request": {"head": {"sha": head, "ref": "topic"}}}
         self.assertEqual(guard.select_event("pull_request_target", event, self.base), ([head], ["topic"], head))
-        self.assertEqual(guard.select_event("push", {"after": head, "ref": "refs/tags/v1"}, self.base),
-                         ([head], ["refs/tags/v1"], None))
-        self.assertEqual(guard.select_event("push", {"deleted": True}, self.base), ([], [], None))
-        self.assertEqual(guard.select_event("merge_group", {"merge_group": {"head_sha": head}}, self.base),
+        self.assertEqual(guard.select_event("workflow_dispatch", {"inputs": {"audit_head": head}}, self.base),
                          ([head], [], head))
+        self.assertEqual(guard.select_event("schedule", {}, self.base), ([self.base], [], self.base))
+        run = {"event": "merge_group", "path": ".github/workflows/history-privacy-request.yml",
+               "head_repository": {"full_name": "example/repository"}, "head_sha": head,
+               "head_branch": "gh-readonly-queue/main/fixture"}
+        with patch.dict(os.environ, GITHUB_REPOSITORY="example/repository"):
+            self.assertEqual(guard.select_event("workflow_run", {"workflow_run": run}, self.base),
+                             ([head], [run["head_branch"]], head))
+            for suffix in ("@main", "@refs/tags/v-fixture"):
+                qualified = dict(run, path=run["path"] + suffix)
+                self.assertEqual(guard.select_event("workflow_run", {"workflow_run": qualified}, self.base)[2], head)
+            for field, bad in (("event", "pull_request"), ("path", "other.yml"),
+                               ("head_repository", {"full_name": "foreign/repository"})):
+                with self.subTest(field=field), self.assertRaises(guard.PrivacyError):
+                    guard.select_event("workflow_run", {"workflow_run": dict(run, **{field: bad})}, self.base)
+        for name in ("push", "merge_group", "pull_request"):
+            with self.subTest(name=name), self.assertRaises(guard.PrivacyError):
+                guard.select_event(name, {}, self.base)
         with self.assertRaises(guard.PrivacyError):
-            guard.select_event("pull_request", {}, self.base)
+            guard.select_event("workflow_dispatch", {"inputs": {"audit_head": "untrusted argument"}}, self.base)
+
+    def test_push_request_catches_annotated_tag_metadata_on_a_clean_commit(self):
+        head = self.oid()
+        self.run_git("tag", "-a", "dirty-metadata", "-m", REMOVED.decode())
+        tag = self.oid("dirty-metadata")
+        event = self.root / "tag-event.json"
+        event.write_text(json.dumps({"workflow_run": {
+            "event": "push", "path": ".github/workflows/history-privacy-request.yml@main",
+            "head_repository": {"full_name": "example/repository"},
+            "head_sha": head, "head_branch": "dirty-metadata"}}))
+        env = dict(GITHUB_EVENT_PATH=str(event), GITHUB_EVENT_NAME="workflow_run",
+                   GITHUB_SHA=self.base, GITHUB_REPOSITORY="example/repository",
+                   HISTORY_PRIVACY_HMAC_KEY=KEY)
+        real_git, real_scan = guard.git, guard.scan
+        def fetch_fixture(repo, *args, **kwargs):
+            if args[0] == "for-each-ref":
+                return (tag + " refs/tags/dirty-metadata\n").encode()
+            return b""
+        def inspect_fixture(repo, policy, heads, excludes, refs):
+            self.assertIn(head, heads)  # original event head survives all-ref enumeration
+            self.assertIn(tag, heads)   # annotated tag object, not only its peeled commit
+            with patch.object(guard, "git", real_git):
+                return real_scan(self.repo, policy, heads, excludes, refs)
+        with patch.dict(os.environ, env), patch.object(guard, "git", side_effect=fetch_fixture), \
+                patch.object(guard, "scan", side_effect=inspect_fixture), \
+                patch.object(guard, "api", return_value={"id": 123}) as api:
+            with self.assertRaises(guard.PrivacyError):
+                guard.ci(self.policy_path)
+        self.assertEqual(api.call_args_list[-1].args[2]["conclusion"], "failure")
 
     def test_incoming_program_is_never_executed(self):
         marker = self.root / "should-not-exist"
