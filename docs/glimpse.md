@@ -1,6 +1,6 @@
 # Glimpse analytics
 
-OpenLattice3D adds a disabled-by-default adapter to [Glimpse](https://github.com/esaueng/glimpse), matching the two-level design used by OpenZCAD and OpenFEA. Model processing, validation and generation remain browser-local. No model upload, third-party script, identifier, queue, retry or raw-event store is added.
+OpenLattice3D connects a consent-gated adapter to [Glimpse](https://github.com/esaueng/glimpse), matching the two-level design used by OpenZCAD and OpenFEA. Model processing, validation and generation remain browser-local. No model upload, third-party script, identifier, queue, retry or raw-event store is added.
 
 ## Optional browser analytics
 
@@ -18,18 +18,18 @@ The client posts exactly `{event,bucket}` to `/api/glimpse/usage`, omitting cred
 
 ## Rollout and rollback
 
-Both `GLIMPSE_BASIC_ENABLED` and `GLIMPSE_USAGE_ENABLED` are `false` in Wrangler. The `GLIMPSE` binding is deliberately omitted, allowing this PR to deploy without an undeployed entrypoint or migration. Before enabling collection:
+Production enables both `GLIMPSE_BASIC_ENABLED` and `GLIMPSE_USAGE_ENABLED` and binds `GLIMPSE` to `OpenLattice3DIngest`. Browser consent remains off by default and is required independently of these deployment switches. Activation prerequisites:
 
 1. Review Glimpse's [privacy limits](https://github.com/esaueng/glimpse/blob/main/docs/PRIVACY.md): intended audience, notices, lawful basis, infrastructure metadata/logging/backups and retention. Transport necessarily processes IP/headers at the edge; do not promise no IP processing anywhere. Existing infrastructure logging is separate from these aggregates.
 2. With separate production authorization, apply Glimpse's `0002_openlattice3d.sql` migration and deploy its `OpenLattice3DIngest` entrypoint. Glimpse stores only daily aggregates, expires reads after 90 UTC days and deletes expired rows via cron; Access protects the dashboard.
-3. Add the service binding below to this app, regenerate types with `npx wrangler types --strict-vars false`, and deploy. Preview and self-hosted configurations remain disabled unless deliberately configured.
+3. Keep the fixed service binding below, regenerate types with `npx wrangler types --strict-vars false`, and deploy. Preview and self-hosted configurations remain disabled unless deliberately configured.
 4. Enable each switch only after review. Optional additionally requires each browser's explicit consent. Verify no sends without consent, saved grants, DNT/GPC, two-tab withdrawal, pending-send cancellation, generation/export outcomes and isolated third-app counts on the protected dashboard.
 
 ```json
 {"binding":"GLIMPSE","service":"glimpse","entrypoint":"OpenLattice3DIngest"}
 ```
 
-No Glimpse deployment, production migration, binding resolution or activation is performed by this PR. Set both switches back to `false` and redeploy to stop collection; users can also withdraw independently. Missing bindings, collector outages and blocked storage must leave geometry operations usable. On static-only hosting the control can save a preference, but collection needs a configured Worker relay; Vite dev does not provide it.
+Production activation is authorized; the existing collector and migrations must be verified before rollout. Set both switches back to `false` and redeploy to stop collection; users can also withdraw independently. Missing bindings, collector outages and blocked storage must leave geometry operations usable. On static-only hosting the control can save a preference, but collection needs a configured Worker relay; Vite dev does not provide it.
 
 ## Validation
 
