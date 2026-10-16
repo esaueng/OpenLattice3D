@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "baseline": "a05c5fa8915ae602ad9d7733845977c4c6652587",
+  "redaction_passes": [
+    "2026-10-16-initial",
+    "2026-10-16-email-followup"
+  ],
+  "verification_digest": "ebbbeb419163ef1431e938bc5a6488eed89a64a2f41052603ae43cf8fcd92646",
+  "blocked_file_sha256": "599bb20f75d967a81d74d828b8eed19a4bb208f505ca4dbf92f5aeca18fc6a7f",
+  "blocked_object_count": 730,
+  "identifiers": [
+    {
+      "length": 15,
+      "prefix_digest": "761b300731f64228a592ae305ebad174b31654819097e41af5be3f1061409c00",
+      "digest": "6693f69fde200ad70cc3f16f8bf2782a39e0c4f821cae3933e8bda6eb7a880f3"
+    },
+    {
+      "length": 17,
+      "prefix_digest": "761b300731f64228a592ae305ebad174b31654819097e41af5be3f1061409c00",
+      "digest": "8fda32c320f300654582ff1b2b0e9792efb18fdd026394bce6a36ce95f9d2cac"
+    },
+    {
+      "length": 19,
+      "prefix_digest": "761b300731f64228a592ae305ebad174b31654819097e41af5be3f1061409c00",
+      "digest": "1825e755823570a9e3cdd2575b4af383f4c8727734f61efadfad0ed73e2e589f"
+    },
+    {
+      "length": 30,
+      "prefix_digest": "761b300731f64228a592ae305ebad174b31654819097e41af5be3f1061409c00",
+      "digest": "d7c633be1d3b1e4f932c3ded7a8e4688d9e020da2491674563cbdcd1eaec81db"
+    },
+    {
+      "length": 11,
+      "prefix_digest": "761b300731f64228a592ae305ebad174b31654819097e41af5be3f1061409c00",
+      "digest": "13a41dbc0f03098ddab23d46a806e596fb6091375e462abf2036d2cf217ddf92"
+    }
+  ]
+}
