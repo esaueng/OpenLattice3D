@@ -37,7 +37,7 @@ jobs:
           sparse-checkout: .github/privacy
       - name: Create narrowly scoped check publisher token
         id: publisher
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           client-id: ${{ vars.HISTORY_PRIVACY_APP_CLIENT_ID }}
           private-key: ${{ secrets.HISTORY_PRIVACY_APP_PRIVATE_KEY }}
