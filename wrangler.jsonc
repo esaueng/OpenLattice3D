@@ -35,9 +35,11 @@
       "head_sampling_rate": 1
     }
   },
+  "previews": { "vars": { "GLIMPSE_BASIC_ENABLED": "false", "GLIMPSE_USAGE_ENABLED": "false" } },
+  "services": [{ "binding": "GLIMPSE", "service": "glimpse", "entrypoint": "OpenLattice3DIngest" }],
   "vars": {
-    "GLIMPSE_BASIC_ENABLED": "false",
-    "GLIMPSE_USAGE_ENABLED": "false"
+    "GLIMPSE_BASIC_ENABLED": "true",
+    "GLIMPSE_USAGE_ENABLED": "true"
   },
   "ratelimits": [
     {
