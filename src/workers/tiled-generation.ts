@@ -1,3 +1,4 @@
+import { generationSampleCount, assertGenerationOutputBudget } from '../geometry/generation-limits';
 import type { MarchingCubesResult } from '../geometry/marching-cubes';
 import type { Vec3 } from '../geometry/vec3';
 import type { LatticeParams, SampleShape } from '../types/project';
@@ -125,6 +126,7 @@ function buildTileJobs(
   resolution: number,
 ): { jobs: LatticeTileJob[]; stats: TileSkipStats } {
   const jobs: LatticeTileJob[] = [];
+  generationSampleCount([resolution, resolution, resolution]);
   const dx = (bounds.max[0] - bounds.min[0]) / resolution;
   const dy = (bounds.max[1] - bounds.min[1]) / resolution;
   const dz = (bounds.max[2] - bounds.min[2]) / resolution;
@@ -176,6 +178,7 @@ function mergeTileResults(results: LatticeTileResult[]): MarchingCubesResult {
   const triangleCount = sorted.reduce((sum, result) => sum + result.triCount, 0);
   const positionLength = sorted.reduce((sum, result) => sum + result.positions.length, 0);
   const normalLength = sorted.reduce((sum, result) => sum + result.normals.length, 0);
+  assertGenerationOutputBudget(triangleCount, positionLength, normalLength);
   const positions = new Float32Array(positionLength);
   const normals = new Float32Array(normalLength);
   let positionOffset = 0;
@@ -215,6 +218,10 @@ export function runTiledGeneration(
   let nextJob = 0;
   let completed = 0;
   let timingMs = 0;
+  let retainedTriangles = 0;
+  let retainedPositions = 0;
+  let retainedNormals = 0;
+  let retainedBytes = 0;
 
   return new Promise<{ result: MarchingCubesResult; stats: TileSkipStats }>((resolve, reject) => {
     let settled = false;
@@ -282,6 +289,23 @@ export function runTiledGeneration(
           fail(new Error('Tile worker returned a malformed response'));
           return;
         }
+        const responseBytes = response.positions.buffer.byteLength
+          + (response.normals.buffer === response.positions.buffer ? 0 : response.normals.buffer.byteLength);
+        try {
+          assertGenerationOutputBudget(
+            retainedTriangles + response.triCount,
+            retainedPositions + response.positions.length,
+            retainedNormals + response.normals.length,
+            retainedBytes + responseBytes,
+          );
+        } catch (error) {
+          fail(error instanceof Error ? error : new Error('Generation memory limit exceeded'));
+          return;
+        }
+        retainedBytes += responseBytes;
+        retainedTriangles += response.triCount;
+        retainedPositions += response.positions.length;
+        retainedNormals += response.normals.length;
         results[response.tileId] = response;
         inFlightTileId = null;
         completed++;

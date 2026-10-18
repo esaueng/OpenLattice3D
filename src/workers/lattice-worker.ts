@@ -1,3 +1,4 @@
+import { generationSampleCount } from '../geometry/generation-limits';
 // Web Worker for lattice generation (SDF sampling + marching cubes)
 // This runs heavy computation off the main thread.
 
@@ -411,7 +412,8 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
       const fieldParams = thinFilterActive && shouldApplyEscapeHoles(params)
         ? { ...params, escapeHoles: false }
         : params;
-      const resolution = msg.resolution || 64;
+      const resolution = msg.resolution ?? 64;
+      generationSampleCount([resolution, resolution, resolution]);
       let sdf: SdfFunction;
       let objectSdf: ((x: number, y: number, z: number) => number) | null = null;
       let surfaceHexSdf: SdfFunction | null = null;
