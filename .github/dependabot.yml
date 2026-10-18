@@ -1,7 +1,13 @@
-# Keep pinned GitHub Actions current. The pin check in CI rejects mutable
-# refs, so Dependabot bumps the reviewed SHA and its version comment together.
 version: 2
 updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      patch-and-minor:
+        update-types: [minor, patch]
   - package-ecosystem: github-actions
     directory: /
     schedule:

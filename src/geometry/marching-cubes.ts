@@ -1,3 +1,4 @@
+import { generationSampleCount, assertGenerationOutputBudget } from './generation-limits';
 // Marching Cubes implementation for SDF -> mesh extraction
 // Uses the classic edge table and tri table
 
@@ -354,7 +355,7 @@ export function sampleSdfField(
   const dz = (bounds.max[2] - minZ) / nz;
   const strideY = nx + 1;
   const strideZ = strideY * (ny + 1);
-  const field = new Float32Array((nx + 1) * (ny + 1) * (nz + 1));
+  const field = new Float32Array(generationSampleCount(cells));
 
   if (nx === ny && ny === nz && hasGridSampler(sdf)) {
     sdf.sampleField(bounds, nx, field, onProgress);
@@ -383,7 +384,7 @@ export function marchingCubesFromField(
   onProgress?: (fraction: number) => void
 ): MarchingCubesResult {
   const nx = cells[0], ny = cells[1], nz = cells[2];
-  const expectedLength = (nx + 1) * (ny + 1) * (nz + 1);
+  const expectedLength = generationSampleCount(cells);
   if (field.length !== expectedLength) {
     throw new Error(`Scalar field length ${field.length} does not match expected length ${expectedLength}`);
   }
@@ -412,6 +413,7 @@ export function marchingCubesFromField(
     }
   }
 
+  assertGenerationOutputBudget(maxTriCount);
   const allPositions = new Float32Array(maxTriCount * 9);
   let writeOffset = 0;
 

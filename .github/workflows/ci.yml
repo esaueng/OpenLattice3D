@@ -36,3 +36,5 @@ jobs:
         run: node scripts/check-workflow-pins.mjs
       - name: Verify agent docs
         run: node scripts/verify-agent-docs.mjs
+      - name: Audit dependencies
+        run: npm audit --audit-level=high

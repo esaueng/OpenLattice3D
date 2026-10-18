@@ -44,10 +44,14 @@ self.onmessage = (event: MessageEvent<LatticeTileJob>) => {
       msg.cells,
       0,
     );
+    // A degenerate field may emit few triangles from a large upper-bound
+    // allocation. Transfer only the emitted bytes, not the unused backing store.
+    const positions = result.positions.byteLength === result.positions.buffer.byteLength
+      ? result.positions : result.positions.slice();
     const response: LatticeTileResponse = {
       type: 'result',
       tileId: msg.tileId,
-      positions: result.positions,
+      positions,
       normals: result.normals,
       triCount: result.triCount,
       timing: {
@@ -55,7 +59,7 @@ self.onmessage = (event: MessageEvent<LatticeTileJob>) => {
         triCount: result.triCount,
       },
     };
-    postWorkerMessage(response, [result.positions.buffer, result.normals.buffer]);
+    postWorkerMessage(response, [positions.buffer, result.normals.buffer]);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown tile worker error';
     postMessage({ type: 'error', tileId: msg.tileId, message } as LatticeTileResponse);

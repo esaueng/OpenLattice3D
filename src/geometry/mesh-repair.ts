@@ -11,6 +11,7 @@
 // afterwards is far smaller and is directly verifiable: the boundary-edge count
 // is zero or it is not. It also repairs seams from tiled generation, which no
 // per-cube rule could.
+import { assertGenerationOutputBudget } from './generation-limits';
 import type { MarchingCubesResult } from './marching-cubes';
 
 export interface RepairReport {
@@ -127,6 +128,7 @@ export function closeBoundaryLoops(
   if (report.trianglesAdded === 0) return { result, report };
 
   const total = triCount + report.trianglesAdded;
+  assertGenerationOutputBudget(total);
   const outPositions = new Float32Array(total * 9);
   const outNormals = new Float32Array(total * 3);
   outPositions.set(positions.subarray(0, triCount * 9));
