@@ -736,7 +736,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
           return;
         } catch (err: unknown) {
           terminateTileWorkers();
-          if (cancelled) throw new Error('Cancelled');
+          if (cancelled) throw new Error('Cancelled', { cause: err });
           const message = err instanceof Error ? err.message : 'unknown error';
           postMessage({
             type: 'progress',
