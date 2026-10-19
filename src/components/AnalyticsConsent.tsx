@@ -6,7 +6,7 @@ export function AnalyticsConsent() {
   const granted = useSyncExternalStore(subscribeAnalyticsConsent, hasAnalyticsConsent, () => false);
   const [error, setError] = useState('');
   return (
-    <section className="panel-section" aria-labelledby="analytics-heading">
+    <section className="analytics-section" aria-labelledby="analytics-heading">
       <h3 id="analytics-heading">Privacy &amp; data</h3>
       <label className="analytics-choice">
         <input type="checkbox" checked={granted} aria-describedby="analytics-description analytics-status" onChange={(event) => {

@@ -1108,6 +1108,16 @@ export function Viewer3D() {
     setGizmoViewRequest((request) => ({ view, signal: request.signal + 1 }));
   }, []);
 
+  // Presets chosen from the toolbar's Views menu arrive through the store.
+  // A remount must not replay the last preset, so only newer signals apply.
+  const cameraViewRequest = useStore((s) => s.cameraViewRequest);
+  const handledCameraSignal = useRef(cameraViewRequest.signal);
+  useEffect(() => {
+    if (!cameraViewRequest.view || cameraViewRequest.signal === handledCameraSignal.current) return;
+    handledCameraSignal.current = cameraViewRequest.signal;
+    requestView(cameraViewRequest.view);
+  }, [cameraViewRequest, requestView]);
+
   const handleViewportKeyDown = useCallback((event: KeyboardEvent<HTMLDivElement>) => {
     const state = r3fStateRef.current;
     if (!state) return;
@@ -1144,12 +1154,6 @@ export function Viewer3D() {
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%', backgroundColor: viewerBackground }}>
-      <div className="viewer-view-presets" role="group" aria-label="Camera view presets">
-        <button type="button" className="btn btn-small" title="Front view" onClick={() => requestView('y')}>Front</button>
-        <button type="button" className="btn btn-small" title="Top view" onClick={() => requestView('z')}>Top</button>
-        <button type="button" className="btn btn-small" title="Right view" onClick={() => requestView('x')}>Right</button>
-        <button type="button" className="btn btn-small" title="Isometric view" onClick={() => requestView('iso')}>Iso</button>
-      </div>
       <div
         className="viewer-canvas-surface"
         role="application"

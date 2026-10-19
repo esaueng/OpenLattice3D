@@ -107,6 +107,11 @@ COEP compatibility problems with third-party form resources.
 
 ## How to Use
 
+The workspace walks through numbered steps in the top bar: **Model → Regions → Lattice →
+Shell → Generate → Results** (Regions only appears for imported STL meshes). Each step's
+panel asks one question; **Back** / **Continue** (or `B` / `N`) move between them, and
+less-used settings sit under **More options**. Generate is always available in the top bar.
+
 ### 1. Import a Model
 
 - **Import STL**: load any STL file (binary or ASCII). The model card shows its size,
@@ -115,10 +120,10 @@ COEP compatibility problems with third-party form resources.
   (from inches, ×10, ×0.1). Open or non-manifold meshes get their face normals recomputed
   and the card says so plainly; **Close holes** fills the boundary loops so the mesh can be
   used. Your lattice parameters survive a model change.
-- **Open JSON**: resume a versioned project with its parameters, embedded source mesh,
+- **Open project**: resume a versioned project with its parameters, embedded source mesh,
   selection masks, validation results, and viewer state. Legacy parameter-only JSON files
   remain supported; malformed or out-of-range values are ignored.
-- **Sample Part**: pick a built-in procedural shape (sphere, cube, cylinder, torus, capsule)
+- **Samples**: pick a built-in procedural shape from the start card or the Model step (sphere, cube, cylinder, torus, capsule)
   with print-ready defaults. Procedural shapes use analytic SDFs and a tiled multi-worker
   CPU backend for fast generation.
 
@@ -143,7 +148,7 @@ COEP compatibility problems with third-party form resources.
 
 ### 3. Compare
 
-Enable "Compare all 12 lattice types" to render every lattice type side-by-side for the
+In the Lattice step, choose "Compare all 12 on this part" to render every lattice type side-by-side for the
 current model, opening in the cross-section view so the tiles actually differ. Parameters
 are shared across tiles, so an edit re-queues every tile and the comparison stays
 like-for-like. Tiles show "Queued" until their run starts and the status bar reports how
@@ -154,10 +159,11 @@ switching back restores what you had unless you changed it in the meantime.
 
 ### 4. Generate
 
-The **Before you generate** block under the parameters shows the grid, voxel size, and
+The **Estimate** block in the Generate step shows the grid, voxel size, and
 rough triangle, time and memory estimates for the current settings, plus any sanity
 warnings (cell larger than the part, shell filling it, walls thinner than two voxels, open
-mesh). Click "Generate Lattice" (or press `G`). Computation runs in background Web Workers with
+mesh). Click **Generate** (top bar or Generate step, or press `G`); a finished run opens the
+Results step. Computation runs in background Web Workers with
 progress, time estimates, and run logs (drawer in the status bar); validation reports its own
 progress once the mesh lands. Hotkeys `1`–`4` switch viewer modes (Original, Solid,
 Cross-Section, X-Ray); `H` resets the viewport. `Ctrl/Cmd+Z` and `Ctrl/Cmd+Shift+Z` undo and
@@ -165,14 +171,15 @@ redo painting, parameter edits, and seed changes on one history (rapid edits of 
 collapse into a single step). The cross-section position is shown in millimetres along the
 cut axis.
 
-**Compare runs**: pin a result in the Inspect column, change settings, generate again, and
+**Compare runs**: pin a result under **Compare runs** in the Results step, change settings, generate again, and
 flip the viewer between the pinned and current runs; the panel lists the parameter
 differences. The Min Thickness card can mark the sampled spots that measured thinner than
 the target directly on the model.
 
 ### 5. Validate
 
-After generation, the validation panel shows:
+After generation, the Results step leads with the verdict and four numbers (relative
+density, mass or volume, thinnest feature, triangles), then the checks:
 - **Out of date**: whenever a parameter, the seed, the model, or the painted faces change
   after a run, the result on screen is kept but marked out of date in the status bar, the
   validation panel, and the export buttons until you regenerate. Cancelling a run keeps the
@@ -192,13 +199,13 @@ After generation, the validation panel shows:
 - **Export OBJ**: indexed Wavefront OBJ geometry (the format does not declare units)
 - **Save Project JSON**: a resumable project with its source geometry and workspace state
 
-Validation, part statistics and export live in the **Inspect** column on the right; below
-1120 px the viewer sits on top and Setup / Inspect become tabs.
+Validation, part statistics and export live in the **Results** step; below 1120 px the step
+panel sits under the viewer.
 
 Every project carries a versioned 32-bit generation seed. Repeated generation with the same
 project, seed, application version, parameters, and resolution is byte-deterministic even when
 tile completion order or the worker-pool size changes. Use **Reseed** for an intentional new
-stochastic result; it lives under **Advanced** in the Lattice section and marks the current
+stochastic result; it lives under **More options** in the Generate step and marks the current
 result out of date rather than discarding it. Generation never draws from ambient randomness. Project JSON preserves the
 seed and PRNG version, while STL, 3MF, and OBJ exports include the seed in their available
 metadata fields.
@@ -206,7 +213,7 @@ metadata fields.
 Mesh exports can optionally reduce triangle count while keeping simplification
 error within the configured geometric tolerance.
 
-After validation, the right panel also reports generated volume, relative density, material
+After validation, the Results step also reports generated volume, relative density, material
 reduction, and optional mass when a material density is configured.
 
 ## Architecture
@@ -233,13 +240,15 @@ src/
   components/
     Viewer3D.tsx            # Viewer scene orchestration and interaction
     viewer/                 # Mesh renderers and twelve-lattice demo grid
-    LeftPanel.tsx           # Import, parameters, generate
-    RightPanel.tsx          # Validation and manufacturing statistics
-    ViewerControls.tsx      # View modes, cross-section, background
+    steps/                  # One panel per workflow step (Model … Results)
+    workflow.ts             # Step order, questions, and stepper state rules
+    StepNav.tsx             # Numbered stepper in the top bar
+    ViewerControls.tsx      # Floating view toolbar: modes, cross-section, camera views
     ExportControls.tsx      # STL, 3MF, OBJ, and project JSON export
   hooks/
     useLatticeGeneration.ts # Worker lifecycle for generation + validation
     useWorkspaceHotkeys.ts  # Keyboard shortcuts
+    useModelImport.tsx      # STL / project / sample intake shared by the start card and Model step
   store/
     useStore.ts             # Zustand global state + preference-only persistence
   types/
@@ -268,7 +277,7 @@ single-worker paths; see [the backend decision](./docs/performance/backend-decis
 
 ## Privacy & data
 
-Optional usage analytics start off. Opt in or withdraw in **Inspect → Privacy & data**; browser privacy signals suppress sends. Only fixed operation counts and coarse durations can be collected, with no model contents, filenames, URLs or visitor IDs. Collection also requires a deliberately configured and enabled backend. See [the data boundary and rollout](docs/glimpse.md).
+Optional usage analytics start off. Opt in or withdraw in the top bar's **⋯ project menu → Privacy & data**; browser privacy signals suppress sends. Only fixed operation counts and coarse durations can be collected, with no model contents, filenames, URLs or visitor IDs. Collection also requires a deliberately configured and enabled backend. See [the data boundary and rollout](docs/glimpse.md).
 
 ## Testing
 

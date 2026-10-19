@@ -17,6 +17,12 @@ import { closeBoundaryLoops } from '../geometry/mesh-repair';
 
 export type ViewMode = 'original' | 'lattice' | 'cross_section' | 'xray';
 
+/** The guided workflow's steps, in order. Never persisted. */
+export type WorkflowStep = 'model' | 'regions' | 'lattice' | 'shell' | 'generate' | 'results';
+
+/** Camera presets reachable from the DOM; the view cube adds corner views of its own. */
+export type CameraPreset = 'x' | 'y' | 'z' | 'iso';
+
 export type ClipAxis = 'x' | 'y' | 'z';
 
 export interface ClipPlaneState {
@@ -469,6 +475,7 @@ interface AppState {
   clipPlane: ClipPlaneState;
   viewerBackground: string;
   viewportResetSignal: number;
+  cameraViewRequest: { view: CameraPreset | null; signal: number };
   viewerCameraState: ViewerCameraState | null;
   demoModeActive: boolean;
   demoRunId: number;
@@ -479,6 +486,9 @@ interface AppState {
 
   // Boot
   persistenceHydrated: boolean;
+
+  // Workflow
+  workflowStep: WorkflowStep;
 
   // Actions
   setOriginalMesh: (mesh: TriangleMesh | null, info: MeshInfo | null, fileName: string) => void;
@@ -522,6 +532,8 @@ interface AppState {
   setClipPlane: (partial: Partial<ClipPlaneState>) => void;
   setViewerBackground: (color: string) => void;
   resetViewport: () => void;
+  requestCameraView: (view: CameraPreset) => void;
+  setWorkflowStep: (step: WorkflowStep) => void;
   setViewerCameraState: (cameraState: ViewerCameraState | null) => void;
   setDemoModeActive: (active: boolean) => void;
   startDemoRun: () => void;
@@ -607,11 +619,13 @@ export const useStore = create<AppState>((set, get) => ({
   clipPlane: persisted?.clipPlane ?? { axis: 'z', position: 0.5, flipped: false },
   viewerBackground: persisted?.viewerBackground ?? DEFAULT_VIEWER_BACKGROUND,
   viewportResetSignal: 0,
+  cameraViewRequest: { view: null, signal: 0 },
   viewerCameraState: null,
   demoModeActive: false,
   demoSuspended: null,
   demoRunId: 0,
   logs: [],
+  workflowStep: 'model',
   // IndexedDB is asynchronous, so the UI waits for saved preferences before rendering.
   persistenceHydrated: false,
 
@@ -1013,6 +1027,12 @@ export const useStore = create<AppState>((set, get) => ({
     viewerCameraState: null,
   })),
 
+  requestCameraView: (view) => set((s) => ({
+    cameraViewRequest: { view, signal: s.cameraViewRequest.signal + 1 },
+  })),
+
+  setWorkflowStep: (step) => set({ workflowStep: step }),
+
   setViewerCameraState: (cameraState) => set({ viewerCameraState: cameraState }),
 
   setDemoModeActive: (active) => set((s) => {
@@ -1163,6 +1183,7 @@ export const useStore = create<AppState>((set, get) => ({
       viewportResetSignal: 0,
       viewerCameraState: null,
       logs: [],
+      workflowStep: 'model',
       demoModeActive: false,
       demoSuspended: null,
       demoRunId: 0,

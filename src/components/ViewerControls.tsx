@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { resultBounds } from './viewer/ViewerMeshViews';
 import { useShallow } from 'zustand/react/shallow';
 import { canSelectView, useStore } from '../store/useStore';
-import type { ViewMode } from '../store/useStore';
+import type { CameraPreset, ViewMode } from '../store/useStore';
+import { ChevronDownIcon, EyeIcon } from './icons';
 
 const VIEW_LABELS: Record<ViewMode, string> = {
   original: 'Original',
@@ -10,6 +11,13 @@ const VIEW_LABELS: Record<ViewMode, string> = {
   cross_section: 'Cross-Section',
   xray: 'X-Ray',
 };
+
+const CAMERA_PRESETS: readonly { view: CameraPreset; label: string }[] = [
+  { view: 'y', label: 'Front' },
+  { view: 'z', label: 'Top' },
+  { view: 'x', label: 'Right' },
+  { view: 'iso', label: 'Isometric' },
+];
 
 const VIEW_HOTKEYS: Record<ViewMode, string> = {
   original: '1',
@@ -33,6 +41,8 @@ export function ViewerControls() {
     setViewMode: s.setViewMode,
     setClipPlane: s.setClipPlane,
     setViewerBackground: s.setViewerBackground,
+    requestCameraView: s.requestCameraView,
+    resetViewport: s.resetViewport,
   })));
   const {
     resultMesh,
@@ -79,7 +89,7 @@ export function ViewerControls() {
   }, [crossSectionSettingsOpen]);
 
   return (
-    <div className="viewer-controls-panel" aria-label="Viewer controls">
+    <div className="viewer-toolbar" role="group" aria-label="Viewer controls">
       <div className="view-buttons">
         {(Object.keys(VIEW_LABELS) as ViewMode[]).map((mode) => {
           const disabled = !canSelectView(store, mode);
@@ -182,6 +192,15 @@ export function ViewerControls() {
           );
         })}
       </div>
+      {!demoModeActive && (
+        <>
+          <span className="viewer-toolbar-divider" aria-hidden="true" />
+          <CameraViewsMenu
+            onSelect={(view) => store.requestCameraView(view)}
+            onReset={() => store.resetViewport()}
+          />
+        </>
+      )}
       <div className="viewer-background-swatch" title="Set the 3D viewer background color.">
         <input
           type="color"
@@ -191,6 +210,76 @@ export function ViewerControls() {
           aria-label="Viewer background color"
         />
       </div>
+    </div>
+  );
+}
+
+/**
+ * The view cube is drawn in the canvas and cannot take focus, so this menu is the
+ * keyboard path to every camera preset. It follows the ARIA menu pattern.
+ */
+function CameraViewsMenu({ onSelect, onReset }: { onSelect: (view: CameraPreset) => void; onReset: () => void }) {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+    const closeOnOutside = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (!menuRef.current?.contains(target) && !triggerRef.current?.contains(target)) setOpen(false);
+    };
+    document.addEventListener('pointerdown', closeOnOutside);
+    return () => document.removeEventListener('pointerdown', closeOnOutside);
+  }, [open]);
+
+  const close = (refocus: boolean) => {
+    setOpen(false);
+    if (refocus) triggerRef.current?.focus();
+  };
+
+  const handleMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const items = Array.from(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []);
+    const index = items.indexOf(document.activeElement as HTMLElement);
+    const focusAt = (next: number) => items[(next + items.length) % items.length]?.focus();
+    if (event.key === 'ArrowDown') { event.preventDefault(); focusAt(index + 1); }
+    else if (event.key === 'ArrowUp') { event.preventDefault(); focusAt(index - 1); }
+    else if (event.key === 'Home') { event.preventDefault(); focusAt(0); }
+    else if (event.key === 'End') { event.preventDefault(); focusAt(items.length - 1); }
+    else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(true); }
+    else if (event.key === 'Tab') setOpen(false);
+  };
+
+  return (
+    <div className="viewer-menu-anchor">
+      <button
+        ref={triggerRef}
+        type="button"
+        className="btn btn-small viewer-toolbar-button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls={open ? 'viewer-camera-menu' : undefined}
+        title="Camera views"
+        onClick={() => setOpen((value) => !value)}
+      >
+        <EyeIcon size={15} />
+        <span className="viewer-toolbar-label">Views</span>
+        <ChevronDownIcon size={13} />
+      </button>
+      {open && (
+        <div ref={menuRef} id="viewer-camera-menu" className="viewer-menu" role="menu" aria-label="Camera views" onKeyDown={handleMenuKeyDown}>
+          {CAMERA_PRESETS.map((preset) => (
+            <button key={preset.view} type="button" role="menuitem" tabIndex={-1} onClick={() => { onSelect(preset.view); close(true); }}>
+              {preset.label}
+            </button>
+          ))}
+          <div className="viewer-menu-separator" role="separator" />
+          <button type="button" role="menuitem" tabIndex={-1} onClick={() => { onReset(); close(true); }}>
+            Reset view <kbd>H</kbd>
+          </button>
+        </div>
+      )}
     </div>
   );
 }

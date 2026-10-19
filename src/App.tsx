@@ -1,9 +1,21 @@
-import { forwardRef, useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type UIEvent } from 'react';
-import { LeftPanel } from './components/LeftPanel';
+import { forwardRef, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type PointerEvent, type UIEvent } from 'react';
 import { Viewer3D } from './components/Viewer3D';
 import { ViewerControls } from './components/ViewerControls';
-import { InspectPanel } from './components/InspectPanel';
-import { useStore, type LogEntry } from './store/useStore';
+import { StepNav } from './components/StepNav';
+import { ProjectMenu } from './components/ProjectMenu';
+import { StartOverlay } from './components/StartOverlay';
+import { ModelStep } from './components/steps/ModelStep';
+import { RegionsStep } from './components/steps/RegionsStep';
+import { LatticeStep } from './components/steps/LatticeStep';
+import { ShellStep } from './components/steps/ShellStep';
+import { GenerateStep } from './components/steps/GenerateStep';
+import { ResultsStep } from './components/steps/ResultsStep';
+import { PlayIcon, SquareIcon } from './components/icons';
+import { adjacentStep, canNavigateToStep, reachableStep, visibleSteps, type WorkflowInputs } from './components/workflow';
+import { useWorkflowInputs } from './hooks/useWorkflow';
+import type { LatticeGenerationControls } from './hooks/useLatticeGeneration';
+import type { LatticeType } from './types/project';
+import { useStore, type LogEntry, type WorkflowStep } from './store/useStore';
 import { registerNotificationServiceWorker } from './utils/notifications';
 import { escapeControlCharacters } from './utils/text-safety';
 import { useLatticeGeneration } from './hooks/useLatticeGeneration';
@@ -33,36 +45,24 @@ function AppBootShell() {
 
         <div className="topbar-divider" />
         <div className="chrome-path" aria-label="Project status">
-          <span className="chrome-path-root">OpenLattice3D</span>
-          <span className="breadcrumb-sep">/</span>
           <span className="breadcrumb-chip">Checking workspace</span>
         </div>
       </header>
 
       <main className="workspace" id="main-content">
-        <section className="tool-panel left-panel" aria-label="Lattice setup">
-          <div className="panel-content boot-panel-placeholder" aria-hidden="true">
-            <div className="panel-intro">
-              <span className="panel-eyebrow">setup</span>
-              <h2>Model and lattice</h2>
-              <span className="boot-skeleton-line boot-skeleton-line-wide" />
-            </div>
-            <section className="panel-section">
-              <span className="boot-skeleton-line boot-skeleton-line-short" />
-              <span className="boot-skeleton-line" />
-              <span className="boot-skeleton-line boot-skeleton-line-wide" />
-            </section>
-            <section className="panel-section">
-              <span className="boot-skeleton-line boot-skeleton-line-short" />
-              <span className="boot-skeleton-line boot-skeleton-line-wide" />
-            </section>
-          </div>
-        </section>
-
         <section className="viewer-shell boot-viewer-shell" aria-label="3D lattice viewer">
           <div className="boot-viewer-state" role="status" aria-live="polite">
             <strong>Checking saved preferences…</strong>
             <span>Your viewer settings will be ready in a moment.</span>
+          </div>
+        </section>
+
+        <section className="side-panel" aria-label="Lattice workflow panel">
+          <div className="boot-panel-placeholder" aria-hidden="true">
+            <span className="boot-skeleton-line boot-skeleton-line-short" />
+            <span className="boot-skeleton-line boot-skeleton-line-wide" />
+            <span className="boot-skeleton-line" />
+            <span className="boot-skeleton-line boot-skeleton-line-wide" />
           </div>
         </section>
       </main>
@@ -96,6 +96,8 @@ function HydratedApp() {
     validationProgress,
     showPinnedRun,
     pinnedRun,
+    workflowStep,
+    setWorkflowStep,
   } = useStore();
   const generationControls = useLatticeGeneration();
   const countedOpen = useRef(false);
@@ -105,14 +107,46 @@ function HydratedApp() {
     trackUsage('workspace_opened');
   }, []);
   const staleness = useResultStaleness();
+  const workflowInputs = useWorkflowInputs();
   const [logsExpanded, setLogsExpanded] = useState(false);
-  // Below the stacked breakpoint only one panel shows at a time, beneath the viewer.
-  const [activePanel, setActivePanel] = useState<'setup' | 'inspect'>('setup');
   const logsTabRef = useRef<HTMLButtonElement>(null);
   const logsDrawerRef = useRef<HTMLDivElement>(null);
   const logsToggledRef = useRef(false);
 
   useWorkspaceHotkeys(generationControls);
+
+  // A step that disappears (painting without a mesh) or closes (results after a
+  // reset) hands over to the nearest reachable step before it.
+  const reachable = reachableStep(workflowStep, workflowInputs);
+  const stepVisible = visibleSteps(workflowInputs).some((step) => step.id === workflowStep);
+  useEffect(() => {
+    if (!stepVisible || !canNavigateToStep(workflowStep, workflowInputs)) setWorkflowStep(reachable);
+  }, [reachable, setWorkflowStep, stepVisible, workflowInputs, workflowStep]);
+
+  // A run started from the Generate step lands on its result.
+  const wasGenerating = useRef(generating);
+  useEffect(() => {
+    const finished = wasGenerating.current && !generating;
+    wasGenerating.current = generating;
+    if (finished && resultMesh && useStore.getState().workflowStep === 'generate') setWorkflowStep('results');
+  }, [generating, resultMesh, setWorkflowStep]);
+
+  // B and N walk the workflow, like the panel footer's Back and Continue.
+  useEffect(() => {
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.defaultPrevented || event.repeat || event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target;
+      if (target instanceof HTMLElement && (target.closest('input, select, textarea, [contenteditable="true"]'))) return;
+      const key = event.key.toLowerCase();
+      if (key !== 'b' && key !== 'n') return;
+      const step = adjacentStep(useStore.getState().workflowStep, workflowInputs, key === 'n' ? 1 : -1);
+      if (!step || !canNavigateToStep(step.id, workflowInputs)) return;
+      event.preventDefault();
+      setWorkflowStep(step.id);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [setWorkflowStep, workflowInputs]);
 
   const toggleLogs = useCallback(() => {
     logsToggledRef.current = true;
@@ -149,17 +183,28 @@ function HydratedApp() {
     : comparing
       ? `Comparing ${demoQueue.done} of ${demoQueue.total}`
       : hasModel ? 'Ready' : 'Idle';
-  const viewportMode = demoModeActive ? 'Multiview' : hasModel ? 'Interactive' : 'Standby';
+  const statusTone = generating || comparing ? 'busy' : hasModel ? 'ready' : 'idle';
   const showFaceLegend = keepOutTris.size > 0 || keepInTris.size > 0 || (selectionMode !== 'none' && selectionMode !== 'place_hole');
   const checks = summarizeValidation(validation, Boolean(resultMesh), generating, staleness.stale, validationProgress);
+  const canGenerate = hasModel && !demoModeActive;
+  const studySummary = hasModel
+    ? `${latticeLabel(params.latticeType)} · ${params.cellSize} mm cells${resultMesh ? ` · ${resultStats}` : ''}`
+    : 'Load a part to begin';
 
   // The statusbar verdict is a route to the detail, not another dead readout.
   const revealValidation = () => {
-    const target = document.getElementById('validation-panel') ?? document.getElementById('generate-action');
-    if (!target) return;
-    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    target.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'start' });
-    target.focus({ preventScroll: true });
+    if (!resultMesh) {
+      setWorkflowStep('generate');
+      return;
+    }
+    setWorkflowStep('results');
+    window.requestAnimationFrame(() => {
+      const target = document.getElementById('validation-panel');
+      if (!target) return;
+      const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      target.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'start' });
+      target.focus({ preventScroll: true });
+    });
   };
 
   return (
@@ -171,61 +216,65 @@ function HydratedApp() {
           <span className="brand-mark" aria-hidden="true">
             <img src="/favicon.svg" alt="" />
           </span>
-          <span>OpenLattice3D</span>
+          <span className="brand-name">OpenLattice3D</span>
           <span className="version-chip">beta</span>
         </div>
 
         <div className="topbar-divider" />
         <div className="chrome-path" aria-label="Project status">
-          <span className="chrome-path-root">OpenLattice3D</span>
-          <span className="breadcrumb-sep">/</span>
-          <span className="breadcrumb-chip">{modelLabel}</span>
-          <span className="breadcrumb-sep">/</span>
-          <span className="chrome-path-leaf">{params.latticeType}</span>
+          <span className="breadcrumb-chip" title={modelLabel}>{hasModel ? modelLabel : 'No part loaded'}</span>
+        </div>
+
+        <StepNav inputs={workflowInputs} />
+
+        <div className="topbar-tools">
+          {generating ? (
+            <button
+              type="button"
+              className="topbar-action running"
+              style={{ '--run-progress': `${Math.round(progress * 100)}%` } as CSSProperties}
+              title="Stop the current generation job. The previous result stays."
+              aria-label={`Cancel generation, ${progressLabel} complete`}
+              onClick={generationControls.cancelGeneration}
+            >
+              <SquareIcon size={13} />
+              <span>Cancel · {progressLabel}</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="topbar-action btn-primary"
+              disabled={!canGenerate}
+              title={demoModeActive
+                ? 'Close the comparison grid to generate a full-resolution lattice.'
+                : hasModel ? 'Generate the lattice with the current settings (G).' : 'Load a part first.'}
+              onClick={generationControls.startGeneration}
+            >
+              <PlayIcon size={13} />
+              <span>{staleness.stale ? 'Regenerate' : 'Generate'}</span>
+              <kbd>G</kbd>
+            </button>
+          )}
+          <ProjectMenu />
         </div>
       </header>
 
-      <main className="workspace" id="main-content" tabIndex={-1} data-active-panel={activePanel}>
-        <div className="panel-tabs" role="tablist" aria-label="Panels">
-          <button
-            type="button"
-            role="tab"
-            id="panel-tab-setup"
-            aria-selected={activePanel === 'setup'}
-            aria-controls="setup-panel"
-            className={activePanel === 'setup' ? 'active' : ''}
-            onClick={() => setActivePanel('setup')}
-          >
-            Setup
-          </button>
-          <button
-            type="button"
-            role="tab"
-            id="panel-tab-inspect"
-            aria-selected={activePanel === 'inspect'}
-            aria-controls="inspect-panel"
-            className={activePanel === 'inspect' ? 'active' : ''}
-            onClick={() => setActivePanel('inspect')}
-          >
-            Inspect
-            {checks.tone === 'fail' && <span className="count-pill">{checks.failedCount}</span>}
-          </button>
-        </div>
+      <div className="step-nav-strip">
+        <StepNav inputs={workflowInputs} />
+      </div>
 
-        <section className="tool-panel left-panel" id="setup-panel" aria-label="Lattice setup" aria-labelledby="panel-tab-setup">
-          <LeftPanel generationControls={generationControls} />
-        </section>
-
+      <main className="workspace" id="main-content" tabIndex={-1}>
         <section className="viewer-shell" aria-label="3D lattice viewer">
-          {!demoModeActive && (
+          {!demoModeActive && hasModel && (
             <div className="viewer-hud">
               <div className="viewer-readout">
-                <span>{hasModel ? modelLabel : 'No model loaded'}</span>
-                <strong>{resultMesh ? resultStats : 'Viewport ready'}</strong>
+                <span>{modelLabel}</span>
+                <strong>{resultMesh ? resultStats : 'Source model'}</strong>
               </div>
             </div>
           )}
           <Viewer3D />
+          {!hasModel && !demoModeActive && <StartOverlay />}
           {showFaceLegend && !demoModeActive && (
             <div className="viewer-legend" role="group" aria-label="Face marking legend">
               <span className="viewer-legend-item">
@@ -238,13 +287,15 @@ function HydratedApp() {
               </span>
             </div>
           )}
-          <div className="viewer-controls-overlay">
-            <ViewerControls />
-          </div>
+          {(hasModel || demoModeActive) && (
+            <div className="viewer-controls-overlay">
+              <ViewerControls />
+            </div>
+          )}
         </section>
 
-        <section className="side-panel inspect-panel" id="inspect-panel" aria-label="Inspect result" aria-labelledby="panel-tab-inspect">
-          <InspectPanel />
+        <section className="side-panel" aria-label="Lattice workflow panel">
+          <ActiveStep step={workflowStep} inputs={workflowInputs} generationControls={generationControls} />
         </section>
       </main>
 
@@ -272,8 +323,9 @@ function HydratedApp() {
           </button>
         </div>
         <div className="statusbar-group" aria-label="Model and solver status">
-          <span className="statusbar-segment">Lattice: {params.latticeType}</span>
-          <span className="statusbar-segment">Result: {resultStats}</span>
+          <span className={`status-dot is-${statusTone}`} aria-hidden="true" />
+          <span className="statusbar-segment status-text">{solverStatus}</span>
+          <span className="statusbar-segment status-summary" title={studySummary}>{studySummary}</span>
           <button
             type="button"
             className={`statusbar-segment validation-chip is-${checks.tone}`}
@@ -283,8 +335,6 @@ function HydratedApp() {
           >
             <span aria-live="polite">{checks.label}</span>
           </button>
-          <span className="statusbar-segment">Solver: {solverStatus}</span>
-          <span className="statusbar-segment">Viewport: {viewportMode}</span>
         </div>
         <div className="status-links" aria-label="Project links">
           <a
@@ -311,7 +361,7 @@ function HydratedApp() {
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
             </svg>
-            feedback
+            Feedback
           </a>
           <a
             className="status-link"
@@ -325,12 +375,37 @@ function HydratedApp() {
               <path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.4 5.4 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4" />
               <path d="M9 18c-4.51 2-5-2-7-2" />
             </svg>
-            github
+            GitHub
           </a>
         </div>
       </footer>
     </div>
   );
+}
+
+function ActiveStep({ step, inputs, generationControls }: {
+  step: WorkflowStep;
+  inputs: WorkflowInputs;
+  generationControls: LatticeGenerationControls;
+}) {
+  switch (step) {
+    case 'model': return <ModelStep inputs={inputs} />;
+    case 'regions': return <RegionsStep inputs={inputs} />;
+    case 'lattice': return <LatticeStep inputs={inputs} />;
+    case 'shell': return <ShellStep inputs={inputs} />;
+    case 'generate': return <GenerateStep inputs={inputs} generationControls={generationControls} />;
+    case 'results': return <ResultsStep inputs={inputs} />;
+  }
+}
+
+const LATTICE_NAMES: Partial<Record<LatticeType, string>> = {
+  gyroid: 'Gyroid', schwarzP: 'Schwarz P', schwarzD: 'Schwarz D', neovius: 'Neovius', iwp: 'IWP',
+  bcc: 'BCC', octet: 'Octet', diamond: 'Diamond', hexagon: 'Hexagon', triangle: 'Triangle',
+  voronoi: 'Voronoi', spinodal: 'Spinodal',
+};
+
+function latticeLabel(type: LatticeType): string {
+  return LATTICE_NAMES[type] ?? type;
 }
 
 const MIN_DRAWER_HEIGHT = 260;
