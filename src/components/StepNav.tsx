@@ -1,5 +1,5 @@
-// The workflow as a numbered stepper in the top bar. A tick means present and valid;
-// a blocked or out-of-date step carries a glyph and its reason, never colour alone.
+// The workflow as one joined segment bar in the top bar. A tick means present and
+// valid; a blocked or out-of-date step carries a glyph and its reason, never colour alone.
 import { useStore } from '../store/useStore';
 import { canNavigateToStep, stepStatus, visibleSteps, type WorkflowInputs } from './workflow';
 import { AlertIcon, CheckIcon } from './icons';
@@ -28,14 +28,16 @@ export function StepNav({ inputs }: { inputs: WorkflowInputs }) {
                 aria-label={reason ? `${step.label}: ${reason}` : undefined}
                 onClick={() => setWorkflowStep(step.id)}
               >
-                <span className={`step-nav-dot ${status}`} aria-hidden="true">
-                  {index + 1}
-                  {status === 'done' && <span className="step-nav-status"><CheckIcon size={9} strokeWidth={3.2} /></span>}
-                  {(status === 'blocked' || status === 'attention') && (
-                    <span className="step-nav-status"><AlertIcon size={9} strokeWidth={2.8} /></span>
-                  )}
+                {/* A done step trades its number for a tick; a blocked one keeps its
+                    number and adds a warning after the label, never colour alone. */}
+                <span className={`step-nav-mark ${status}`} aria-hidden="true">
+                  {status === 'done' ? <CheckIcon size={14} strokeWidth={2.4} /> : index + 1}
                 </span>
                 <span className="step-nav-label">{step.label}</span>
+                {status === 'done' && <span className="visually-hidden">, done</span>}
+                {(status === 'blocked' || status === 'attention') && (
+                  <span className="step-nav-warning" aria-hidden="true"><AlertIcon size={14} strokeWidth={2.2} /></span>
+                )}
               </button>
             </li>
           );

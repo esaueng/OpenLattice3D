@@ -433,38 +433,38 @@ summary:focus-visible,
   margin: 0 auto;
 }
 
+/* One control: a single hairline box with dividers between segments. */
 .step-nav-list {
   display: flex;
-  align-items: center;
-  gap: var(--sp-1);
+  align-items: stretch;
   margin: 0;
   padding: 0;
+  overflow: hidden;
   list-style: none;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
 }
 
 .step-nav-item {
   display: flex;
-  align-items: center;
-  gap: var(--sp-1);
 }
 
-.step-nav-item + .step-nav-item::before {
-  content: "";
-  width: var(--sp-3);
-  height: 1px;
-  background: var(--color-border-strong);
+.step-nav-item + .step-nav-item {
+  border-left: 1px solid var(--color-border-strong);
 }
 
 .step-nav-step {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: var(--sp-15);
-  min-height: var(--control-h-lg);
-  padding: 0 var(--sp-25) 0 var(--sp-1);
+  gap: var(--sp-2);
+  min-height: 32px;
+  padding: 0 var(--sp-3);
   color: var(--color-text-muted);
   background: transparent;
   border: 0;
-  border-radius: var(--radius-pill);
+  border-radius: 0;
   font-size: var(--fs-base);
   white-space: nowrap;
 }
@@ -474,71 +474,49 @@ summary:focus-visible,
   background: var(--color-surface-2);
 }
 
+.step-nav-step:focus-visible {
+  outline-offset: -2px;
+}
+
 .step-nav-step:disabled {
   cursor: not-allowed;
   opacity: 0.45;
 }
 
+/* The current step: tinted, heavier, underlined in the accent. */
 .step-nav-step.active {
   color: var(--color-text);
   background: var(--color-accent-dim);
-  font-weight: var(--fw-medium);
+  font-weight: var(--fw-semibold);
+  box-shadow: inset 0 -2px 0 var(--color-accent);
 }
 
-.step-nav-dot {
-  position: relative;
-  display: grid;
+.step-nav-step.active:hover {
+  background: var(--color-accent-dim);
+}
+
+.step-nav-mark {
+  display: inline-grid;
   place-items: center;
   flex: none;
-  width: 22px;
-  height: 22px;
-  border: 1px solid var(--color-border-strong);
-  border-radius: 50%;
+  min-width: 14px;
   font-family: var(--font-mono);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-sm);
   font-variant-numeric: tabular-nums;
 }
 
-.step-nav-dot.done {
+.step-nav-mark.done {
   color: var(--color-success);
-  background: var(--color-surface-2);
-  border-color: var(--color-border);
 }
 
-.step-nav-dot.blocked,
-.step-nav-dot.attention {
-  color: var(--color-warning);
-  border-color: var(--color-warning);
+.step-nav-step.active .step-nav-mark {
+  color: var(--color-accent);
 }
 
-.step-nav-step.active .step-nav-dot {
-  color: var(--color-on-accent);
-  background: var(--color-accent);
-  border-color: var(--color-accent);
-}
-
-/* The number stays in every state; status rides on a glyph badge. */
-.step-nav-status {
-  position: absolute;
-  right: -6px;
-  bottom: -5px;
-  display: grid;
+.step-nav-warning {
+  display: inline-grid;
   place-items: center;
-  width: 12px;
-  height: 12px;
-  color: var(--color-surface);
-  background: var(--color-success);
-  border-radius: 50%;
-  box-shadow: 0 0 0 2px var(--color-surface);
-}
-
-.step-nav-dot.blocked .step-nav-status,
-.step-nav-dot.attention .step-nav-status {
-  background: var(--color-warning);
-}
-
-.step-nav-dot.blocked .step-nav-status {
-  background: var(--color-error);
+  color: var(--color-warning);
 }
 
 /* Narrow: the top bar has no room, so a strip under it carries the stepper.
@@ -553,7 +531,7 @@ summary:focus-visible,
    clipped, not removed, so each keeps its accessible name and a title. */
 @media (max-width: 1320px) {
   .step-nav-step:not(.active) {
-    padding-right: var(--sp-1);
+    padding: 0 var(--sp-25);
   }
 
   .step-nav-step:not(.active) .step-nav-label {
@@ -567,10 +545,6 @@ summary:focus-visible,
 }
 
 @media (min-width: 981px) and (max-width: 1180px) {
-  .topbar .step-nav-item + .step-nav-item::before {
-    width: var(--sp-1);
-  }
-
   .topbar .chrome-path,
   .topbar .topbar-divider {
     display: none;
