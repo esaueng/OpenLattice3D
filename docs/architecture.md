@@ -7,7 +7,8 @@ positive outside, and are extracted at iso-value zero.
 
 ## Generation flow
 
-1. `LeftPanel` imports an STL, restores a project, or selects a procedural part.
+1. `useModelImport` (the Model step and the empty-viewer start card) imports an
+   STL, restores a project, or selects a procedural part.
 2. `useStore` owns the source, sanitized lattice parameters, selection masks,
    viewer state, and undo/redo history.
 3. `useLatticeGeneration` starts `lattice-worker`, reports progress, and rejects

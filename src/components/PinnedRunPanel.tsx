@@ -6,6 +6,7 @@ import { describeSnapshotChanges, type GenerationSnapshot } from '../store/gener
 import { selectGenerationInputs } from '../store/useResultStaleness';
 import { summarizeValidation } from '../utils/validation-summary';
 import type { LatticeParams } from '../types/project';
+import { Collapsible } from './PanelChrome';
 
 const DIFF_LABELS: Partial<Record<keyof LatticeParams, string>> = {
   latticeType: 'type', cellSize: 'cell', wallThickness: 'wall', strutDiameter: 'strut',
@@ -59,12 +60,11 @@ export function PinnedRunPanel() {
   const isSameAsCurrent = pinnedRun !== null && pinnedRun.resultMesh === resultMesh;
 
   return (
-    <section className="panel-section pinned-run" aria-label="Pinned run">
-      <h3>Compare runs</h3>
+    <Collapsible title="Compare runs" subtitle={pinnedRun ? (showPinnedRun ? 'Showing pinned' : 'Pinned') : undefined} defaultOpen={pinnedRun !== null}>
       {!pinnedRun ? (
         <>
           <p className="info-text">Pin this result, change settings, generate again, then flip between the two.</p>
-          <button type="button" className="btn btn-small" style={{ marginTop: '8px' }} onClick={pinCurrentResult} disabled={!resultMesh}>
+          <button type="button" className="btn btn-small" onClick={pinCurrentResult} disabled={!resultMesh}>
             Pin this result
           </button>
         </>
@@ -80,7 +80,7 @@ export function PinnedRunPanel() {
               <div><strong>Form differs by:</strong> {pinnedVsForm.join(', ')}</div>
             )}
           </div>
-          <div className="row" style={{ gap: '6px', flexWrap: 'wrap', marginTop: '8px' }}>
+          <div className="button-row">
             <button
               type="button"
               className={`btn btn-small ${showPinnedRun ? 'btn-active' : ''}`}
@@ -98,6 +98,6 @@ export function PinnedRunPanel() {
           </div>
         </>
       )}
-    </section>
+    </Collapsible>
   );
 }

@@ -111,11 +111,11 @@ export function ExportControls() {
   };
 
   return (
-    <section className="panel-section export-section" aria-label="Export">
-      <h3>Export</h3>
+    <section className="panel-block export-section" aria-label="Export">
+      <div className="panel-block-header"><h3>Export</h3></div>
       {resultMesh && (
         <div className="row export-simplify">
-          <label htmlFor="export-simplify">Detail:</label>
+          <label htmlFor="export-simplify">Detail</label>
           <select
             id="export-simplify"
             title={`Simplify exports without exceeding the ${meshParams.toleranceMm}mm deviation tolerance. The viewport remains full detail.`}

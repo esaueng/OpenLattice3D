@@ -4,7 +4,7 @@ OpenLattice3D connects a consent-gated adapter to [Glimpse](https://github.com/e
 
 ## Optional browser analytics
 
-**Inspect → Privacy & data → Allow optional usage analytics** is unchecked by default and available before loading a model. It stores only `granted-v1` under `openlattice3d.glimpse.consent.v1` on this origin. It is separate from projects, viewer preferences and other apps. Refusal has no effect on use. DNT/GPC suppress sends while leaving a saved grant visible and withdrawable.
+**Project menu (⋯ in the top bar) → Privacy & data → Allow optional usage analytics** is unchecked by default and available before loading a model. It stores only `granted-v1` under `openlattice3d.glimpse.consent.v1` on this origin. It is separate from projects, viewer preferences and other apps. Refusal has no effect on use. DNT/GPC suppress sends while leaving a saved grant visible and withdrawable.
 
 Unchecking cancels pending sends and stops future sends immediately. Other open tabs follow saved changes and storage clears. Failed storage access fails closed; a failed withdrawal retains a safety block for that page and tells the user to clear site storage before reloading. Already-received anonymous counts cannot be attributed to a person for deletion. No pending events are replayed after a grant.
 
