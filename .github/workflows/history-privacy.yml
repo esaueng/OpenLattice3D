@@ -18,6 +18,13 @@ on:
 permissions:
   contents: read
 
+# Collapse queued duplicates of one audit: the same PR, or the same requested
+# head and requester event. A running audit is never cancelled, and only the
+# newest pending run of a group waits behind it.
+concurrency:
+  group: history-privacy-${{ github.event_name }}-${{ github.event.pull_request.number || (github.event.workflow_run.head_sha && format('{0}-{1}', github.event.workflow_run.event, github.event.workflow_run.head_sha)) || github.run_id }}
+  cancel-in-progress: false
+
 jobs:
   history-privacy-audit:
     if: >-
