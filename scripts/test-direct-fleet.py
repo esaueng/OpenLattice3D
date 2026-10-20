@@ -6,6 +6,7 @@ import json
 import re
 import subprocess
 import unittest
+from datetime import datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,6 +17,39 @@ EXPRESSIONS = re.findall(
 )
 REPO = re.search(r"github.repository == '([^']+)'", TEXT)[1]
 REPO_ID = int(re.search(r"github.repository_id == '([0-9]+)'", TEXT)[1])
+PIN = re.search(r"\.github/workflows/fleet-ci\.yml@([0-9a-f]{40})", CALLER)[1]
+
+
+def main_contains(commit):
+    """Whether origin/main reaches `commit`, fetching only the history needed."""
+    def contains():
+        return subprocess.run(
+            ["git", "merge-base", "--is-ancestor", commit, "refs/remotes/origin/main"],
+            cwd=ROOT, capture_output=True,
+        ).returncode == 0
+    if contains():
+        return True
+    if subprocess.run(["git", "cat-file", "-e", f"{commit}^{{commit}}"], cwd=ROOT, capture_output=True).returncode:
+        subprocess.run(["git", "fetch", "--no-tags", "--quiet", "--depth=1", "origin", commit], cwd=ROOT, check=True)
+    fetch = ["git", "fetch", "--no-tags", "--quiet"]
+    shallow = subprocess.check_output(
+        ["git", "rev-parse", "--is-shallow-repository"], cwd=ROOT, text=True
+    ).strip() == "true"
+    if shallow:
+        # Main's commits since a day before the pin are enough to walk to it;
+        # CI checkouts are shallow.
+        committed = subprocess.check_output(["git", "show", "-s", "--format=%cI", commit], cwd=ROOT, text=True).strip()
+        since = datetime.fromisoformat(committed) - timedelta(days=1)
+        fetch.append(f"--shallow-since={since.isoformat()}")
+    result = subprocess.run(
+        fetch + ["origin", "+refs/heads/main:refs/remotes/origin/main"],
+        cwd=ROOT, capture_output=True, text=True,
+    )
+    if result.returncode:
+        # Git cannot unshallow a pinned commit main does not reach ("error in
+        # object: unshallow ..."), so this is usually the same answer.
+        raise AssertionError(f"could not fetch main back to {commit}: {result.stderr.strip()}")
+    return contains()
 
 
 class Context(dict):
@@ -161,6 +195,16 @@ class DirectFleetTests(unittest.TestCase):
         for status in ("success", "failure", "cancelled", "skipped", ""):
             result = subprocess.run(["bash", "-c", command], env={"RESULT": status})
             self.assertEqual(result.returncode == 0, status == "success")
+
+    def test_pin_is_a_commit_main_already_contains(self):
+        # GitHub deletes a PR branch at merge, and Actions cannot resolve a
+        # reusable workflow at a commit only refs/pull/N/head still reaches:
+        # every ci run then fails at startup with no jobs. Land the
+        # fleet-ci.yml change first, then re-pin to its commit on main.
+        self.assertTrue(
+            main_contains(PIN),
+            f"ci.yml pins fleet-ci.yml@{PIN}, which main does not contain",
+        )
 
     def test_embedded_shell_syntax(self):
         for block in re.findall(r"        run: \|\n((?:          [^\n]*\n|\n)+)", TEXT):

@@ -111,5 +111,9 @@ and the smoke workflow is disabled by default (see
   marching cubes at production resolutions, hence the 60s timeout.
 - Dev, preview, and production all send COOP/COEP isolation headers; third-
   party embeds that cannot opt in must stay external links.
+- `ci.yml` must pin `fleet-ci.yml` to a commit main already contains. Change
+  `fleet-ci.yml` in one PR, then re-pin `ci.yml` to its squash commit in a
+  second; a pin to a PR branch commit breaks every CI run once GitHub deletes
+  that branch at merge. `scripts/test-direct-fleet.py` fails such a pin.
 - Models never leave the browser. Do not add telemetry, upload endpoints, or
   third-party model handling.
