@@ -127,7 +127,7 @@ function sdfNormal(
   const gy = sdf(x, y + step, z) - sdf(x, y - step, z);
   const gz = sdf(x, y, z + step) - sdf(x, y, z - step);
   const magnitude = Math.hypot(gx, gy, gz);
-  if (magnitude < 1e-12) return null;
+  if (!Number.isFinite(magnitude) || magnitude < 1e-12) return null;
   return [gx / magnitude, gy / magnitude, gz / magnitude];
 }
 
@@ -147,6 +147,7 @@ function bisectCrossing(
       origin[1] + direction[1] * midpoint,
       origin[2] + direction[2] * midpoint,
     );
+    if (!Number.isFinite(value)) return Number.NaN;
     if (value <= 0) insideDistance = midpoint;
     else outsideDistance = midpoint;
   }
@@ -160,6 +161,9 @@ function bisectCrossing(
  * must meet the required minimum for validation to pass.
  */
 export const MAX_THIN_POINTS = 400;
+// A malformed/non-closing field or very large model must not make a ray
+// unbounded. Exhausting this budget is unmeasured, never an invented thickness.
+const MAX_THICKNESS_MARCH_STEPS = 4096;
 
 export function checkMinThickness(
   sdf: (x: number, y: number, z: number) => number,
@@ -169,9 +173,25 @@ export function checkMinThickness(
   onProgress?: (fraction: number) => void,
 ): { passed: boolean; minMeasured: number; absoluteMin: number; sampled: number; thinPoints: number[] } {
   const { positions, triCount } = result;
+  const unavailable = { passed: false, minMeasured: 0, absoluteMin: 0, sampled: 0, thinPoints: [] };
+  if (!Number.isFinite(minRequired) || minRequired <= 0 || triCount === 0) return unavailable;
   const stride = Math.max(1, Math.floor(triCount / sampleCount));
   const marchStep = minRequired / 16;
-  const maxDepth = minRequired * 4;
+  if (marchStep === 0) return unavailable;
+  const min = [Infinity, Infinity, Infinity];
+  const max = [-Infinity, -Infinity, -Infinity];
+  for (let offset = 0; offset < triCount * 9; offset += 3) {
+    for (let axis = 0; axis < 3; axis++) {
+      min[axis] = Math.min(min[axis], positions[offset + axis]);
+      max[axis] = Math.max(max[axis], positions[offset + axis]);
+    }
+  }
+  // A chord through the generated solid cannot exceed its bounds diagonal.
+  // Keep the existing short-ray range for partial surface probes, and add an
+  // outside step so a crossing on the opposite bound can be bracketed.
+  const diagonal = Math.hypot(max[0] - min[0], max[1] - min[1], max[2] - min[2]);
+  const maxDepth = Math.max(minRequired * 4, diagonal + marchStep * 4);
+  if (!Number.isFinite(maxDepth)) return unavailable;
   const gradientStep = Math.max(1e-4, minRequired * 0.01);
   const thicknesses: number[] = [];
   // Where the thin rays start, so the viewer can point at them.
@@ -207,15 +227,18 @@ export function checkMinThickness(
 
     const crossing = (sign: number): number => {
       let lastInside = seed;
-      for (let distance = marchStep; distance <= maxDepth; distance += marchStep) {
+      for (let step = 1; step <= MAX_THICKNESS_MARCH_STEPS; step++) {
+        const distance = Math.min(step * marchStep, maxDepth);
         const candidate = seed + sign * distance;
         const value = sdf(
           origin[0] + inward[0] * candidate,
           origin[1] + inward[1] * candidate,
           origin[2] + inward[2] * candidate,
         );
+        if (!Number.isFinite(value)) return Number.NaN;
         if (value > 0) return bisectCrossing(sdf, origin, inward, lastInside, candidate);
         lastInside = candidate;
+        if (distance >= maxDepth) break;
       }
       return Number.NaN;
     };
