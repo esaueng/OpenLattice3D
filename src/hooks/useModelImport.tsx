@@ -28,6 +28,13 @@ export function useModelImport() {
   const [clearAllArmed, setClearAllArmed] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const jsonRef = useRef<HTMLInputElement>(null);
+  const activeIntake = useRef<number | null>(null);
+
+  useEffect(() => () => {
+    // Unmounting one intake surface must not cancel a newer request owned by
+    // another mounted instance of this hook.
+    if (activeIntake.current !== null) useStore.getState().cancelModelIntake(activeIntake.current);
+  }, []);
 
   useEffect(() => {
     if (!clearAllArmed) return;
@@ -40,12 +47,15 @@ export function useModelImport() {
     // Reset the input so the same file can be re-imported after a fix.
     e.target.value = '';
     if (!file) return;
+    const epoch = store.beginModelIntake();
+    activeIntake.current = epoch;
     store.addLog(`Importing ${file.name}...`);
     try {
       // Check the declared size before reading: arrayBuffer() would otherwise
       // pull the whole file into tab memory before any limit could apply.
       assertFileSizeWithinBudget(file.size, DEFAULT_IMPORT_LIMITS.maxStlBytes, `STL file ${file.name}`);
       const buffer = await file.arrayBuffer();
+      if (useStore.getState().modelIntakeEpoch !== epoch) return;
       let mesh = parseSTL(buffer);
       let info = analyzeMesh(mesh);
       store.addLog(`Loaded: ${info.triangleCount} triangles, ${info.vertexCount} vertices`);
@@ -105,13 +115,17 @@ export function useModelImport() {
         });
       }
     } catch (err) {
+      if (useStore.getState().modelIntakeEpoch !== epoch) return;
       const message = errorMessage(err);
+      const current = useStore.getState();
       store.addLog(`Import failed: ${message}`, 'error');
       store.setImportNotice({
         level: 'error',
         message: `Could not import ${file.name}: ${message}`,
-        detail: store.originalMesh || store.sphereMode ? 'The previous model is still loaded.' : undefined,
+        detail: current.originalMesh || current.sphereMode ? 'The previous model is still loaded.' : undefined,
       });
+    } finally {
+      if (activeIntake.current === epoch) activeIntake.current = null;
     }
   }, [store]);
 
@@ -126,9 +140,12 @@ export function useModelImport() {
     // Reset the input so the same file can be re-imported
     e.target.value = '';
     if (!file) return;
+    const epoch = store.beginModelIntake();
+    activeIntake.current = epoch;
     try {
       assertFileSizeWithinBudget(file.size, DEFAULT_IMPORT_LIMITS.maxProjectBytes, `Project file ${file.name}`);
       const text = await file.text();
+      if (useStore.getState().modelIntakeEpoch !== epoch) return;
       const data: unknown = JSON.parse(text);
       const parsed = parseProjectFile(data);
       for (const warning of parsed.warnings) store.addLog(`JSON import: ${warning}`, 'warn');
@@ -160,9 +177,12 @@ export function useModelImport() {
         });
       }
     } catch (err) {
+      if (useStore.getState().modelIntakeEpoch !== epoch) return;
       const message = errorMessage(err);
       store.addLog(`JSON import failed: ${message}`, 'error');
       store.setImportNotice({ level: 'error', message: `Could not read ${file.name}: ${message}` });
+    } finally {
+      if (activeIntake.current === epoch) activeIntake.current = null;
     }
   }, [store]);
 
