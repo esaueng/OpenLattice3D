@@ -16,6 +16,25 @@ function planarSurface(x: number): MarchingCubesResult {
   };
 }
 
+function slabMesh(thickness: number, side = 20): MarchingCubesResult {
+  const x = thickness * 0.5;
+  const halfSide = side * 0.5;
+  const vertices = [
+    [-x, -halfSide, -halfSide], [x, -halfSide, -halfSide], [x, halfSide, -halfSide], [-x, halfSide, -halfSide],
+    [-x, -halfSide, halfSide], [x, -halfSide, halfSide], [x, halfSide, halfSide], [-x, halfSide, halfSide],
+  ];
+  const faces = [
+    [0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7],
+    [0, 1, 5], [0, 5, 4], [3, 7, 6], [3, 6, 2],
+    [0, 4, 7], [0, 7, 3], [1, 2, 6], [1, 6, 5],
+  ];
+  return {
+    positions: new Float32Array(faces.flatMap((face) => face.flatMap((vertex) => vertices[vertex]))),
+    normals: new Float32Array(faces.length * 3),
+    triCount: faces.length,
+  };
+}
+
 describe('minimum-thickness validation against known solids', () => {
   it.each([0.3, 0.6, 1, 1.5, 2, 3])('measures a %fmm slab continuously', (thickness) => {
     const sdf = (x: number) => Math.abs(x) - thickness * 0.5;
@@ -33,6 +52,18 @@ describe('minimum-thickness validation against known solids', () => {
       const result = checkMinThickness(sdf, planarSurface(thickness * 0.5), required, 1);
       expect(result.minMeasured).toBeCloseTo(thickness, 5);
       expect(result.passed).toBe(thickness >= required - 1e-3);
+    }
+  });
+
+  it.each([4, 10])('measures a closed %fmm slab beyond four times the minimum', (thickness) => {
+    const sdf = (x: number, y: number, z: number) => Math.max(Math.abs(x) - thickness * 0.5, Math.abs(y) - 10, Math.abs(z) - 10);
+    const mesh = slabMesh(thickness);
+    for (const required of [0.2, 0.8, 1]) {
+      const result = checkMinThickness(sdf, mesh, required, mesh.triCount);
+      expect(result.sampled).toBe(mesh.triCount);
+      expect(result.minMeasured).toBeCloseTo(thickness, 5);
+      expect(result.absoluteMin).toBeCloseTo(thickness, 5);
+      expect(result.passed).toBe(true);
     }
   });
 
@@ -75,6 +106,28 @@ describe('unmeasurable thickness', () => {
   it('fails without inventing thickness when no usable ray is found', () => {
     const result = checkMinThickness(() => 1, planarSurface(0), 0.8);
     expect(result).toEqual({ passed: false, minMeasured: 0, absoluteMin: 0, sampled: 0, thinPoints: [] });
+  });
+
+  it('bounds work on a large solid and leaves exhausted rays unmeasured', () => {
+    const mesh = slabMesh(1000, 1000);
+    let fieldCalls = 0;
+    const result = checkMinThickness((x, y, z) => {
+      fieldCalls++;
+      return Math.max(Math.abs(x), Math.abs(y), Math.abs(z)) - 500;
+    }, mesh, 0.8, mesh.triCount);
+    expect(result).toEqual({ passed: false, minMeasured: 0, absoluteMin: 0, sampled: 0, thinPoints: [] });
+    expect(fieldCalls).toBeLessThan(mesh.triCount * 10_000);
+  });
+
+  it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY, Number.MIN_VALUE])('fails closed for an unusable minimum %s', (required) => {
+    const result = checkMinThickness((x) => Math.abs(x) - 1, planarSurface(1), required);
+    expect(result).toEqual({ passed: false, minMeasured: 0, absoluteMin: 0, sampled: 0, thinPoints: [] });
+  });
+
+  it('does not turn a nonfinite field interval into a measured crossing', () => {
+    const result = checkMinThickness((x) => x < -1 ? Number.NaN : Math.abs(x) - 2, slabMesh(4), 0.8);
+    expect(result.sampled).toBe(0);
+    expect(result.passed).toBe(false);
   });
 });
 
