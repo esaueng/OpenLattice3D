@@ -1,12 +1,31 @@
 import { createElement } from 'react';
 import { renderToString } from 'react-dom/server';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useModelImport } from './useModelImport';
 import { useStore } from '../store/useStore';
 import { DEFAULT_PARAMS } from '../types/project';
 import { generateCubeMesh } from '../geometry/mesh-analysis';
 import { exportBinarySTL } from '../geometry/stl-parser';
 import { createProjectFile } from '../utils/project-file';
+import { readModelFile, type IntakeRequest } from '../workers/model-intake';
+import { modelIntake } from './model-intake-client';
+import type { GenerationWorkerLike, WorkerErrorLike } from './generation-worker-controller';
+
+// Exercise actual file reads/parsers in Node while retaining worker lifecycle
+// and deliberately delivering late messages after termination.
+class InProcessWorker implements GenerationWorkerLike {
+  onmessage: ((event: { data: unknown }) => void) | null = null;
+  onerror: ((event: WorkerErrorLike) => void) | null = null;
+  onmessageerror: ((event: unknown) => void) | null = null;
+  postMessage(request: IntakeRequest) {
+    const deliver = this.onmessage;
+    void readModelFile(request).then(
+      result => deliver?.({ data: { type: 'result', result } }),
+      error => deliver?.({ data: { type: 'error', message: error.message } }),
+    );
+  }
+  terminate() {}
+}
 
 type Controls = ReturnType<typeof useModelImport>;
 type Change = (event: React.ChangeEvent<HTMLInputElement>) => Promise<void>;
@@ -38,11 +57,32 @@ function parameterFile(name: string, cellSize: number) {
 }
 
 beforeEach(async () => {
+  vi.stubGlobal('Worker', InProcessWorker);
   await expect.poll(() => useStore.getState().persistenceHydrated).toBe(true);
   useStore.getState().resetProject();
 });
+afterEach(() => { modelIntake.dispose(); vi.unstubAllGlobals(); });
 
 describe('shared model intake ownership', () => {
+  it('preserves the valid model when startup, crash or protocol failure occurs', async () => {
+    for (const failure of ['startup', 'crash', 'malformed']) {
+      class FailingWorker extends InProcessWorker {
+        constructor() { super(); if (failure === 'startup') throw new Error('startup blocked'); }
+        override postMessage() {
+          if (failure === 'crash') this.onerror?.({ message: 'crash' });
+          else this.onmessage?.({ data: { type: 'result', result: {} } });
+        }
+      }
+      vi.stubGlobal('Worker', FailingWorker);
+      useStore.getState().setSampleShape('sphere');
+      const intake = controls();
+      await change(intake, '.json')(event(parameterFile('failure.json', 11)));
+      expect(useStore.getState().sampleShape).toBe('sphere');
+      expect(useStore.getState().params.cellSize).toBe(DEFAULT_PARAMS.cellSize);
+      expect(useStore.getState().importNotice).toMatchObject({ level: 'error', message: expect.stringContaining('failure.json') });
+    }
+  });
+
   it('keeps the newer parameter import across separate hook instances', async () => {
     const first = controls();
     const second = controls();
