@@ -421,6 +421,8 @@ function seedDemoParamsMap(existing: DemoParamsByType): DemoParamsByType {
 }
 
 interface AppState {
+  /** Shared, transient ownership fence for every model/project intake entry point. */
+  modelIntakeEpoch: number;
   // Mesh
   originalMesh: TriangleMesh | null;
   meshInfo: MeshInfo | null;
@@ -491,6 +493,8 @@ interface AppState {
   workflowStep: WorkflowStep;
 
   // Actions
+  beginModelIntake: () => number;
+  cancelModelIntake: (epoch: number) => void;
   setOriginalMesh: (mesh: TriangleMesh | null, info: MeshInfo | null, fileName: string) => void;
   setMeshRepaired: (repaired: boolean) => void;
   setSampleShape: (shape: SampleShape) => void;
@@ -580,6 +584,7 @@ interface SuspendedResult {
 }
 
 export const useStore = create<AppState>((set, get) => ({
+  modelIntakeEpoch: 0,
   originalMesh: null,
   meshInfo: null,
   meshRepaired: false,
@@ -629,7 +634,17 @@ export const useStore = create<AppState>((set, get) => ({
   // IndexedDB is asynchronous, so the UI waits for saved preferences before rendering.
   persistenceHydrated: false,
 
+  beginModelIntake: () => {
+    const epoch = get().modelIntakeEpoch + 1;
+    set({ modelIntakeEpoch: epoch });
+    return epoch;
+  },
+  cancelModelIntake: (epoch) => {
+    if (get().modelIntakeEpoch === epoch) set({ modelIntakeEpoch: epoch + 1 });
+  },
+
   setOriginalMesh: (mesh, info, fileName) => set((s) => ({
+    modelIntakeEpoch: s.modelIntakeEpoch + 1,
     originalMesh: mesh,
     meshInfo: info,
     meshFileName: fileName,
@@ -663,6 +678,7 @@ export const useStore = create<AppState>((set, get) => ({
   })),
 
   setSampleShape: (shape) => set({
+    modelIntakeEpoch: get().modelIntakeEpoch + 1,
     sampleShape: shape,
     sphereMode: true,   // reuse sphereMode flag for "procedural" mode
     sphereRadius: 25,   // kept for sphere; other shapes have fixed dims
@@ -690,6 +706,7 @@ export const useStore = create<AppState>((set, get) => ({
   }),
 
   setSphereMode: (radius) => set({
+    modelIntakeEpoch: get().modelIntakeEpoch + 1,
     sampleShape: 'sphere',
     sphereMode: true,
     sphereRadius: radius,
@@ -1089,8 +1106,9 @@ export const useStore = create<AppState>((set, get) => ({
   importParams: (imported) => set((s) => {
     const nextParams = { ...s.params, ...imported };
     const history = pushSelectionHistory(s);
-    if (!s.demoModeActive) return { params: nextParams, ...history };
+    if (!s.demoModeActive) return { modelIntakeEpoch: s.modelIntakeEpoch + 1, params: nextParams, ...history };
     return {
+      modelIntakeEpoch: s.modelIntakeEpoch + 1,
       params: nextParams,
       ...history,
       demoParamsByType: {
@@ -1101,6 +1119,7 @@ export const useStore = create<AppState>((set, get) => ({
   }),
 
   restoreProject: (project) => set({
+    modelIntakeEpoch: get().modelIntakeEpoch + 1,
     originalMesh: project.originalMesh,
     meshInfo: project.meshInfo,
     meshRepaired: project.meshInfo?.repaired ?? false,
@@ -1146,6 +1165,7 @@ export const useStore = create<AppState>((set, get) => ({
     clearLegacyPersistedState();
     void clearPersistedAppState();
     return set({
+      modelIntakeEpoch: get().modelIntakeEpoch + 1,
       originalMesh: null,
       meshInfo: null,
       meshRepaired: false,

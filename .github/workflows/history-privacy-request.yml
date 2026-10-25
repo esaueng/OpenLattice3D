@@ -12,6 +12,9 @@ permissions:
 
 jobs:
   history-privacy-regressions:
+    # Same-repository PR branches already run these tests on push, and History
+    # privacy never audits a pull_request request; keep the PR run for forks.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:

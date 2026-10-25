@@ -1,10 +1,11 @@
 # Deployment is owned by Cloudflare Workers Builds, which is connected to this
 # repository and publishes on push to main (the "Workers Builds: openlattice3d"
 # check). This workflow must not publish, or the two would race on the same push.
+# Pull requests get the same build and dry run from `checks / cloudflare-verify`
+# in fleet-ci.yml, which the `ci` gate covers, so this runs only for main.
 name: Cloudflare build check
 
 on:
-  pull_request: {}
   push:
     branches: [main]
   workflow_dispatch: {}

@@ -8,11 +8,18 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  # Pinned to a main commit whose fleet-ci.yml matches the checked-in file.
+  # Re-pin after changing fleet-ci.yml, or the change (and any Dependabot
+  # action bump in it) never runs.
   checks:
     permissions:
       contents: read
-    uses: esaueng/OpenLattice3D/.github/workflows/fleet-ci.yml@8b9a88a429cc18539c08f86014d951d716b71e13 # reviewed workflow (unreleased)
+    uses: esaueng/OpenLattice3D/.github/workflows/fleet-ci.yml@0d7e6e0eec038f87d8a10630a4983ea8cf67720d # reviewed workflow (unreleased)
 
   # Branch protection requires this exact name outside the reusable workflow.
   ci:
@@ -36,5 +43,16 @@ jobs:
         run: node scripts/check-workflow-pins.mjs
       - name: Verify agent docs
         run: node scripts/verify-agent-docs.mjs
+
+  # Kept out of the `ci` gate: a newly published advisory for an existing
+  # dependency should not fail every unrelated PR. Dependency changes are
+  # still gated by the required `dependency-review` check.
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Audit dependencies
         run: npm audit --audit-level=high

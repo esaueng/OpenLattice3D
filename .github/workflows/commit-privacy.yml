@@ -3,13 +3,22 @@ name: Commit privacy
 on:
   pull_request_target:
     types: [opened, synchronize, reopened, edited]
+  # PR branches are covered by pull_request_target; push runs are for main
+  # and tags only.
   push:
-    branches: ["**"]
+    branches: [main]
     tags: ["**"]
   merge_group:
 
 permissions:
   contents: read
+
+# A newer event for the same PR checks its current base..head range, so it
+# supersedes the older run. Push and merge-group runs each check their own
+# range and never share a group.
+concurrency:
+  group: commit-privacy-${{ github.event_name == 'pull_request_target' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request_target' }}
 
 jobs:
   commit-privacy:
