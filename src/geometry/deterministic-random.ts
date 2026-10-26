@@ -54,7 +54,7 @@ export function createDeterministicRandom(rootSeed: number, ...parts: SeedStream
 /** Produce a different seed only when the user explicitly requests a reseed. */
 export function createReseedValue(
   currentSeed: number,
-  fill: (target: Uint32Array) => Uint32Array = (target) => crypto.getRandomValues(target),
+  fill: (target: Uint32Array<ArrayBuffer>) => Uint32Array<ArrayBuffer> = (target) => crypto.getRandomValues(target),
 ): number {
   let next: number;
   try {
