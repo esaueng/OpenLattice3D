@@ -4,8 +4,11 @@
 import type { MarchingCubesResult } from '../geometry/marching-cubes';
 import { computeSignedVolume, countNormalWindingAgreement } from '../geometry/mesh-analysis';
 import { buildEdgeTopology, countEdgeDefects, findConnectedComponents } from '../geometry/mesh-topology';
-import { checkMinThickness, runValidation } from '../geometry/validation';
+import { sampleShapeObjectSdf } from '../geometry/sample-shapes';
+import { checkAnalyticOuterDeviation, type OuterDeviationMeasurement } from '../geometry/shape-deviation';
+import { checkMinThickness, NO_DEVIATION_REFERENCE_WARNING, runValidation } from '../geometry/validation';
 import type { Vec3 } from '../geometry/vec3';
+import type { ValidationResult } from '../types/project';
 import { buildFixtureSdf } from './fixtures';
 import type { BackendFixture, GenerationBackendId } from './types';
 
@@ -48,7 +51,39 @@ export interface BackendParityReport {
   reference: GenerationBackendId;
   candidate: GenerationBackendId;
   checks: ParityCheckResult[];
+  /** Outer deviation of each result against the fixture shape; null when the buffers were rejected. */
+  outerDeviation: { reference: OuterDeviationMeasurement; candidate: OuterDeviationMeasurement } | null;
   passed: boolean;
+}
+
+/** Validation of a fixture result; its outer deviation is always analytically measured. */
+export type FixtureValidationResult = ValidationResult & {
+  outerDeviation: OuterDeviationMeasurement & { tolerance: number };
+};
+
+/**
+ * Validate one backend result the way the validation worker validates a
+ * sample shape: thickness and topology against the fixture lattice field, and
+ * outer deviation against the shape's analytic object SDF, so every fixture's
+ * deviation is actually measured rather than reported as unmeasured.
+ */
+export function validateFixtureResult(
+  fixture: BackendFixture,
+  mesh: MarchingCubesResult,
+  sdf: (x: number, y: number, z: number) => number = buildFixtureSdf(fixture),
+): FixtureValidationResult {
+  const base = runValidation(mesh, sdf, fixture.params, null, null);
+  const outerDeviation = checkAnalyticOuterDeviation(
+    mesh,
+    sampleShapeObjectSdf(fixture.shape, fixture.sphereRadius),
+    fixture.params.toleranceMm,
+  );
+  return {
+    ...base,
+    passed: outerDeviation.passed && base.minThickness.passed && base.manifold.passed && base.disconnected.passed,
+    outerDeviation: { ...outerDeviation, tolerance: fixture.params.toleranceMm },
+    warnings: base.warnings.filter((warning) => warning !== NO_DEVIATION_REFERENCE_WARNING),
+  };
 }
 
 function computeBounds(positions: Float32Array): { min: Vec3; max: Vec3 } {
@@ -93,7 +128,14 @@ export function compareBackendResults(
       `${mesh.triCount} triangles`, 'finite, correctly sized buffers with nonzero normals');
   }
   if (checks.some((entry) => !entry.passed)) {
-    return { fixture: fixture.name, reference: referenceId, candidate: candidateId, checks, passed: false };
+    return {
+      fixture: fixture.name,
+      reference: referenceId,
+      candidate: candidateId,
+      checks,
+      outerDeviation: null,
+      passed: false,
+    };
   }
 
   // Triangle count: exact when the reference is empty, relative otherwise.
@@ -200,11 +242,11 @@ export function compareBackendResults(
   }
 
   // Validation verdicts must match on the same field and parameters, whether
-  // the fixture itself passes validation or not.
+  // the fixture itself passes validation or not. Outer deviation is measured
+  // against the fixture shape's analytic SDF for every shape.
   const sdf = buildFixtureSdf(fixture);
-  const sphereRadius = fixture.shape === 'sphere' ? fixture.sphereRadius : null;
-  const refValidation = runValidation(reference, sdf, fixture.params, null, sphereRadius);
-  const candValidation = runValidation(candidate, sdf, fixture.params, null, sphereRadius);
+  const refValidation = validateFixtureResult(fixture, reference, sdf);
+  const candValidation = validateFixtureResult(fixture, candidate, sdf);
   check(
     'validation verdicts',
     refValidation.passed === candValidation.passed
@@ -215,12 +257,16 @@ export function compareBackendResults(
     `passed ${formatCounts([Number(refValidation.passed), Number(candValidation.passed)])}`,
     'identical verdicts on every validation check',
   );
-  const deviationDelta = Math.abs(refValidation.outerDeviation.maxDeviation - candValidation.outerDeviation.maxDeviation);
+  const refDeviation = refValidation.outerDeviation;
+  const candDeviation = candValidation.outerDeviation;
+  const deviationDelta = Math.abs(refDeviation.maxDeviation - candDeviation.maxDeviation);
   check(
     'outer deviation',
-    deviationDelta <= tolerances.deviationCells * cellMm + 1e-4,
-    `${refValidation.outerDeviation.maxDeviation.toFixed(4)} vs ${candValidation.outerDeviation.maxDeviation.toFixed(4)}mm`,
-    `delta <= ${(tolerances.deviationCells * cellMm).toFixed(4)}mm`,
+    (refDeviation.sampled > 0) === (candDeviation.sampled > 0)
+      && deviationDelta <= tolerances.deviationCells * cellMm + 1e-4,
+    `${refDeviation.maxDeviation.toFixed(4)} vs ${candDeviation.maxDeviation.toFixed(4)}mm`
+      + ` (sampled ${formatCounts([refDeviation.sampled, candDeviation.sampled])})`,
+    `both measured or both unmeasured, delta <= ${(tolerances.deviationCells * cellMm).toFixed(4)}mm`,
   );
 
   return {
@@ -228,6 +274,10 @@ export function compareBackendResults(
     reference: referenceId,
     candidate: candidateId,
     checks,
+    outerDeviation: {
+      reference: { maxDeviation: refDeviation.maxDeviation, sampled: refDeviation.sampled, passed: refDeviation.passed },
+      candidate: { maxDeviation: candDeviation.maxDeviation, sampled: candDeviation.sampled, passed: candDeviation.passed },
+    },
     passed: checks.every((entry) => entry.passed),
   };
 }

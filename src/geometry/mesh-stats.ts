@@ -1,6 +1,7 @@
 import type { MarchingCubesResult } from './marching-cubes';
 import type { TriangleMesh } from './stl-parser';
 import type { SampleShape } from '../types/project';
+import { SAMPLE_SHAPE_DIMENSIONS } from './sample-shapes';
 
 /** Enclosed triangle-mesh volume in mm^3 using signed tetrahedra.
  * The absolute value makes the result independent of consistent global winding. */
@@ -34,13 +35,23 @@ export function meshVolumeMm3(mesh: Pick<TriangleMesh, 'positions' | 'triCount'>
   return Math.abs(sum);
 }
 
+/** Analytic solid volume (mm^3) of a built-in sample shape, from SAMPLE_SHAPE_DIMENSIONS. */
 export function proceduralSolidVolumeMm3(shape: SampleShape, sphereRadius: number): number {
   switch (shape) {
     case 'sphere': return (4 / 3) * Math.PI * sphereRadius ** 3;
-    case 'cube': return 30 ** 3;
-    case 'cylinder': return Math.PI * 15 ** 2 * 40;
-    case 'torus': return 2 * Math.PI ** 2 * 20 * 8 ** 2;
-    case 'capsule': return Math.PI * 12 ** 2 * 30 + (4 / 3) * Math.PI * 12 ** 3;
+    case 'cube': return (2 * SAMPLE_SHAPE_DIMENSIONS.cube.halfSize) ** 3;
+    case 'cylinder': {
+      const { radius, halfHeight } = SAMPLE_SHAPE_DIMENSIONS.cylinder;
+      return Math.PI * radius ** 2 * (2 * halfHeight);
+    }
+    case 'torus': {
+      const { majorRadius, tubeRadius } = SAMPLE_SHAPE_DIMENSIONS.torus;
+      return 2 * Math.PI ** 2 * majorRadius * tubeRadius ** 2;
+    }
+    case 'capsule': {
+      const { radius, halfHeight } = SAMPLE_SHAPE_DIMENSIONS.capsule;
+      return Math.PI * radius ** 2 * (2 * halfHeight) + (4 / 3) * Math.PI * radius ** 3;
+    }
   }
 }
 

@@ -6,6 +6,7 @@ import {
   generateShapeSurfaceSamples,
   pickTriangleIndex,
   sampleSurfacePointForShape,
+  type ShapeSampleParams,
 } from './surface-sampling';
 
 function samplerMesh() {
@@ -128,5 +129,29 @@ describe('capsule surface sampling', () => {
     // Caps hold 4*pi*r^2 / (4*pi*r^2 + 4*pi*r*h) = r / (r + h) = 12 / 27 of the area.
     expect(capSamples / 5_000).toBeGreaterThan(12 / 27 - 0.03);
     expect(capSamples / 5_000).toBeLessThan(12 / 27 + 0.03);
+  });
+});
+
+describe('procedural surface sampling defaults', () => {
+  it('defaults to the shared sample-shape dimensions without changing any sample', () => {
+    // The literal defaults used before they were read from SAMPLE_SHAPE_DIMENSIONS.
+    const legacyDefaults: ShapeSampleParams = {
+      radius: 25,
+      halfSize: 15,
+      cylRadius: 15,
+      cylHalfHeight: 20,
+      torusMajor: 20,
+      torusTube: 8,
+      capRadius: 12,
+      capHalfHeight: 15,
+    };
+    for (const shape of ['sphere', 'cube', 'cylinder', 'torus', 'capsule'] as const) {
+      const derived = createDeterministicRandom(11, 'defaults', shape);
+      const legacy = createDeterministicRandom(11, 'defaults', shape);
+      for (let i = 0; i < 200; i++) {
+        expect(sampleSurfacePointForShape(shape, {}, derived))
+          .toEqual(sampleSurfacePointForShape(shape, legacyDefaults, legacy));
+      }
+    }
   });
 });

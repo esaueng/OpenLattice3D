@@ -29,4 +29,15 @@ describe('mesh statistics', () => {
     expect(proceduralSolidVolumeMm3('sphere', 10)).toBeCloseTo((4 / 3) * Math.PI * 1000, 9);
     expect(proceduralSolidVolumeMm3('cube', 25)).toBe(27_000);
   });
+
+  it('derives every procedural volume from the shared shape dimensions without changing it', () => {
+    // The literal formulas used before the volumes read SAMPLE_SHAPE_DIMENSIONS.
+    // Exact equality on purpose: the derivation must be bit-identical.
+    expect(proceduralSolidVolumeMm3('sphere', 25)).toBe((4 / 3) * Math.PI * 25 ** 3);
+    expect(proceduralSolidVolumeMm3('cube', 25)).toBe(30 ** 3);
+    expect(proceduralSolidVolumeMm3('cylinder', 25)).toBe(Math.PI * 15 ** 2 * 40);
+    expect(proceduralSolidVolumeMm3('torus', 25)).toBe(2 * Math.PI ** 2 * 20 * 8 ** 2);
+    expect(proceduralSolidVolumeMm3('capsule', 25))
+      .toBe(Math.PI * 12 ** 2 * 30 + (4 / 3) * Math.PI * 12 ** 3);
+  });
 });
