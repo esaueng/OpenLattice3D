@@ -85,8 +85,9 @@ and the smoke workflow is disabled by default (see
   computational geometry out of components.
 - `src/store/useStore.ts` — Zustand global state; browser persistence is
   limited to parameters and viewer preferences.
-- `worker/index.ts` — tiny production Worker serving `/health` and `/healthz`; static
-  assets come from `dist/`.
+- `worker/index.ts` — tiny production Worker serving `/health` and `/healthz`
+  plus the allowlisted opt-in analytics relay (`worker/glimpse.ts`,
+  `docs/glimpse.md`); static assets come from `dist/`.
 
 ## Geometry invariants
 
@@ -115,5 +116,5 @@ and the smoke workflow is disabled by default (see
   `fleet-ci.yml` in one PR, then re-pin `ci.yml` to its squash commit in a
   second; a pin to a PR branch commit breaks every CI run once GitHub deletes
   that branch at merge. `scripts/test-direct-fleet.py` fails such a pin.
-- Models never leave the browser. Do not add telemetry, upload endpoints, or
-  third-party model handling.
+- Models never leave the browser. Do not add upload endpoints or third-party
+  model handling.
