@@ -128,3 +128,13 @@ export function sampleShapeBounds(
     }
   }
 }
+
+/**
+ * Largest bounding-box extent (mm) of a sample shape; no shape (null) falls
+ * back to the sphere, matching the generation worker. Used to size sampling
+ * voxels from the export resolution.
+ */
+export function sampleShapeMaxSpan(shape: SampleShape | null, sphereRadius: number): number {
+  const { min, max } = sampleShapeBounds(shape ?? 'sphere', sphereRadius, 0);
+  return Math.max(max[0] - min[0], max[1] - min[1], max[2] - min[2]);
+}

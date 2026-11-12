@@ -21,7 +21,10 @@ backend, then compares the results with `compareBackendResults`:
 - wall thickness measured against the shared fixture field within 15% or half
   a grid cell, whichever is larger;
 - identical validation verdicts (deviation, thickness, manifold,
-  connectivity), with max outer deviation within one grid cell.
+  connectivity), with max outer deviation within one grid cell. Outer
+  deviation is measured against each fixture shape's analytic SDF
+  (`sampleShapeObjectSdf`), so every shape with geometry is measured; both
+  results must be measured, or both unmeasured (the empty field).
 
 The tolerances (`PARITY_TOLERANCES` in `src/backend/parity.ts`) exist because
 whole-volume sealing and per-tile extraction legitimately differ by a few
