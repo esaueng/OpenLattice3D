@@ -10,6 +10,7 @@ import { PinnedRunPanel } from '../PinnedRunPanel';
 import { Collapsible, PanelSection, StepPanel } from '../PanelChrome';
 import { AlertIcon, CircleCheckIcon, CircleXIcon, ClockIcon } from '../icons';
 import type { WorkflowInputs } from '../workflow';
+import type { ValidationResult } from '../../types/project';
 
 function formatChangeList(changes: string[]): string {
   if (changes.length === 0) return 'settings';
@@ -104,7 +105,7 @@ export function ResultsStep({ inputs }: { inputs: WorkflowInputs }) {
         >
           <ul className="check-list">
             <CheckRow passed={validation.outerDeviation.passed} name="Outer deviation">
-              Max <span className="mono">{validation.outerDeviation.maxDeviation.toFixed(3)} mm</span> · limit {validation.outerDeviation.tolerance} mm
+              <OuterDeviationDetail outerDeviation={validation.outerDeviation} />
             </CheckRow>
             <CheckRow passed={validation.minThickness.passed} name="Min thickness">
               {validation.minThickness.sampled > 0 ? (
@@ -203,6 +204,16 @@ function Kpi({ label, value, unit }: { label: string; value: string; unit?: stri
         {value}{unit && <small>{unit}</small>}
       </strong>
     </div>
+  );
+}
+
+/** sampled === 0 means the check could not run; never present that as a 0 mm pass. */
+export function OuterDeviationDetail({ outerDeviation }: { outerDeviation: ValidationResult['outerDeviation'] }) {
+  if (outerDeviation.sampled === 0) {
+    return <>Not measured: no usable deviation samples · limit {outerDeviation.tolerance} mm</>;
+  }
+  return (
+    <>Max <span className="mono">{outerDeviation.maxDeviation.toFixed(3)} mm</span> · limit {outerDeviation.tolerance} mm</>
   );
 }
 

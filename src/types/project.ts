@@ -81,7 +81,13 @@ export interface LatticeParams {
 
 export interface ValidationResult {
   passed: boolean;
-  outerDeviation: { passed: boolean; maxDeviation: number; tolerance: number };
+  outerDeviation: {
+    passed: boolean;
+    maxDeviation: number;
+    tolerance: number;
+    /** Surface samples measured; 0 means deviation could not be measured. Absent on older results. */
+    sampled?: number;
+  };
   minThickness: {
     passed: boolean;
     minMeasured: number;

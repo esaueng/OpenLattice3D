@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { trackUsage } from '../analytics';
 import { useStore } from '../store/useStore';
 import type { WorkerMessage } from '../workers/lattice-worker';
-import type { ValidationWorkerMessage, ValidationWorkerResponse } from '../workers/validation-worker';
+import type { ValidationWorkerMessage } from '../workers/validation-worker';
 import { requestNotificationPermission, sendNotification } from '../utils/notifications';
 import {
   createBackendGeometryBuffers,
@@ -17,6 +17,7 @@ import {
   type GenerationResultResponse,
   type GenerationWorkerLike,
 } from './generation-worker-controller';
+import { parseValidationResponse } from './validation-response';
 import { buildGenerationSnapshot } from '../store/generation-snapshot';
 import { selectGenerationInputs } from '../store/useResultStaleness';
 
@@ -221,43 +222,49 @@ export function useLatticeGeneration(): LatticeGenerationControls {
         validationMsg.meshTriCount = store.originalMesh.triCount;
       }
 
-      validationWorker.onmessage = (event: MessageEvent<ValidationWorkerResponse>) => {
-        if (generationRunRef.current !== runId || validationWorkerRef.current !== validationWorker) return;
+      const isCurrentValidation = () => (
+        generationRunRef.current === runId && validationWorkerRef.current === validationWorker
+      );
+      const finishValidationWorker = () => {
+        releaseModelSubscription();
+        validationWorker.terminate();
+        if (validationWorkerRef.current === validationWorker) validationWorkerRef.current = null;
+      };
+      // Every terminal failure clears the progress indicator; otherwise the
+      // statusbar keeps reading "validating" for a worker that is gone.
+      const failValidation = (message: string) => {
         const current = useStore.getState();
-        const validationResp = event.data;
+        finishValidationWorker();
+        current.setValidationProgress(null);
+        current.addLog(message, 'error');
+      };
+
+      validationWorker.onmessage = (event: MessageEvent<unknown>) => {
+        if (!isCurrentValidation()) return;
+        const validationResp = parseValidationResponse(event.data);
+        if (!validationResp) {
+          failValidation('Validation worker returned a malformed response');
+          return;
+        }
+        const current = useStore.getState();
         if (validationResp.type === 'progress') {
           if (validationResp.message) current.addLog(validationResp.message);
           if (typeof validationResp.progress === 'number') current.setValidationProgress(validationResp.progress);
         } else if (validationResp.type === 'result') {
-          releaseModelSubscription();
-          current.setValidation(validationResp.validation || null);
+          finishValidationWorker();
+          current.setValidation(validationResp.validation);
           current.addLog('Validation complete');
-          validationWorker.terminate();
-          if (validationWorkerRef.current === validationWorker) validationWorkerRef.current = null;
-        } else if (validationResp.type === 'error') {
-          releaseModelSubscription();
-          current.setValidationProgress(null);
-          current.addLog(`Validation error: ${validationResp.message}`, 'error');
-          validationWorker.terminate();
-          if (validationWorkerRef.current === validationWorker) validationWorkerRef.current = null;
+        } else {
+          failValidation(`Validation error: ${validationResp.message}`);
         }
       };
       validationWorker.onerror = () => {
-        if (generationRunRef.current !== runId || validationWorkerRef.current !== validationWorker) return;
-        const current = useStore.getState();
-        releaseModelSubscription();
-        current.setValidationProgress(null);
-        current.addLog('Validation worker failed', 'error');
-        validationWorker.terminate();
-        if (validationWorkerRef.current === validationWorker) validationWorkerRef.current = null;
+        if (!isCurrentValidation()) return;
+        failValidation('Validation worker failed');
       };
       validationWorker.onmessageerror = () => {
-        if (generationRunRef.current !== runId || validationWorkerRef.current !== validationWorker) return;
-        const current = useStore.getState();
-        releaseModelSubscription();
-        current.addLog('Validation worker returned an unreadable response', 'error');
-        validationWorker.terminate();
-        validationWorkerRef.current = null;
+        if (!isCurrentValidation()) return;
+        failValidation('Validation worker returned an unreadable response');
       };
 
       useStore.getState().setValidationProgress(0);
