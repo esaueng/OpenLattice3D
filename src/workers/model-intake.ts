@@ -31,9 +31,13 @@ export function prepareStl(buffer: ArrayBuffer, fileName: string): StlIntake {
       mesh = flipMeshOrientation(mesh);
       log(`Inverted winding detected (signed volume ${signedVolume.toFixed(1)}mm3). Flipped mesh orientation.`, 'warn');
     }
+    // Winding (made outward above) is authoritative. Any stored normal that
+    // disagrees with it, even a minority, is replaced so that downstream
+    // consumers of per-face normals (surface sampling, display) see the same
+    // orientation the signed distance uses.
     const agreement = countNormalWindingAgreement(mesh);
     const compared = agreement.agree + agreement.disagree;
-    if (compared > 0 && agreement.disagree > agreement.agree) {
+    if (compared > 0 && agreement.disagree > 0) {
       mesh = alignNormalsToWinding(mesh);
       log(`Stored normals disagreed with winding on ${agreement.disagree}/${compared} faces. Recomputed normals.`, 'warn');
     }

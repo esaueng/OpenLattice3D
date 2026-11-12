@@ -3,6 +3,7 @@ import { intakeTransfers, prepareStl, readModelFile } from './model-intake';
 import { countNormalWindingAgreement, generateCubeMesh } from '../geometry/mesh-analysis';
 import { exportBinarySTL } from '../geometry/stl-parser';
 import { DEFAULT_IMPORT_LIMITS } from '../geometry/mesh-limits';
+import { MeshBVH } from '../geometry/bvh';
 import { createProjectFile } from '../utils/project-file';
 import { DEFAULT_PARAMS } from '../types/project';
 
@@ -30,6 +31,20 @@ describe('worker model intake', () => {
     expect(normals.info.volumeMm3).toBe(1000);
     expect(countNormalWindingAgreement(normals.mesh)).toEqual({ agree: 12, disagree: 0, degenerate: 0 });
     expect(normals.logs.some(log => log.message.includes('Stored normals disagreed'))).toBe(true);
+  });
+
+  it('replaces a minority of wrong stored normals with winding normals', () => {
+    const { mesh } = cubeFile();
+    const stored = new Float32Array(mesh.normals);
+    for (const t of [1, 6]) for (let axis = 0; axis < 3; axis++) stored[t * 3 + axis] *= -1;
+    stored.fill(0, 9, 12); // and one zero normal, as some exporters write
+    const result = prepareStl(exportBinarySTL(mesh.positions, stored, mesh.triCount), 'mixed.stl');
+    expect(countNormalWindingAgreement(result.mesh)).toEqual({ agree: 12, disagree: 0, degenerate: 0 });
+    expect(result.mesh.positions).toEqual(mesh.positions);
+    expect(result.logs.some(log => log.message.includes('Stored normals disagreed with winding on 3/12 faces'))).toBe(true);
+    const bvh = new MeshBVH(result.mesh.positions, result.mesh.normals, result.mesh.triCount);
+    expect(bvh.signedDistance([0, 0, 4.5])).toBeCloseTo(-0.5, 5);
+    expect(bvh.signedDistance([0, 0, 5.5])).toBeCloseTo(0.5, 5);
   });
 
   it('keeps open mesh repair honest and retains the explicit unit prompt', () => {
