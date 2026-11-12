@@ -43,21 +43,17 @@ export function analyzeMesh(mesh: TriangleMesh): MeshInfo {
     }
   }
 
-  let isManifold = true;
-  let isWatertight = true;
   let boundaryEdges = 0;
   let nonManifoldEdges = 0;
   for (const count of edgeCounts.values()) {
-    if (count !== 2) {
-      isManifold = false;
-      if (count === 1) {
-        isWatertight = false;
-        boundaryEdges++;
-      } else {
-        nonManifoldEdges++;
-      }
-    }
+    if (count === 1) boundaryEdges++;
+    else if (count > 2) nonManifoldEdges++;
   }
+  const isManifold = boundaryEdges === 0 && nonManifoldEdges === 0;
+  // A closed solid needs every edge shared by exactly two triangles. Edges
+  // shared by three or more (fins, T-junction sheets) leave inside/outside,
+  // signed volume, and orientation undefined, so they are not watertight.
+  const isWatertight = isManifold;
 
   // Count unique vertices
   const vertSet = new Set<string>();

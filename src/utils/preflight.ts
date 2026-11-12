@@ -50,7 +50,9 @@ export function buildPreflight(
   if (meshInfo && !meshInfo.isWatertight) {
     warnings.push({
       level: 'block',
-      message: `The mesh is open (${meshInfo.boundaryEdges.toLocaleString()} boundary edges); inside and outside are undefined. Close the holes first.`,
+      message: meshInfo.boundaryEdges > 0
+        ? `The mesh is open (${meshInfo.boundaryEdges.toLocaleString()} boundary edges); inside and outside are undefined. Close the holes first.`
+        : `The mesh has ${meshInfo.nonManifoldEdges.toLocaleString()} non-manifold edges (shared by three or more triangles); inside and outside are undefined. Repair it in a mesh editor first.`,
     });
   }
   if (extents) {

@@ -53,4 +53,13 @@ describe('model summary', () => {
     expect(condition.message).toContain('still open (8 boundary edges)');
     expect(condition.message).not.toContain('repaired');
   });
+
+  it('does not call a closed non-manifold mesh open', () => {
+    const closed = analyzeMesh(generateCubeMesh(10));
+    const finned = { ...closed, isWatertight: false, isManifold: false, nonManifoldEdges: 3 };
+    const condition = describeMeshCondition(finned);
+    expect(condition.level).toBe('warn');
+    expect(condition.message).toContain('3 non-manifold edges');
+    expect(condition.message).not.toContain('open');
+  });
 });

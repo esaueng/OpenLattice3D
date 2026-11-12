@@ -26,6 +26,7 @@ type StrutCache = {
   corners: Vec3[];
   edges: [Vec3, Vec3][];
   faceCenters: Vec3[];
+  octetStruts: [Vec3, Vec3][];
   diamondBins: [Vec3, Vec3][][];
 };
 
@@ -94,6 +95,41 @@ function buildDiamondBins(L: number): [Vec3, Vec3][][] {
   return bins;
 }
 
+/** Octet truss struts within one unit cell: the 24 half face-diagonals
+ *  (each face centre to the 4 corners of its face) and the 12 edges of the
+ *  inscribed octahedron (each face centre to the 4 non-opposite face centres).
+ *  The cell content is mirror-symmetric about every cell face, so every strut
+ *  of a neighbouring cell has a mirror image here that is at least as close to
+ *  any point inside this cell; wrapping into [0,L)^3 is therefore exact without
+ *  explicit periodic images. */
+function buildOctetStruts(L: number, corners: Vec3[], faceCenters: Vec3[]): [Vec3, Vec3][] {
+  const struts: [Vec3, Vec3][] = [];
+  // A face centre lies on exactly one cell face (one coordinate at 0 or L);
+  // the corners of that face share that coordinate.
+  const tol = 1e-9 * L;
+  for (const fc of faceCenters) {
+    for (const cn of corners) {
+      let shared = 0;
+      for (let axis = 0; axis < 3; axis++) {
+        if (Math.abs(fc[axis] - cn[axis]) <= tol) shared++;
+      }
+      if (shared === 1) struts.push([fc, cn]);
+    }
+  }
+  // Adjacent (non-opposite) face centres are h*sqrt(2) apart; opposite ones
+  // are L apart.
+  const adjacent = (L / 2) * Math.SQRT2;
+  for (let i = 0; i < faceCenters.length; i++) {
+    for (let j = i + 1; j < faceCenters.length; j++) {
+      const a = faceCenters[i];
+      const b = faceCenters[j];
+      const d = Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+      if (Math.abs(d - adjacent) <= tol) struts.push([a, b]);
+    }
+  }
+  return struts;
+}
+
 function supportsOptimizedTpms(t: LatticeType): t is OptimizedTpmsType {
   return t === 'gyroid' || t === 'schwarzP' || t === 'schwarzD' || t === 'neovius' || t === 'iwp';
 }
@@ -114,7 +150,15 @@ function getStrutCache(L: number): StrutCache {
     [h, h, 0], [h, 0, h], [0, h, h], [h, h, L], [h, L, h], [L, h, h],
   ];
 
-  strutCache = { L, h, corners, edges, faceCenters, diamondBins: buildDiamondBins(L) };
+  strutCache = {
+    L,
+    h,
+    corners,
+    edges,
+    faceCenters,
+    octetStruts: buildOctetStruts(L, corners, faceCenters),
+    diamondBins: buildDiamondBins(L),
+  };
   return strutCache;
 }
 
@@ -147,34 +191,23 @@ export function bccStrutSDF(x: number, y: number, z: number, cellSize: number, s
   return minDist - r;
 }
 
-/** Octet Truss (FCC): face-centre nodes connected to corner nodes.
- *  The stiffest periodic strut lattice at low density. Nearly isotropic. */
+/** Octet Truss (FCC): each face-centre node connects to the 4 corners of its
+ *  face and to the 4 adjacent face centres (the inscribed octahedron), giving
+ *  the 12-connected octet truss. The stiffest periodic strut lattice at low
+ *  density. Nearly isotropic. */
 export function octetSDF(x: number, y: number, z: number, cellSize: number, strutDiameter: number): number {
   const r = strutDiameter / 2;
   const L = cellSize;
-  const { h, corners, faceCenters } = getStrutCache(L);
+  const { octetStruts } = getStrutCache(L);
   const lx = ((x % L) + L) % L;
   const ly = ((y % L) + L) % L;
   const lz = ((z % L) + L) % L;
 
   let minDist = Infinity;
   const p: Vec3 = [lx, ly, lz];
-
-  // Each face centre connects to its 4 adjacent corners
-  // +X face (L,h,h): corners with x=L
-  for (const fc of faceCenters) {
-    for (const cn of corners) {
-      // A face centre at (fx,fy,fz) connects to corner (cx,cy,cz) if they
-      // share two coordinates within h of each other — i.e. they're on the
-      // same face of the cube.
-      const dx = Math.abs(fc[0] - cn[0]);
-      const dy = Math.abs(fc[1] - cn[1]);
-      const dz = Math.abs(fc[2] - cn[2]);
-      if (dx <= h && dy <= h && dz <= h) {
-        const d = distToSegment(p, fc, cn);
-        if (d < minDist) minDist = d;
-      }
-    }
+  for (const [a, b] of octetStruts) {
+    const d = distToSegment(p, a, b);
+    if (d < minDist) minDist = d;
   }
   return minDist - r;
 }

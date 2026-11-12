@@ -80,6 +80,67 @@ describe('bccStrutSDF / octetSDF', () => {
     expect(octetSDF(0, 0, 0, L, D)).toBeCloseTo(-R, 6);
   });
 
+  it('octet connects adjacent face centres (octahedral struts)', () => {
+    // Midpoint of the (L/2, L/2, 0) - (L/2, 0, L/2) strut lies inside the cell,
+    // far from every face-centre-to-corner strut.
+    expect(octetSDF(L / 2, L / 4, L / 4, L, D)).toBeCloseTo(-R, 6);
+    expect(octetSDF(3 * L / 4, L / 2, 3 * L / 4, L, D)).toBeCloseTo(-R, 6);
+    expect(octetSDF(L / 4, 3 * L / 4, L / 2, L, D)).toBeCloseTo(-R, 6);
+  });
+
+  it('octet matches a brute-force strut reference including periodic images', () => {
+    const h = L / 2;
+    const corners: Vec3[] = [];
+    for (const x of [0, L]) for (const y of [0, L]) for (const z of [0, L]) corners.push([x, y, z]);
+    const faces: Vec3[] = [[h, h, 0], [h, h, L], [h, 0, h], [h, L, h], [0, h, h], [L, h, h]];
+    const cellStruts: [Vec3, Vec3][] = [];
+    // Each face centre to the 4 corners of its face.
+    for (const f of faces) {
+      const axis = f.findIndex((v) => Math.abs(v - h) > 1e-9);
+      for (const c of corners) if (Math.abs(c[axis] - f[axis]) < 1e-9) cellStruts.push([f, c]);
+    }
+    // Each face centre to the 4 non-opposite face centres.
+    for (let i = 0; i < faces.length; i++) {
+      for (let j = i + 1; j < faces.length; j++) {
+        const d = Math.hypot(faces[i][0] - faces[j][0], faces[i][1] - faces[j][1], faces[i][2] - faces[j][2]);
+        if (Math.abs(d - L) > 1e-9) cellStruts.push([faces[i], faces[j]]);
+      }
+    }
+    expect(cellStruts).toHaveLength(36);
+    const segmentDistance = (p: Vec3, a: Vec3, b: Vec3) => {
+      const ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+      const ap = [p[0] - a[0], p[1] - a[1], p[2] - a[2]];
+      const t = Math.max(0, Math.min(1, (ap[0] * ab[0] + ap[1] * ab[1] + ap[2] * ab[2]) / (ab[0] ** 2 + ab[1] ** 2 + ab[2] ** 2)));
+      return Math.hypot(ap[0] - t * ab[0], ap[1] - t * ab[1], ap[2] - t * ab[2]);
+    };
+    // Deterministic quasi-random points (golden-ratio sequence) spanning
+    // several cells, including negative coordinates.
+    for (let i = 0; i < 400; i++) {
+      const p: Vec3 = [
+        ((i * 0.6180339887) % 1) * 3 * L - 1.5 * L,
+        ((i * 0.7548776662) % 1) * 3 * L - L,
+        ((i * 0.5698402910) % 1) * 3 * L - 0.5 * L,
+      ];
+      // Unwrapped reference: struts of the containing cell and all 26
+      // neighbouring cells, evaluated at the raw (unwrapped) point.
+      const cell = p.map((v) => Math.floor(v / L));
+      let reference = Infinity;
+      for (let ix = -1; ix <= 1; ix++) {
+        for (let iy = -1; iy <= 1; iy++) {
+          for (let iz = -1; iz <= 1; iz++) {
+            const o: Vec3 = [(cell[0] + ix) * L, (cell[1] + iy) * L, (cell[2] + iz) * L];
+            for (const [a, b] of cellStruts) {
+              const a2: Vec3 = [a[0] + o[0], a[1] + o[1], a[2] + o[2]];
+              const b2: Vec3 = [b[0] + o[0], b[1] + o[1], b[2] + o[2]];
+              reference = Math.min(reference, segmentDistance(p, a2, b2));
+            }
+          }
+        }
+      }
+      expect(octetSDF(p[0], p[1], p[2], L, D)).toBeCloseTo(reference - R, 6);
+    }
+  });
+
   it('bcc is periodic', () => {
     const base = bccStrutSDF(1.2, 3.4, 5.6, L, D);
     expect(bccStrutSDF(1.2 + L, 3.4 - L, 5.6, L, D)).toBeCloseTo(base, 9);

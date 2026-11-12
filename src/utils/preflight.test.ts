@@ -44,6 +44,15 @@ describe('preflight', () => {
     expect(p.warnings.some((w) => w.message.startsWith('Wall thickness 0.30 mm is under two'))).toBe(true);
   });
 
+  it('blocks closed but non-manifold meshes without calling them open', () => {
+    const cube = analyzeMesh(generateCubeMesh(30));
+    const finned = { ...cube, isWatertight: false, isManifold: false, nonManifoldEdges: 3, volumeMm3: null };
+    const p = buildPreflight(DEFAULT_PARAMS, modelExtents(finned, null, 25), finned);
+    expect(p.warnings[0]).toMatchObject({ level: 'block' });
+    expect(p.warnings[0].message).toContain('3 non-manifold edges');
+    expect(p.warnings[0].message).not.toContain('open');
+  });
+
   it('warns when the triangle estimate gets heavy', () => {
     const p = buildPreflight({ ...DEFAULT_PARAMS, exportResolution: 10 }, modelExtents(null, 'cube', 25), null);
     expect(p.estimatedTriangles).toBeGreaterThan(2_000_000);
