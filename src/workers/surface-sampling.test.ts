@@ -5,6 +5,7 @@ import {
   buildSurfaceSampleJobs,
   generateShapeSurfaceSamples,
   pickTriangleIndex,
+  sampleSurfacePointForShape,
 } from './surface-sampling';
 
 function samplerMesh() {
@@ -93,5 +94,39 @@ describe('surface sampling logical worker streams', () => {
       .map((job) => [job.streamId, run(job)] as const)
       .sort((a, b) => a[0] - b[0]);
     expect(scheduled).toEqual(serial);
+  });
+});
+
+describe('capsule surface sampling', () => {
+  it('places every sample on the capsule surface with an outward normal', () => {
+    const radius = 12;
+    const halfHeight = 15;
+    const random = createDeterministicRandom(2026, 'capsule-test');
+    const capsuleSdf = (p: readonly number[]) => {
+      const z = Math.max(-halfHeight, Math.min(halfHeight, p[2]));
+      return Math.hypot(p[0], p[1], p[2] - z) - radius;
+    };
+    let capSamples = 0;
+    for (let i = 0; i < 5_000; i++) {
+      const { pos, normal } = sampleSurfacePointForShape(
+        'capsule',
+        { capRadius: radius, capHalfHeight: halfHeight },
+        random,
+      );
+      expect(Math.abs(capsuleSdf(pos))).toBeLessThan(1e-9);
+      // The normal is the direction from the nearest axis point to the sample.
+      const axisZ = Math.max(-halfHeight, Math.min(halfHeight, pos[2]));
+      const outward = [pos[0] / radius, pos[1] / radius, (pos[2] - axisZ) / radius];
+      const dot = normal[0] * outward[0] + normal[1] * outward[1] + normal[2] * outward[2];
+      expect(dot).toBeGreaterThan(1 - 1e-9);
+      // Stepping along the normal leaves the solid; stepping against it enters.
+      const step = 0.01;
+      expect(capsuleSdf([pos[0] + normal[0] * step, pos[1] + normal[1] * step, pos[2] + normal[2] * step])).toBeGreaterThan(0);
+      expect(capsuleSdf([pos[0] - normal[0] * step, pos[1] - normal[1] * step, pos[2] - normal[2] * step])).toBeLessThan(0);
+      if (Math.abs(pos[2]) > halfHeight + 1e-9) capSamples++;
+    }
+    // Caps hold 4*pi*r^2 / (4*pi*r^2 + 4*pi*r*h) = r / (r + h) = 12 / 27 of the area.
+    expect(capSamples / 5_000).toBeGreaterThan(12 / 27 - 0.03);
+    expect(capSamples / 5_000).toBeLessThan(12 / 27 + 0.03);
   });
 });

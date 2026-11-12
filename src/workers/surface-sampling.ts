@@ -214,12 +214,16 @@ export function sampleSurfacePointForShape(
     const y = radius * Math.sin(theta);
     return { pos: [x, y, z], normal: normalize([x, y, 0]) };
   }
+  // Uniform point on a sphere, folded onto the outward hemisphere of the
+  // chosen end cap (|cos phi| stays uniform on [0,1], so the hemisphere is
+  // still sampled uniformly). The two caps together have the sphere's area.
   const theta = 2 * Math.PI * random();
   const phi = Math.acos(2 * random() - 1);
   const sx = radius * Math.sin(phi) * Math.cos(theta);
   const sy = radius * Math.sin(phi) * Math.sin(theta);
-  const sz = radius * Math.cos(phi);
-  const centerZ = random() > 0.5 ? halfHeight : -halfHeight;
+  const top = random() > 0.5;
+  const sz = top ? Math.abs(radius * Math.cos(phi)) : -Math.abs(radius * Math.cos(phi));
+  const centerZ = top ? halfHeight : -halfHeight;
   return { pos: [sx, sy, sz + centerZ], normal: normalize([sx, sy, sz]) };
 }
 

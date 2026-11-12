@@ -67,7 +67,7 @@ export function describeMeshCondition(info: MeshInfo): { level: 'ok' | 'warn'; m
     return { level: 'ok', message: 'Closed and manifold' };
   }
   const parts: string[] = [];
-  if (!info.isWatertight) parts.push(`open (${info.boundaryEdges.toLocaleString()} boundary edges)`);
+  if (info.boundaryEdges > 0) parts.push(`open (${info.boundaryEdges.toLocaleString()} boundary edges)`);
   if (info.nonManifoldEdges > 0) parts.push(`${info.nonManifoldEdges.toLocaleString()} non-manifold edges`);
   const prefix = info.repaired ? 'Normals recomputed; mesh is still ' : 'Mesh is ';
   return { level: 'warn', message: `${prefix}${parts.join(', ')}. Generated geometry will be unreliable.` };

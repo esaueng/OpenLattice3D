@@ -119,7 +119,7 @@ export function ModelStep({ inputs }: { inputs: WorkflowInputs }) {
           {meshCondition?.level === 'warn' && store.meshInfo && (
             <div className="warning">
               {meshCondition.message}
-              {!store.meshInfo.isWatertight && (
+              {store.meshInfo.boundaryEdges > 0 && (
                 <div style={{ marginTop: '6px' }}>
                   <button type="button" className="btn btn-tiny" onClick={intake.closeHoles} title="Fill each open boundary loop with triangles.">
                     Close holes

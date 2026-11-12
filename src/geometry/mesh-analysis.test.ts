@@ -59,4 +59,39 @@ describe('analyzeMesh condition report', () => {
     expect(info.boundaryEdges).toBe(4);
     expect(info.volumeMm3).toBeNull();
   });
+
+  it('treats edges shared by three or more triangles as not watertight', () => {
+    // Three triangles fanning out from the shared edge (0,0,0)-(0,0,10).
+    const positions = new Float32Array([
+      0, 0, 0, 10, 0, 0, 0, 0, 10,
+      0, 0, 0, 0, 10, 0, 0, 0, 10,
+      0, 0, 0, -10, -10, 0, 0, 0, 10,
+    ]);
+    const fin = { positions, normals: new Float32Array(9), triCount: 3 };
+    const info = analyzeMesh(fin);
+    expect(info.nonManifoldEdges).toBe(1);
+    expect(info.boundaryEdges).toBe(6);
+    expect(info.isManifold).toBe(false);
+    expect(info.isWatertight).toBe(false);
+    expect(info.volumeMm3).toBeNull();
+  });
+
+  it('rejects a closed mesh with an extra fin sharing one of its edges', () => {
+    const cube = generateCubeMesh(30);
+    // Duplicate one triangle with reversed winding: every one of its edges is
+    // now shared by three triangles, and no edge is open.
+    const o = 0;
+    const tri = cube.positions.slice(o, o + 9);
+    const reversed = new Float32Array([tri[0], tri[1], tri[2], tri[6], tri[7], tri[8], tri[3], tri[4], tri[5]]);
+    const positions = new Float32Array(cube.positions.length + 9);
+    positions.set(cube.positions);
+    positions.set(reversed, cube.positions.length);
+    const normals = new Float32Array(cube.normals.length + 3);
+    normals.set(cube.normals);
+    const info = analyzeMesh({ positions, normals, triCount: cube.triCount + 1 });
+    expect(info.boundaryEdges).toBe(0);
+    expect(info.nonManifoldEdges).toBe(3);
+    expect(info.isWatertight).toBe(false);
+    expect(info.volumeMm3).toBeNull();
+  });
 });
