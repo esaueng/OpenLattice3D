@@ -20,6 +20,7 @@ import {
   ThinFeatureMarkers,
   XRayView,
   SampleMeshView,
+  useRetainResultGeometries,
 } from './viewer/ViewerMeshViews';
 import { DemoGridView } from './viewer/DemoGridView';
 import {
@@ -766,12 +767,18 @@ function GizmoTextLabel({
   );
 }
 
+// Scratch vectors for the per-frame face visibility test (six faces per frame).
+const viewCubeFaceNormalScratch = new THREE.Vector3();
+const viewCubeToCameraScratch = new THREE.Vector3();
+
 function shouldShowViewCubeFaceLabel(
   faceNormalWorld: THREE.Vector3,
   toCameraWorld: THREE.Vector3,
   threshold = VIEWER_VIEW_CUBE_FACE_VISIBILITY_THRESHOLD
 ) {
-  return faceNormalWorld.clone().normalize().dot(toCameraWorld.clone().normalize()) > threshold;
+  const normal = viewCubeFaceNormalScratch.copy(faceNormalWorld).normalize();
+  const toCamera = viewCubeToCameraScratch.copy(toCameraWorld).normalize();
+  return normal.dot(toCamera) > threshold;
 }
 
 type ViewportApi = { camera: THREE.Camera; controls: ResettableOrbitControls | null };
@@ -1084,6 +1091,8 @@ export function Viewer3D() {
   // The result views can show the pinned run instead of the current one.
   const displayedResult = showPinnedRun && pinnedRun ? pinnedRun.resultMesh : resultMesh;
   const displayedValidation = showPinnedRun && pinnedRun ? pinnedRun.validation : validation;
+  // Cached display geometry survives only for the current and pinned results.
+  useRetainResultGeometries(resultMesh, pinnedRun?.resultMesh);
   const thinPoints = displayedValidation?.minThickness.thinPoints ?? [];
   const thinBounds = useMemo(() => (displayedResult ? resultBounds(displayedResult) : new THREE.Box3()), [displayedResult]);
   const [gizmoViewRequest, setGizmoViewRequest] = useState<{ view: GizmoViewRequest | null; signal: number }>({ view: null, signal: 0 });

@@ -118,6 +118,8 @@ type SelectionSnapshot = {
 const HISTORY_COALESCE_MS = 1200;
 
 const MAX_SELECTION_HISTORY = 100;
+/** Earlier log entries kept when a new one is appended (the log holds at most this plus one). */
+const LOG_HISTORY_LIMIT = 200;
 
 export interface ProjectRestoreState {
   params: LatticeParams;
@@ -1098,7 +1100,7 @@ export const useStore = create<AppState>((set, get) => ({
   }),
 
   addLog: (message, level = 'info') => set((s) => ({
-    logs: [...s.logs.slice(-200), { time: Date.now(), message, level }],
+    logs: [...s.logs.slice(-LOG_HISTORY_LIMIT), { time: Date.now(), message, level }],
   })),
 
   // Imported parameters are just parameter edits: the current result stays and

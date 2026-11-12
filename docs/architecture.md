@@ -67,8 +67,9 @@ disabled until parity, fallback, and speed evidence is committed.
 `Viewer3D` owns scene interaction, while `viewer/ViewerMeshViews` owns mesh and
 selection rendering and `viewer/DemoGridView` owns the twelve-lattice overview.
 Generation scheduling is separated into `tiled-generation`,
-`generation-estimate`, and `mesh-cleanup` so the worker entry point remains an
-orchestrator.
+`generation-estimate`, and `progress-reporter`, and post-extraction cleanup
+lives in `geometry/mesh-repair` (`closeBoundaryLoops`), so the worker entry
+point remains an orchestrator.
 
 Project JSON uses a versioned schema. It embeds imported source geometry as a
 binary STL, fingerprints the decoded positions before applying selection masks,

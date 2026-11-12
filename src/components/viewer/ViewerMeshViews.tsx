@@ -22,6 +22,7 @@ import {
   radialSegmentsForProjectedRadius,
   sampleCircularEdge,
 } from '../../geometry/display-tessellation';
+import { createResultResourceCache } from './result-geometry-cache';
 
 const SAMPLE_CYLINDER_RADIUS_MM = 15;
 const SAMPLE_CYLINDER_HEIGHT_MM = 40;
@@ -46,15 +47,7 @@ export function resultBounds(result: MarchingCubesResult): THREE.Box3 {
   return box.clone();
 }
 
-// One display geometry per result, shared by the Solid, Cross-Section and X-Ray
-// views so switching views or toggling overlays never rebuilds 100 MB of
-// attributes. Kept for the last few results; older ones are disposed.
-const GEOMETRY_CACHE_LIMIT = 3;
-const geometryCache: Array<{ result: MarchingCubesResult; geometry: THREE.BufferGeometry }> = [];
-
-export function resultGeometry(result: MarchingCubesResult): THREE.BufferGeometry {
-  const hit = geometryCache.find((entry) => entry.result === result);
-  if (hit) return hit.geometry;
+function buildResultGeometry(result: MarchingCubesResult): THREE.BufferGeometry {
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(result.positions, 3));
   if (result.vertexNormals && result.vertexNormals.length >= result.triCount * 9) {
@@ -62,9 +55,36 @@ export function resultGeometry(result: MarchingCubesResult): THREE.BufferGeometr
   } else {
     geometry.computeVertexNormals();
   }
-  geometryCache.push({ result, geometry });
-  while (geometryCache.length > GEOMETRY_CACHE_LIMIT) geometryCache.shift()!.geometry.dispose();
   return geometry;
+}
+
+// One display geometry per result, shared by the Solid, Cross-Section and X-Ray
+// views so switching views or toggling overlays never rebuilds 100 MB of
+// attributes. Entries live while a view holds them or while their result is
+// the current or pinned run (see useRetainResultGeometries); everything else
+// is disposed so a reset or new model releases the arrays and GPU buffers.
+const resultGeometryCache = createResultResourceCache<MarchingCubesResult, THREE.BufferGeometry>(buildResultGeometry);
+
+/** Shared display geometry for a result, held for as long as the caller is mounted. */
+export function useResultGeometry(result: MarchingCubesResult): THREE.BufferGeometry {
+  const geometry = useMemo(() => resultGeometryCache.get(result), [result]);
+  useEffect(() => resultGeometryCache.acquire(result, geometry), [result, geometry]);
+  return geometry;
+}
+
+/**
+ * Keep cached geometries only for the given results (the current result and
+ * the pinned run). Called by the viewer that owns those results; on unmount
+ * nothing stays live, so the remaining entries go with their last view.
+ */
+export function useRetainResultGeometries(
+  current: MarchingCubesResult | null | undefined,
+  pinned: MarchingCubesResult | null | undefined,
+): void {
+  useEffect(() => {
+    resultGeometryCache.setLive([current, pinned]);
+  }, [current, pinned]);
+  useEffect(() => () => resultGeometryCache.setLive([]), []);
 }
 
 export function meshBounds(mesh: TriangleMesh): THREE.Box3 {
@@ -480,7 +500,7 @@ export function SampleMeshView(props: {
 }
 
 export function ResultMeshView({ result }: { result: MarchingCubesResult }) {
-  const geometry = useMemo(() => resultGeometry(result), [result]);
+  const geometry = useResultGeometry(result);
   return <mesh geometry={geometry}><meshPhongMaterial color="#4a9eff" side={THREE.DoubleSide} /></mesh>;
 }
 
@@ -499,7 +519,7 @@ function clipPlane(clip: ClipPlaneState, bounds: THREE.Box3): THREE.Plane {
 }
 
 export function CrossSectionView({ result, clip }: { result: MarchingCubesResult; clip: ClipPlaneState }) {
-  const geometry = useMemo(() => resultGeometry(result), [result]);
+  const geometry = useResultGeometry(result);
   const bounds = useMemo(() => resultBounds(result), [result]);
   const plane = useMemo(() => clipPlane(clip, bounds), [bounds, clip]);
   return (
@@ -510,7 +530,7 @@ export function CrossSectionView({ result, clip }: { result: MarchingCubesResult
 }
 
 export function XRayView({ result }: { result: MarchingCubesResult }) {
-  const geometry = useMemo(() => resultGeometry(result), [result]);
+  const geometry = useResultGeometry(result);
   const material = useDisposable(useMemo(() => new THREE.MeshBasicMaterial({
     color: '#3388cc',
     side: THREE.DoubleSide,

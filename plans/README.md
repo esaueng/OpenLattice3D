@@ -12,8 +12,8 @@ Effort level: `standard` (hotspot-weighted; all nine audit categories). Each pla
 | 001 | [Test + CI baseline](001-test-ci-baseline.md) — vitest, characterization tests for `src/geometry`, GitHub Actions | — | M | **DONE** — superseded by PR #14 |
 | 002 | [STL import robustness](002-stl-import-robustness.md) — bounds-check binary headers, fix `solid`-prefixed binary fallback, BVH empty-mesh guards | **001 (hard)** | S–M | **DONE** — superseded by PR #14 |
 | 003 | [Sanitize imported params](003-sanitize-imported-params.md) — clamp/whitelist JSON-imported and localStorage-persisted `LatticeParams` | 001 (soft) | S | **DONE** — superseded by PR #14 |
-| 004 | [Throttle progress updates](004-throttle-progress-updates.md) — rate-limit worker progress messages, stop logging every one | 001 (soft) | S | TODO — scope reduced, see reconciliation |
-| 005 | [Dispose viewer geometries](005-dispose-viewer-geometries.md) — `BufferGeometry.dispose()` on swap in `Viewer3D.tsx` | — | S | TODO — scope reduced, see reconciliation |
+| 004 | [Throttle progress updates](004-throttle-progress-updates.md) — rate-limit worker progress messages, stop logging every one | 001 (soft) | S | **DONE** — `src/workers/progress-reporter.ts` throttles worker progress (tested in `progress-reporter.test.ts`) and marks it `transient`; `useLatticeGeneration.ts` logs only non-transient messages |
+| 005 | [Dispose viewer geometries](005-dispose-viewer-geometries.md) — `BufferGeometry.dispose()` on swap in `Viewer3D.tsx` | — | S | **DONE** — `useDisposable` disposes per-view geometries/materials in `src/components/viewer/`; result display geometry is shared through `result-geometry-cache.ts`, which disposes entries when their result is replaced, reset, or unpinned |
 
 Recommended order: **001 first** (it is the verification gate every other plan uses), then 002–005 in any order (they touch disjoint code except a trivial import-line overlap between 002 and 003 in `LeftPanel.tsx`).
 
@@ -25,6 +25,8 @@ Still open after PR #14 (verified against `origin/main` on 2026-07-02):
 
 - **004** — the re-render half is fixed (selector subscriptions), but the worker still posts unthrottled per-slice progress and `useLatticeGeneration.ts:186` still `addLog`s every progress message. The worker-side reporter + `transient` flag from plan 004 remain worth doing.
 - **005** — `Viewer3D.tsx` on main has 6 `new THREE.BufferGeometry()` sites and disposal on only ~2 of them; re-run the plan's enumeration grep and fix the remainder.
+
+Update 2026-11-12: both items above are now done; see the Status column for the evidence.
 
 All plan line numbers are stamped against `2af138a` and are now stale for 004/005 — executors must follow each plan's drift protocol (re-read cited files at HEAD) before editing.
 
@@ -77,5 +79,5 @@ Every row was verified by direct code reading, not just reported by a subagent. 
 
 1. **Complete the project save/load round-trip.** Export writes `meshAssetName`, `selectionMask` (keep-out/keep-in triangle indices), params, and validation (`src/utils/export.ts:47-71`), but import applies **params only** (`LeftPanel.tsx:69-84`) — selections and the mesh reference are silently dropped. Restoring selections + prompting for the matching STL would make projects genuinely portable. Effort ~M; touches import flow + store.
 2. **Surface the 10 undocumented lattice types.** Twelve SDFs are implemented and selectable (`lattice.ts`, `types/project.ts:5-17`) but README markets two. A README/UI pass (type descriptions, which are sheet vs strut, recommended processes) is cheap and is effectively free product surface. Effort S.
-3. **Promote WebGPU Phase A per your own roadmap.** `docs/performance/webgpu-backend.md` defines the phases; Phase A (GPU field sampling for sample shapes) is implemented but hard-disabled (`ENABLE_WEBGPU_FIELD_CPU_MC = false`, `lattice-worker.ts:31`). After plan 001 lands, an experimental user-facing toggle + the fallback tests the doc itself calls for would start collecting real-world signal. Effort M (spike-shaped).
+3. **Superseded by [`docs/performance/backend-decision.md`](../docs/performance/backend-decision.md).** The WebGPU field sampler, `docs/performance/webgpu-backend.md`, and the `ENABLE_WEBGPU_FIELD_CPU_MC` flag cited below were removed; any GPU backend must now pass that document's gates (`src/backend/` parity, fallback, and speedup checks). Original text, kept for history: ~~**Promote WebGPU Phase A per your own roadmap.** `docs/performance/webgpu-backend.md` defines the phases; Phase A (GPU field sampling for sample shapes) is implemented but hard-disabled (`ENABLE_WEBGPU_FIELD_CPU_MC = false`, `lattice-worker.ts:31`). After plan 001 lands, an experimental user-facing toggle + the fallback tests the doc itself calls for would start collecting real-world signal. Effort M (spike-shaped).~~
 4. **Consider 3MF export alongside STL.** Marching cubes emits triangle soup; STL stores it verbatim (large files at high resolutions). 3MF (zipped XML, indexed vertices, units metadata) typically shrinks exports several-fold and carries the mm unit explicitly — relevant to the app's SLS/MJF/SLA audience. Effort M; pure addition in `src/utils/export.ts`.
