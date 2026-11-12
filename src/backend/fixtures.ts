@@ -1,31 +1,19 @@
 // Deterministic fixtures for the backend parity benchmark and GPU promotion
 // gate. Shapes, parameters, seeds, and resolutions are fixed so runs are
 // byte-reproducible across machines. See docs/performance/parity-gates.md.
-import {
-  buildCapsuleLattice,
-  buildCubeLattice,
-  buildCylinderLattice,
-  buildSphereLattice,
-  buildTorusLattice,
-} from '../geometry/lattice';
+import { buildSampleShapeLattice } from '../geometry/lattice';
 import { DEFAULT_PARAMS, type LatticeParams, type SampleShape } from '../types/project';
 import type { BackendFixture } from './types';
 
-// Same shape constants as lattice-tile-worker.ts, so parity fixtures exercise
-// exactly the fields production generates.
+// Same sample-shape fields as lattice-tile-worker.ts, so parity fixtures
+// exercise exactly the fields production generates.
 export function buildShapeSdf(
   shape: SampleShape,
   sphereRadius: number,
   params: LatticeParams,
   generationSeed: number,
 ): (x: number, y: number, z: number) => number {
-  switch (shape) {
-    case 'sphere': return buildSphereLattice(sphereRadius || 25, params, generationSeed);
-    case 'cube': return buildCubeLattice(15, params, generationSeed);
-    case 'cylinder': return buildCylinderLattice(15, 20, params, generationSeed);
-    case 'torus': return buildTorusLattice(20, 8, params, generationSeed);
-    case 'capsule': return buildCapsuleLattice(12, 15, params, generationSeed);
-  }
+  return buildSampleShapeLattice(shape, sphereRadius, params, generationSeed);
 }
 
 export function buildFixtureSdf(fixture: BackendFixture): (x: number, y: number, z: number) => number {

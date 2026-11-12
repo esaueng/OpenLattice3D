@@ -113,6 +113,22 @@ describe('procedural validation measures outer deviation for every sample shape'
     }));
     expect(validation.outerDeviation.passed).toBe(false);
     expect(validation.outerDeviation.maxDeviation).toBeGreaterThan(params.toleranceMm);
+    expect(validation.outerDeviation.sampled).toBeGreaterThan(0);
+  });
+
+  it('reports an empty imported-mesh result as unmeasured, like the sample-shape path', () => {
+    const reference = generateCubeMesh(20);
+    const empty = { positions: new Float32Array(0), normals: new Float32Array(0), triCount: 0 };
+    const imported = validateGeneratedResult(message(null, empty, {
+      meshPositions: reference.positions,
+      meshNormals: reference.normals,
+      meshTriCount: reference.triCount,
+    }));
+    const procedural = validateGeneratedResult(message('cube', empty));
+    expect(imported.outerDeviation).toEqual(procedural.outerDeviation);
+    expect(imported.outerDeviation).toMatchObject({ passed: false, maxDeviation: 0, sampled: 0 });
+    expect(imported.warnings).toContain('Outer deviation could not be measured');
+    expect(imported.passed).toBe(false);
   });
 
   it('rejects a mesh-path request without the reference mesh', () => {

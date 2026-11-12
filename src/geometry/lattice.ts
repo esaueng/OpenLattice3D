@@ -5,9 +5,18 @@
 import type { Vec3 } from './vec3';
 import type { MeshBVH } from './bvh';
 import type { GridSdfSampler } from './marching-cubes';
-import type { LatticeParams, LatticeType } from '../types/project';
+import type { LatticeParams, LatticeType, SampleShape } from '../types/project';
 import type { BoundingBox } from '../types/project';
 import { withEscapeHoles } from './escape-holes';
+import {
+  capsuleSdf,
+  cubeSdf,
+  cylinderSdf,
+  SAMPLE_SHAPE_DIMENSIONS,
+  sampleSphereRadius,
+  sphereSdf,
+  torusSdf,
+} from './sample-shapes';
 import {
   DEFAULT_GENERATION_SEED,
   deriveGenerationSeed,
@@ -1138,7 +1147,7 @@ export function buildSphereLattice(
   generationSeed = DEFAULT_GENERATION_SEED,
 ): SdfFunction {
   return buildAnalyticLattice(
-    (x, y, z) => Math.sqrt(x*x + y*y + z*z) - radius,
+    sphereSdf(radius),
     params,
     { min: [-radius, -radius, -radius], max: [radius, radius, radius] },
     generationSeed,
@@ -1150,14 +1159,12 @@ export function buildCubeLattice(
   params: LatticeParams,
   generationSeed = DEFAULT_GENERATION_SEED,
 ): SdfFunction {
-  return buildAnalyticLattice((x, y, z) => {
-    const dx = Math.abs(x) - halfSize;
-    const dy = Math.abs(y) - halfSize;
-    const dz = Math.abs(z) - halfSize;
-    const outside = Math.sqrt(Math.max(dx,0)**2 + Math.max(dy,0)**2 + Math.max(dz,0)**2);
-    const inside = Math.min(Math.max(dx, dy, dz), 0);
-    return outside + inside;
-  }, params, { min: [-halfSize, -halfSize, -halfSize], max: [halfSize, halfSize, halfSize] }, generationSeed);
+  return buildAnalyticLattice(
+    cubeSdf(halfSize),
+    params,
+    { min: [-halfSize, -halfSize, -halfSize], max: [halfSize, halfSize, halfSize] },
+    generationSeed,
+  );
 }
 
 export function buildCylinderLattice(
@@ -1166,13 +1173,12 @@ export function buildCylinderLattice(
   params: LatticeParams,
   generationSeed = DEFAULT_GENERATION_SEED,
 ): SdfFunction {
-  return buildAnalyticLattice((x, y, z) => {
-    const dRadial = Math.sqrt(x*x + y*y) - radius;
-    const dAxial = Math.abs(z) - halfHeight;
-    const outside = Math.sqrt(Math.max(dRadial,0)**2 + Math.max(dAxial,0)**2);
-    const inside = Math.min(Math.max(dRadial, dAxial), 0);
-    return outside + inside;
-  }, params, { min: [-radius, -radius, -halfHeight], max: [radius, radius, halfHeight] }, generationSeed);
+  return buildAnalyticLattice(
+    cylinderSdf(radius, halfHeight),
+    params,
+    { min: [-radius, -radius, -halfHeight], max: [radius, radius, halfHeight] },
+    generationSeed,
+  );
 }
 
 export function buildTorusLattice(
@@ -1181,10 +1187,7 @@ export function buildTorusLattice(
   params: LatticeParams,
   generationSeed = DEFAULT_GENERATION_SEED,
 ): SdfFunction {
-  return buildAnalyticLattice((x, y, z) => {
-    const qx = Math.sqrt(x*x + y*y) - majorRadius;
-    return Math.sqrt(qx*qx + z*z) - tubeRadius;
-  }, params, {
+  return buildAnalyticLattice(torusSdf(majorRadius, tubeRadius), params, {
     min: [-(majorRadius + tubeRadius), -(majorRadius + tubeRadius), -tubeRadius],
     max: [majorRadius + tubeRadius, majorRadius + tubeRadius, tubeRadius],
   }, generationSeed);
@@ -1196,12 +1199,39 @@ export function buildCapsuleLattice(
   params: LatticeParams,
   generationSeed = DEFAULT_GENERATION_SEED,
 ): SdfFunction {
-  return buildAnalyticLattice((x, y, z) => {
-    // Clamp z to the cylinder body, then measure distance to that clamped point.
-    const cz = Math.max(-halfHeight, Math.min(halfHeight, z));
-    return Math.sqrt(x*x + y*y + (z - cz)*(z - cz)) - radius;
-  }, params, {
+  return buildAnalyticLattice(capsuleSdf(radius, halfHeight), params, {
     min: [-radius, -radius, -(halfHeight + radius)],
     max: [radius, radius, halfHeight + radius],
   }, generationSeed);
+}
+
+/**
+ * Lattice field for a built-in sample shape at its fixed dimensions
+ * (`SAMPLE_SHAPE_DIMENSIONS`). Generation, tile workers, parity fixtures and
+ * validation all build sample-shape fields through this one function.
+ */
+export function buildSampleShapeLattice(
+  shape: SampleShape,
+  sphereRadius: number,
+  params: LatticeParams,
+  generationSeed = DEFAULT_GENERATION_SEED,
+): SdfFunction {
+  switch (shape) {
+    case 'sphere':
+      return buildSphereLattice(sampleSphereRadius(sphereRadius), params, generationSeed);
+    case 'cube':
+      return buildCubeLattice(SAMPLE_SHAPE_DIMENSIONS.cube.halfSize, params, generationSeed);
+    case 'cylinder': {
+      const { radius, halfHeight } = SAMPLE_SHAPE_DIMENSIONS.cylinder;
+      return buildCylinderLattice(radius, halfHeight, params, generationSeed);
+    }
+    case 'torus': {
+      const { majorRadius, tubeRadius } = SAMPLE_SHAPE_DIMENSIONS.torus;
+      return buildTorusLattice(majorRadius, tubeRadius, params, generationSeed);
+    }
+    case 'capsule': {
+      const { radius, halfHeight } = SAMPLE_SHAPE_DIMENSIONS.capsule;
+      return buildCapsuleLattice(radius, halfHeight, params, generationSeed);
+    }
+  }
 }
