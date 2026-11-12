@@ -28,7 +28,7 @@ export function StartOverlay() {
           <button type="button" className="start-action" onClick={intake.pickStl}>
             <UploadIcon size={16} />
             <strong>Import STL</strong>
-            <small>Millimetres, closed mesh</small>
+            <small>Millimetres, closed mesh. Or drop it here.</small>
           </button>
           <button type="button" className="start-action" onClick={intake.pickProject}>
             <FolderOpenIcon size={16} />
@@ -41,7 +41,14 @@ export function StartOverlay() {
           <span className="start-samples-label" id="start-samples-label">Or pick a sample shape</span>
           <div className="start-sample-row" role="group" aria-labelledby="start-samples-label">
             {(Object.keys(SAMPLE_SHAPE_INFO) as SampleShape[]).map((shape) => (
-              <button key={shape} type="button" className="start-sample" title={SAMPLE_SHAPE_INFO[shape].label} onClick={() => intake.loadSample(shape)}>
+              <button
+                key={shape}
+                type="button"
+                className="start-sample"
+                aria-label={`Load the ${SAMPLE_SHAPE_INFO[shape].label} sample`}
+                title={SAMPLE_SHAPE_INFO[shape].label}
+                onClick={() => intake.loadSample(shape)}
+              >
                 <SampleGlyph shape={shape} />
                 <span>{SAMPLE_SHAPE_INFO[shape].fileName.split(' ')[0]}</span>
               </button>

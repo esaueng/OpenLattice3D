@@ -11,6 +11,8 @@ type NumericInputProps = {
   onCommit: (value: number) => void;
   /** Capture undo/redo before a live edit; restore it when Escape cancels. */
   captureUndoCheckpoint?: () => () => void;
+  /** Id of visible help text, so it is announced with the field (not only as a tooltip). */
+  describedBy?: string;
 };
 
 /**
@@ -18,7 +20,7 @@ type NumericInputProps = {
  * the input shows the raw text while it is being edited, so a partial entry is
  * never rewritten under the cursor. The bound is applied on blur.
  */
-export function NumericInput({ id, title, value, min, max, step, onCommit, captureUndoCheckpoint }: NumericInputProps) {
+export function NumericInput({ id, title, value, min, max, step, onCommit, captureUndoCheckpoint, describedBy }: NumericInputProps) {
   const [draft, setDraft] = useState<string | null>(null);
   const lastCommitted = useRef(value);
   const editStart = useRef<number | null>(null);
@@ -85,6 +87,7 @@ export function NumericInput({ id, title, value, min, max, step, onCommit, captu
       max={max}
       step={step}
       aria-invalid={invalid}
+      aria-describedby={describedBy}
       onChange={handleChange}
       onFocus={handleFocus}
       onBlur={handleBlur}

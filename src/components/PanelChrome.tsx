@@ -1,9 +1,10 @@
 // Shared chrome for the step panels: the question header, the Back/Continue footer,
 // sections and fold-away "More options".
-import type { ReactNode } from 'react';
+import { useId, type ReactNode } from 'react';
 import { useStore } from '../store/useStore';
 import { adjacentStep, canNavigateToStep, visibleSteps, type WorkflowInputs } from './workflow';
 import { ChevronDownIcon } from './icons';
+import { useRadioGroup } from '../hooks/useRadioGroup';
 import type { WorkflowStep } from '../store/useStore';
 
 type StepPanelProps = {
@@ -102,30 +103,48 @@ export function Collapsible({ title, subtitle, children, defaultOpen = false }: 
   );
 }
 
-/** A labelled choice that reads as one control: a radio group styled as segments. */
-export function Segmented<T extends string>({ label, value, options, onChange, disabled }: {
+/**
+ * A labelled choice that reads as one control: a radio group styled as segments.
+ * One tab stop; arrow keys, Home and End move and select (WAI-ARIA radio group).
+ * Each option's description is exposed to assistive tech, not only as a tooltip.
+ */
+export function Segmented<T extends string>({ label, value, options, onChange, disabled, describedBy }: {
   label: string;
   value: T;
   options: readonly { value: T; label: string; title?: string }[];
   onChange: (value: T) => void;
   disabled?: boolean;
+  /** Id of visible text that explains the current choice. */
+  describedBy?: string;
 }) {
+  const groupId = useId();
+  const radio = useRadioGroup({ values: options.map((option) => option.value), selected: value, onSelect: onChange, disabled });
   return (
-    <div className="segmented" role="radiogroup" aria-label={label} style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}>
-      {options.map((option) => (
-        <button
-          key={option.value}
-          type="button"
-          role="radio"
-          aria-checked={value === option.value}
-          className={value === option.value ? 'active' : ''}
-          title={option.title}
-          disabled={disabled}
-          onClick={() => onChange(option.value)}
-        >
-          {option.label}
-        </button>
+    <>
+      <div
+        className="segmented"
+        role="radiogroup"
+        aria-label={label}
+        aria-describedby={describedBy}
+        style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}
+      >
+        {options.map((option, index) => (
+          <button
+            key={option.value}
+            type="button"
+            className={value === option.value ? 'active' : ''}
+            title={option.title}
+            aria-describedby={option.title ? `${groupId}-${index}` : undefined}
+            {...radio(option.value, index)}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+      {/* Outside the buttons, so the descriptions do not become part of their names. */}
+      {options.map((option, index) => option.title && (
+        <span key={option.value} id={`${groupId}-${index}`} className="visually-hidden">{option.title}</span>
       ))}
-    </div>
+    </>
   );
 }

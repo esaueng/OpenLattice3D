@@ -1,7 +1,9 @@
+import { useState } from 'react';
 import { useStore } from '../../store/useStore';
+import { DEFAULT_FACING_TOLERANCE_DEG, FACE_DIRECTIONS, facesFacingDirection, type FaceDirection } from '../../geometry/face-selection';
 import type { SelectionMode } from '../../types/project';
 import { NumericInput } from '../NumericInput';
-import { Collapsible, PanelSection, StepPanel } from '../PanelChrome';
+import { Collapsible, PanelSection, Segmented, StepPanel } from '../PanelChrome';
 import type { WorkflowInputs } from '../workflow';
 
 const BRUSHES: readonly { mode: SelectionMode; label: string; hint: string; title: string; swatch?: string }[] = [
@@ -51,11 +53,15 @@ export function RegionsStep({ inputs }: { inputs: WorkflowInputs }) {
               captureUndoCheckpoint={store.captureUndoCheckpoint}
               id="constraint-brush-radius"
               title="Radius around the pointer hit. Zero paints one triangle. Hold Alt while dragging to erase."
+              describedBy="brush-radius-hint"
               min={0} max={100} step={0.5}
               value={store.brushRadius}
               onCommit={(next) => store.setBrushRadius(next)}
             />
           </div>
+        )}
+        {painting && (
+          <p className="field-hint" id="brush-radius-hint">Faces within this distance of the pointer are painted. 0 paints one triangle.</p>
         )}
       </PanelSection>
 
@@ -78,19 +84,92 @@ export function RegionsStep({ inputs }: { inputs: WorkflowInputs }) {
               captureUndoCheckpoint={store.captureUndoCheckpoint}
               id="keep-in-depth"
               title="Depth of solid material preserved below painted keep-in faces."
+              describedBy="keep-in-depth-hint"
               min={0.1} max={100} step={0.5}
               value={store.params.keepInDepth}
               onCommit={(keepInDepth) => store.updateParams({ keepInDepth })}
             />
           </div>
         )}
+        {store.keepInTris.size > 0 && (
+          <p className="field-hint" id="keep-in-depth-hint">How deep the solid material reaches below keep-in faces.</p>
+        )}
       </PanelSection>
 
-      <Collapsible title="More options">
+      <Collapsible title="Select without painting">
+        <DirectionSelection />
         <div className="button-row">
-          <button type="button" className="btn btn-small" title="Mark every source face as keep-out." onClick={store.selectAllKeepOut}>Select all keep-out</button>
+          <button type="button" className="btn btn-small" aria-describedby="select-all-hint" onClick={store.selectAllKeepOut}>Select all keep-out</button>
         </div>
+        <p className="field-hint" id="select-all-hint">Marks every source face as keep-out.</p>
       </Collapsible>
     </StepPanel>
+  );
+}
+
+type MarkRegion = 'keep_out' | 'keep_in';
+
+const MARK_REGIONS = [
+  { value: 'keep_out', label: 'Keep-out' },
+  { value: 'keep_in', label: 'Keep-in' },
+] as const;
+
+/** A keyboard alternative to the brush: mark every face that points one way. */
+function DirectionSelection() {
+  const originalMesh = useStore((s) => s.originalMesh);
+  const markFaces = useStore((s) => s.markFaces);
+  const addLog = useStore((s) => s.addLog);
+  const [region, setRegion] = useState<MarkRegion>('keep_out');
+  const [direction, setDirection] = useState<FaceDirection>('+z');
+  const [tolerance, setTolerance] = useState(DEFAULT_FACING_TOLERANCE_DEG);
+  const [status, setStatus] = useState('');
+
+  const mark = () => {
+    if (!originalMesh) return;
+    const faces = facesFacingDirection(originalMesh, FACE_DIRECTIONS[direction].vector, tolerance);
+    markFaces(faces, region);
+    const regionLabel = region === 'keep_out' ? 'keep-out' : 'keep-in';
+    const message = faces.length > 0
+      ? `Marked ${faces.length.toLocaleString()} face${faces.length === 1 ? '' : 's'} facing ${FACE_DIRECTIONS[direction].label} as ${regionLabel}.`
+      : `No faces face ${FACE_DIRECTIONS[direction].label} within ${tolerance}°.`;
+    setStatus(message);
+    addLog(message);
+  };
+
+  return (
+    <div className="direction-select">
+      <div className="row">
+        <label htmlFor="mark-direction">Faces pointing</label>
+        <select id="mark-direction" value={direction} onChange={(e) => setDirection(e.target.value as FaceDirection)}>
+          {(Object.keys(FACE_DIRECTIONS) as FaceDirection[]).map((key) => (
+            <option key={key} value={key}>{FACE_DIRECTIONS[key].label}</option>
+          ))}
+        </select>
+      </div>
+      <div className="row">
+        <label htmlFor="mark-tolerance">Within angle (°)</label>
+        <NumericInput
+          id="mark-tolerance"
+          title="How far a face may tilt from the direction and still be marked."
+          describedBy="mark-tolerance-hint"
+          value={tolerance}
+          min={0} max={90} step={5}
+          onCommit={setTolerance}
+        />
+      </div>
+      <p className="field-hint" id="mark-tolerance-hint">How far a face may tilt from that direction and still count. 0° takes only flat faces.</p>
+      <div className="row">
+        <span className="row-text" aria-hidden="true">Mark as</span>
+        <div className="row-control">
+          <Segmented label="Mark as" value={region} options={MARK_REGIONS} onChange={setRegion} />
+        </div>
+      </div>
+      <div className="button-row">
+        <button type="button" className="btn btn-small" disabled={!originalMesh} onClick={mark}>
+          Mark faces
+        </button>
+      </div>
+      <p className="field-hint" role="status" aria-live="polite">{status}</p>
+    </div>
   );
 }

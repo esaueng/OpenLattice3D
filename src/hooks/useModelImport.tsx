@@ -1,6 +1,6 @@
 // Model intake shared by the Model step and the empty-viewer start card:
 // STL import with orientation and unit checks, project/parameter JSON, samples.
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useStore } from '../store/useStore';
 import { assertFileSizeWithinBudget, DEFAULT_IMPORT_LIMITS } from '../geometry/mesh-limits';
 import type { SampleShape } from '../types/project';
@@ -8,6 +8,12 @@ import { modelIntake } from './model-intake-client';
 import { SAMPLE_SHAPE_INFO } from '../store/useStore';
 import { formatGenerationSeed } from '../geometry/deterministic-random';
 import { formatDimensions, modelExtents } from '../utils/model-summary';
+import { describeWorkAtRisk, workLostByReplacingModel } from '../utils/model-replacement';
+import { classifyModelFile } from '../utils/dropped-files';
+import { confirmHint, REPLACE_MODEL_ACTION } from '../components/confirm';
+import type { StlIntake } from '../workers/model-intake';
+import type { RestoredProjectFile } from '../utils/project-file';
+import { isPendingCurrent, pendingReplacementLabel, usePendingReplacement, type PendingModelReplacement } from './pending-model-replacement';
 
 function errorMessage(err: unknown): string {
   if (err instanceof Error) return err.message.replace(/^Error:\s*/, '');
@@ -16,7 +22,6 @@ function errorMessage(err: unknown): string {
 
 export function useModelImport() {
   const store = useStore();
-  const [clearAllArmed, setClearAllArmed] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const jsonRef = useRef<HTMLInputElement>(null);
   const activeIntake = useRef<number | null>(null);
@@ -27,17 +32,27 @@ export function useModelImport() {
     if (activeIntake.current !== null) useStore.getState().cancelModelIntake(activeIntake.current);
   }, []);
 
-  useEffect(() => {
-    if (!clearAllArmed) return;
-    const timeout = window.setTimeout(() => setClearAllArmed(false), 4000);
-    return () => window.clearTimeout(timeout);
-  }, [clearAllArmed]);
+  /**
+   * Loading another model clears the result, painted faces, pinned run and undo
+   * history. When any of that exists, park the load for the replace prompt.
+   */
+  const deferIfWorkAtRisk = useCallback((pending: PendingModelReplacement): boolean => {
+    const risk = workLostByReplacingModel(useStore.getState());
+    if (!risk) return false;
+    usePendingReplacement.getState().request(pending);
+    const label = pendingReplacementLabel(pending);
+    store.addLog(`Loading ${label} would discard ${describeWorkAtRisk(risk)}. ${confirmHint(REPLACE_MODEL_ACTION, null)}`, 'warn');
+    return true;
+  }, [store]);
 
-  const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    // Reset the input so the same file can be re-imported after a fix.
-    e.target.value = '';
-    if (!file) return;
+  const commitStl = useCallback((result: StlIntake, fileName: string) => {
+    for (const log of result.logs) store.addLog(log.message, log.level);
+    store.setOriginalMesh(result.mesh, result.info, fileName);
+    if (!result.info.isManifold || !result.info.isWatertight) store.setMeshRepaired(result.info.repaired);
+    store.setImportNotice(result.notice);
+  }, [store]);
+
+  const importStl = useCallback(async (file: File) => {
     const epoch = store.beginModelIntake();
     activeIntake.current = epoch;
     store.addLog(`Importing ${file.name}...`);
@@ -48,10 +63,8 @@ export function useModelImport() {
       const result = await modelIntake.run(epoch, { kind: 'stl', file });
       if (!result || useStore.getState().modelIntakeEpoch !== epoch) return;
       if (result.kind !== 'stl') throw new Error('Import worker returned the wrong file kind');
-      for (const log of result.logs) store.addLog(log.message, log.level);
-      store.setOriginalMesh(result.mesh, result.info, file.name);
-      if (!result.info.isManifold || !result.info.isWatertight) store.setMeshRepaired(result.info.repaired);
-      store.setImportNotice(result.notice);
+      if (deferIfWorkAtRisk({ kind: 'stl', result, fileName: file.name, epoch })) return;
+      commitStl(result, file.name);
     } catch (err) {
       if (useStore.getState().modelIntakeEpoch !== epoch) return;
       const message = errorMessage(err);
@@ -65,19 +78,39 @@ export function useModelImport() {
     } finally {
       if (activeIntake.current === epoch) activeIntake.current = null;
     }
-  }, [store]);
+  }, [commitStl, deferIfWorkAtRisk, store]);
 
-  const handleSampleShape = useCallback((shape: SampleShape) => {
+  const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    // Reset the input so the same file can be re-imported after a fix.
+    e.target.value = '';
+    if (!file) return;
+    await importStl(file);
+  }, [importStl]);
+
+  const commitSample = useCallback((shape: SampleShape) => {
     store.setSampleShape(shape);
     store.setImportNotice(null);
     store.addLog(`Sample loaded: ${SAMPLE_SHAPE_INFO[shape].fileName}`);
   }, [store]);
 
-  const handleJsonImport = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    // Reset the input so the same file can be re-imported
-    e.target.value = '';
-    if (!file) return;
+  const handleSampleShape = useCallback((shape: SampleShape) => {
+    if (deferIfWorkAtRisk({ kind: 'sample', shape, epoch: useStore.getState().modelIntakeEpoch })) return;
+    commitSample(shape);
+  }, [commitSample, deferIfWorkAtRisk]);
+
+  const commitProject = useCallback((parsed: RestoredProjectFile, fileName: string) => {
+    const detail = parsed.warnings.length > 0 ? parsed.warnings.join(' ') : undefined;
+    store.restoreProject(parsed);
+    store.addLog(`Restored project from ${fileName}; regenerate to refresh geometry and validation`);
+    store.setImportNotice({
+      level: parsed.warnings.length > 0 ? 'warn' : 'info',
+      message: `Opened project ${fileName}. Generate to rebuild the lattice.`,
+      detail,
+    });
+  }, [store]);
+
+  const importProject = useCallback(async (file: File) => {
     const epoch = store.beginModelIntake();
     activeIntake.current = epoch;
     try {
@@ -89,13 +122,8 @@ export function useModelImport() {
       for (const warning of parsed.warnings) store.addLog(`JSON import: ${warning}`, 'warn');
       const detail = parsed.warnings.length > 0 ? parsed.warnings.join(' ') : undefined;
       if (parsed.kind === 'project') {
-        store.restoreProject(parsed);
-        store.addLog(`Restored project from ${file.name}; regenerate to refresh geometry and validation`);
-        store.setImportNotice({
-          level: parsed.warnings.length > 0 ? 'warn' : 'info',
-          message: `Opened project ${file.name}. Generate to rebuild the lattice.`,
-          detail,
-        });
+        if (deferIfWorkAtRisk({ kind: 'project', parsed, fileName: file.name, epoch })) return;
+        commitProject(parsed, file.name);
       } else {
         if (parsed.accepted.length === 0) {
           store.addLog('JSON import: no valid parameters found', 'error');
@@ -122,18 +150,52 @@ export function useModelImport() {
     } finally {
       if (activeIntake.current === epoch) activeIntake.current = null;
     }
+  }, [commitProject, deferIfWorkAtRisk, store]);
+
+  const handleJsonImport = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    // Reset the input so the same file can be re-imported
+    e.target.value = '';
+    if (!file) return;
+    await importProject(file);
+  }, [importProject]);
+
+  /** Import a file chosen any other way (drag and drop), routed by its extension. */
+  const importFile = useCallback(async (file: File) => {
+    const kind = classifyModelFile(file.name);
+    if (kind === 'stl') return importStl(file);
+    if (kind === 'project') return importProject(file);
+    store.addLog(`Import skipped: ${file.name} is not an STL or project file`, 'warn');
+    store.setImportNotice({
+      level: 'error',
+      message: `Could not import ${file.name}: drop an .stl mesh or a .json project file.`,
+      detail: useStore.getState().originalMesh || useStore.getState().sphereMode ? 'The previous model is still loaded.' : undefined,
+    });
+  }, [importProject, importStl, store]);
+
+  const confirmReplacement = useCallback(() => {
+    const { pending, clear } = usePendingReplacement.getState();
+    clear();
+    if (!pending || !isPendingCurrent(pending, useStore.getState().modelIntakeEpoch)) return;
+    if (pending.kind === 'sample') commitSample(pending.shape);
+    else if (pending.kind === 'stl') commitStl(pending.result, pending.fileName);
+    else commitProject(pending.parsed, pending.fileName);
+  }, [commitProject, commitSample, commitStl]);
+
+  const cancelReplacement = useCallback(() => {
+    const { pending, clear } = usePendingReplacement.getState();
+    if (!pending) return;
+    clear();
+    store.addLog(`Kept the current model; ${pendingReplacementLabel(pending)} was not loaded`);
   }, [store]);
 
-  const handleReset = useCallback(() => {
-    if (!clearAllArmed) {
-      setClearAllArmed(true);
-      store.addLog('Click Confirm to reset.', 'warn');
-      return;
-    }
-    setClearAllArmed(false);
+
+  // Callers confirm first (ConfirmButton); this resets immediately.
+  const handleStartOver = useCallback(() => {
+    usePendingReplacement.getState().clear();
     store.resetProject();
     store.addLog('Project reset to defaults');
-  }, [clearAllArmed, store]);
+  }, [store]);
 
   const toggleDemoGrid = useCallback((enabled: boolean) => {
     if (store.generating) return;
@@ -184,8 +246,10 @@ export function useModelImport() {
     pickStl: () => fileRef.current?.click(),
     pickProject: () => jsonRef.current?.click(),
     loadSample: handleSampleShape,
-    reset: handleReset,
-    clearAllArmed,
+    importFile,
+    confirmReplacement,
+    cancelReplacement,
+    startOver: handleStartOver,
     applyScale,
     closeHoles: handleCloseHoles,
     reseed: handleReseed,

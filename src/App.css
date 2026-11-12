@@ -879,7 +879,9 @@ summary:focus-visible,
   inset: 0;
   z-index: var(--z-viewer-overlay);
   display: grid;
-  place-items: center;
+  /* "safe": a card taller than the viewer starts at the top and scrolls, instead
+     of overflowing both edges where its first actions cannot be reached. */
+  place-items: safe center;
   padding: var(--sp-5);
   overflow-y: auto;
   background:
@@ -1355,26 +1357,36 @@ summary:focus-visible,
 }
 
 .lattice-family-label {
-  color: var(--color-text-subtle);
+  color: var(--color-text-muted);
   font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+}
+
+.lattice-family-note {
+  margin: 0 0 var(--sp-1);
+  color: var(--color-text-subtle);
+  font-size: var(--fs-mini);
+  line-height: var(--lh-tight);
 }
 
 .lattice-family-options {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--sp-1);
 }
 
+/* One row per type: a cross-section thumbnail, the name, and what it is for. */
 .lattice-option {
-  min-height: var(--control-h-md);
-  padding: 0 var(--sp-2);
-  overflow: hidden;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--sp-25);
+  min-height: 52px;
+  padding: var(--sp-15) var(--sp-2) var(--sp-15) var(--sp-15);
   color: var(--color-text);
   background: var(--color-bg);
   border: 1px solid var(--color-control-border);
   border-radius: var(--radius-md);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  text-align: left;
 }
 
 .lattice-option:hover {
@@ -1382,11 +1394,64 @@ summary:focus-visible,
 }
 
 .lattice-option.active {
-  color: var(--color-accent);
   background: var(--color-accent-dim);
   border-color: var(--color-accent);
   box-shadow: inset 0 0 0 1px var(--color-accent-border);
+}
+
+.lattice-thumb {
+  width: 40px;
+  height: 40px;
+  color: var(--color-text-muted);
+  background: var(--color-surface);
+  border-radius: var(--radius-sm);
+}
+
+.lattice-option.active .lattice-thumb {
+  color: var(--color-accent);
+}
+
+.lattice-option-text {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.lattice-option-name {
+  font-size: var(--fs-sm);
   font-weight: var(--fw-medium);
+}
+
+.lattice-option.active .lattice-option-name {
+  color: var(--color-accent);
+}
+
+.lattice-option-desc {
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-tight);
+}
+
+/* Visible help under a field, tied to it with aria-describedby. */
+.field-hint {
+  margin: calc(var(--sp-1) * -1) 0 0;
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-tight);
+}
+
+.field-hint:empty {
+  display: none;
+}
+
+.direction-select {
+  display: grid;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+}
+
+.direction-select .row-control {
+  flex: 0 0 60%;
 }
 
 .compare-toggle {
@@ -1578,7 +1643,8 @@ summary:focus-visible,
   min-height: var(--control-h-md);
 }
 
-.row label {
+.row label,
+.row .row-text {
   flex: 1 1 auto;
   min-width: 0;
   color: var(--color-text-muted);
@@ -2602,6 +2668,53 @@ summary:focus-visible,
   .step-nav-strip .step-nav {
     margin: 0;
   }
+
+  /* Phone and tablet: number over a short label, so every step is named on
+     screen and the strip fits without sideways scrolling. */
+  .step-nav-strip .step-nav-list {
+    width: 100%;
+  }
+
+  .step-nav-strip .step-nav-item {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .step-nav-strip .step-nav-step,
+  .step-nav-strip .step-nav-step:not(.active) {
+    flex: 1 1 auto;
+    flex-direction: column;
+    justify-content: center;
+    gap: 1px;
+    min-width: 0;
+    min-height: 44px;
+    padding: var(--sp-1) 2px;
+  }
+
+  .step-nav-strip .step-nav-step:not(.active) .step-nav-label {
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: hidden;
+    clip: auto;
+  }
+
+  .step-nav-strip .step-nav-label {
+    max-width: 100%;
+    overflow: hidden;
+    font-size: var(--fs-mini);
+    text-overflow: ellipsis;
+  }
+
+  .step-nav-strip .step-nav-step.active .step-nav-label {
+    color: var(--color-accent);
+  }
+
+  .step-nav-strip .step-nav-warning {
+    position: absolute;
+    top: 3px;
+    right: 3px;
+  }
 }
 
 @media (max-width: 720px) {
@@ -2617,29 +2730,68 @@ summary:focus-visible,
     display: none;
   }
 
+  /* Phone: the card must fit the short stacked viewer, so it drops the brand
+     (the top bar has it) and packs the three ways in and the samples tightly. */
+  .start-overlay {
+    padding: var(--sp-3);
+  }
+
+  .start-card {
+    gap: var(--sp-2);
+  }
+
+  .start-brand {
+    display: none;
+  }
+
   .start-card h2 {
-    font-size: var(--fs-xl);
+    font-size: var(--fs-lg);
+  }
+
+  .start-lede {
+    margin: 0;
+    font-size: var(--fs-sm);
   }
 
   .start-actions {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--sp-15);
   }
 
   .start-action {
-    min-height: 0;
+    align-content: center;
+    min-height: 56px;
+    padding: var(--sp-2);
   }
 
+  .start-action.primary {
+    align-content: center;
+  }
+
+  .start-action strong {
+    font-size: var(--fs-sm);
+  }
+
+  .start-action small,
   .start-action .icon {
     display: none;
   }
 
-  /* The Model step under the viewer lists the samples too. */
   .start-samples {
-    display: none;
+    gap: var(--sp-1);
+    margin-top: 0;
+    padding-top: var(--sp-2);
   }
 
-  .start-sample-row {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+  .start-sample {
+    min-height: 44px;
+    padding: var(--sp-1) 2px;
+    font-size: var(--fs-mini);
+  }
+
+  .start-sample .sample-glyph {
+    width: 22px;
+    height: 22px;
   }
 
   .viewer-controls-overlay {
@@ -2690,6 +2842,27 @@ summary:focus-visible,
   }
 }
 
+@media (pointer: coarse), (max-width: 720px) {
+  .status-link {
+    min-width: 44px;
+    min-height: 44px;
+    justify-content: center;
+  }
+
+  .view-mode-slot-settings > .view-settings-button {
+    width: 44px;
+  }
+
+  .viewer-toolbar .btn {
+    min-height: 44px;
+  }
+
+  .status-tabs button,
+  .validation-chip {
+    min-height: 36px;
+  }
+}
+
 @media (max-width: 420px) {
   .viewer-toolbar .btn {
     padding: 0 6px;
@@ -2698,5 +2871,111 @@ summary:focus-visible,
 
   .brush-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+/* ── Model intake: replace-model confirmation and the file drop target ── */
+
+.replace-prompt {
+  position: fixed;
+  top: calc(var(--topbar-h) + var(--sp-3));
+  left: 50%;
+  z-index: var(--z-popover);
+  display: grid;
+  gap: var(--sp-2);
+  width: min(460px, calc(100vw - 2 * var(--sp-4)));
+  padding: var(--sp-3) var(--sp-4);
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid rgba(239, 68, 68, 0.55);
+  border-radius: var(--radius-overlay);
+  box-shadow: var(--shadow-float);
+  transform: translateX(-50%);
+}
+
+.replace-prompt strong {
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  overflow-wrap: anywhere;
+}
+
+.replace-prompt p {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-normal);
+}
+
+.replace-prompt-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+}
+
+.replace-prompt-actions .btn {
+  min-height: var(--control-h-lg);
+}
+
+.btn-danger {
+  color: #fee2e2;
+  background: rgba(239, 68, 68, 0.22);
+  border-color: rgba(239, 68, 68, 0.7);
+}
+
+.btn-danger:hover:not(:disabled):not([aria-disabled='true']) {
+  background: rgba(239, 68, 68, 0.34);
+  border-color: var(--color-error);
+}
+
+.file-drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-popover);
+  display: grid;
+  place-items: center;
+  padding: var(--sp-4);
+  background: rgba(7, 11, 16, 0.72);
+  border: 3px dashed var(--color-accent);
+  pointer-events: none;
+}
+
+.file-drop-card {
+  display: grid;
+  justify-items: center;
+  gap: var(--sp-2);
+  max-width: 360px;
+  padding: var(--sp-5);
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-overlay);
+  box-shadow: var(--shadow-float);
+  text-align: center;
+}
+
+.file-drop-card .icon {
+  color: var(--color-accent);
+}
+
+.file-drop-card strong {
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
+}
+
+.file-drop-card span {
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+}
+
+@media (max-width: 720px) {
+  .replace-prompt {
+    top: auto;
+    bottom: var(--sp-3);
+  }
+
+  .replace-prompt-actions .btn {
+    flex: 1 1 auto;
+    min-height: 44px;
   }
 }

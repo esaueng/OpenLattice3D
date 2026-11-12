@@ -4,6 +4,7 @@ import { ViewerControls } from './components/ViewerControls';
 import { StepNav } from './components/StepNav';
 import { ProjectMenu } from './components/ProjectMenu';
 import { StartOverlay } from './components/StartOverlay';
+import { ModelIntakeLayer } from './components/ModelIntakeLayer';
 import { ModelStep } from './components/steps/ModelStep';
 import { RegionsStep } from './components/steps/RegionsStep';
 import { LatticeStep } from './components/steps/LatticeStep';
@@ -210,6 +211,8 @@ function HydratedApp() {
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main-content">Skip to main content</a>
+      {/* Drag-and-drop STL import and the replace-model confirmation. */}
+      <ModelIntakeLayer />
       <h1 className="visually-hidden">OpenLattice3D — 3D lattice generator</h1>
       <header className="topbar">
         <div className="brand" aria-label="Open Lattice 3D">

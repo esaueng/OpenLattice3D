@@ -30,8 +30,8 @@ export function ShellStep({ inputs }: { inputs: WorkflowInputs }) {
   return (
     <StepPanel step="shell" inputs={inputs}>
       <PanelSection title="Outer surface">
-        <Segmented label="Outer surface" value={mode} options={SHELL_MODES} onChange={setMode} />
-        <p className="panel-copy">{SHELL_COPY[mode]}</p>
+        <Segmented label="Outer surface" value={mode} options={SHELL_MODES} onChange={setMode} describedBy="shell-mode-copy" />
+        <p className="panel-copy" id="shell-mode-copy">{SHELL_COPY[mode]}</p>
         {mode === 'band' && (
           <div className="row">
             <label htmlFor="lattice-depth">Band depth (mm)</label>
@@ -39,11 +39,15 @@ export function ShellStep({ inputs }: { inputs: WorkflowInputs }) {
               captureUndoCheckpoint={store.captureUndoCheckpoint}
               id="lattice-depth"
               title="Depth of the generated lattice band from the outer surface."
+              describedBy="lattice-depth-hint"
               value={params.surfaceDepth}
               min={1} max={50} step={0.5}
               onCommit={(surfaceDepth) => store.updateParams({ surfaceDepth })}
             />
           </div>
+        )}
+        {mode === 'band' && (
+          <p className="field-hint" id="lattice-depth-hint">How far the lattice reaches in from the outer surface.</p>
         )}
         {mode === 'shell' && (
           <div className="row">
@@ -52,11 +56,15 @@ export function ShellStep({ inputs }: { inputs: WorkflowInputs }) {
               captureUndoCheckpoint={store.captureUndoCheckpoint}
               id="shell-thickness"
               title="Thickness of the outer shell retained around the lattice."
+              describedBy="shell-thickness-hint"
               value={params.shellThickness}
               min={0.3} max={10} step={0.1}
               onCommit={(shellThickness) => store.updateParams({ shellThickness })}
             />
           </div>
+        )}
+        {mode === 'shell' && (
+          <p className="field-hint" id="shell-thickness-hint">Thickness of the solid skin kept around the lattice core.</p>
         )}
       </PanelSection>
 
@@ -66,19 +74,22 @@ export function ShellStep({ inputs }: { inputs: WorkflowInputs }) {
             <input
               id="escape-holes"
               type="checkbox"
-              title="Subtract through-holes along the selected build axis to release trapped powder or resin."
+              aria-describedby="escape-holes-hint"
               checked={params.escapeHoles}
               onChange={(e) => store.updateParams({ escapeHoles: e.target.checked })}
             />
             Drain trapped powder or resin
           </label>
+          <p className="field-hint" id="escape-holes-hint">
+            Cuts through-holes along the build axis so unfused powder or uncured resin can escape the closed skin.
+          </p>
           {params.escapeHoles && (
             <>
               <div className="row">
                 <label htmlFor="escape-hole-axis">Build axis</label>
                 <select
                   id="escape-hole-axis"
-                  title="Axis followed by the escape-hole cylinders."
+                  aria-describedby="escape-hole-axis-hint"
                   value={params.escapeHoleAxis}
                   onChange={(e) => store.updateParams({ escapeHoleAxis: e.target.value as 'x' | 'y' | 'z' })}
                 >
@@ -87,6 +98,7 @@ export function ShellStep({ inputs }: { inputs: WorkflowInputs }) {
                   <option value="z">Z</option>
                 </select>
               </div>
+              <p className="field-hint" id="escape-hole-axis-hint">Holes run straight through the part along this axis.</p>
               <div className="row">
                 <label htmlFor="escape-hole-diameter">Hole diameter (mm)</label>
                 <NumericInput
@@ -102,7 +114,7 @@ export function ShellStep({ inputs }: { inputs: WorkflowInputs }) {
                 <label htmlFor="escape-hole-placement">Placement</label>
                 <select
                   id="escape-hole-placement"
-                  title="Spread holes automatically, or click the model where each hole should pass through."
+                  aria-describedby="escape-hole-placement-hint"
                   value={params.escapeHolePlacement}
                   onChange={(e) => {
                     const placement = e.target.value as 'auto' | 'manual';
@@ -114,6 +126,7 @@ export function ShellStep({ inputs }: { inputs: WorkflowInputs }) {
                   <option value="manual">Click on the model</option>
                 </select>
               </div>
+              <p className="field-hint" id="escape-hole-placement-hint">Spread holes automatically, or click the model where each one should pass through.</p>
               {params.escapeHolePlacement === 'auto' ? (
                 <div className="row">
                   <label htmlFor="escape-hole-count">Hole count</label>
