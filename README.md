@@ -46,7 +46,7 @@ with `npm run preview` to inspect the production bundle locally.
 Production is a static Cloudflare Workers site. Cloudflare serves the Vite
 bundle from `dist/`; the small Worker in `worker/index.ts` provides the
 uncached health responses used by uptime monitors and a strictly allowlisted optional analytics relay. The application has
-no configured application secrets. Optional Glimpse analytics have a rate-limit binding and two collection switches, both disabled by default; the collector service binding is deferred. See [analytics and rollout](docs/glimpse.md).
+no configured application secrets. Optional Glimpse analytics have a rate-limit binding and two collection switches (`GLIMPSE_BASIC_ENABLED`, `GLIMPSE_USAGE_ENABLED`). `wrangler.jsonc` sets both to `"true"` for production and binds the `GLIMPSE` collector service; branch previews set both to `"false"`. Optional browser usage events additionally require each browser's opt-in consent, which is off by default. See [analytics and rollout](docs/glimpse.md).
 
 ```bash
 npm ci
@@ -79,7 +79,11 @@ host, configure all of the following:
    request to `index.html`.
 
 The supplied `public/_headers` file configures the required cross-origin
-isolation headers on Cloudflare. Other hosts use their own equivalent header
+isolation headers on Cloudflare, plus a same-origin-only
+`Content-Security-Policy`, `X-Content-Type-Options: nosniff`,
+`Referrer-Policy: no-referrer`, and a restrictive `Permissions-Policy`.
+`npm run preview` sends the same set; the dev server omits only the CSP
+because Vite's hot reload injects inline code. Other hosts use their own equivalent header
 and rewrite configuration. Avoid third-party embedded assets unless they send
 headers compatible with the isolation policy described below.
 
@@ -227,6 +231,8 @@ src/
     mesh-analysis.ts        # Watertight/manifold checks, repair, procedural meshes
     mesh-topology.ts        # Edge topology, manifold defects, connected components
     marching-cubes.ts       # Marching cubes iso-surface extraction
+    mesh-repair.ts          # Post-generation cleanup: closes marching-cubes cracks and tile seams
+    morphology.ts           # Thin-section opening on the sampled field before extraction
     lattice.ts              # Lattice SDFs + combined shell/core/surface builders
     validation.ts           # Deviation, thickness, manifold, connectivity checks
   workers/
@@ -234,7 +240,7 @@ src/
     lattice-tile-worker.ts  # One marching-cubes tile per message (CPU tiled backend)
     tiled-generation.ts     # Bounded worker fan-out, sparse skipping, deterministic merge
     generation-estimate.ts  # Resolution and memory estimates
-    mesh-cleanup.ts         # Post-generation fragment cleanup
+    progress-reporter.ts    # Throttled generation progress messages
     surface-sample-worker.ts# Poisson surface sampling for hex/tri surface lattices
     validation-worker.ts    # Post-generation validation
   components/
