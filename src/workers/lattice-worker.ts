@@ -9,7 +9,14 @@ import {
 } from '../geometry/marching-cubes';
 import type { GridSdfSampler } from '../geometry/marching-cubes';
 import { openField, openingIsResolvable } from '../geometry/morphology';
-import { buildCombinedSDF, buildSurfaceHexLattice, buildSphereLattice, buildCubeLattice, buildCylinderLattice, buildTorusLattice, buildCapsuleLattice } from '../geometry/lattice';
+import { buildCombinedSDF, buildSampleShapeLattice, buildSurfaceHexLattice, buildSphereLattice } from '../geometry/lattice';
+import {
+  DEFAULT_SAMPLE_SPHERE_RADIUS,
+  SAMPLE_SHAPE_DIMENSIONS,
+  sampleShapeBounds,
+  sampleShapeObjectSdf,
+  sampleSphereRadius,
+} from '../geometry/sample-shapes';
 import { MeshBVH } from '../geometry/bvh';
 import { closeBoundaryLoops } from '../geometry/mesh-repair';
 import {
@@ -439,90 +446,41 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
       } else if (shape) {
         const pad = params.cellSize * 0.5;
 
-        switch (shape) {
-          case 'sphere': {
-            sphereRadius = msg.sphereRadius || 25;
-            const R = sphereRadius;
-            bounds = { min: [-(R+pad), -(R+pad), -(R+pad)], max: [R+pad, R+pad, R+pad] };
-            objectSdf = (x, y, z) => Math.sqrt(x * x + y * y + z * z) - R;
-            sdf = isSurfacePolygon ? objectSdf : buildSphereLattice(R, fieldParams, generationSeed);
-            break;
-          }
-          case 'cube': {
-            const h = 15; // 30mm cube → halfSize 15
-            bounds = { min: [-(h+pad), -(h+pad), -(h+pad)], max: [h+pad, h+pad, h+pad] };
-            objectSdf = (x, y, z) => {
-              const dx = Math.abs(x) - h;
-              const dy = Math.abs(y) - h;
-              const dz = Math.abs(z) - h;
-              const outside = Math.sqrt(Math.max(dx, 0) ** 2 + Math.max(dy, 0) ** 2 + Math.max(dz, 0) ** 2);
-              const inside = Math.min(Math.max(dx, dy, dz), 0);
-              return outside + inside;
-            };
-            sdf = isSurfacePolygon ? objectSdf : buildCubeLattice(h, fieldParams, generationSeed);
-            break;
-          }
-          case 'cylinder': {
-            const cr = 15, ch = 20; // R=15, H=40 → halfH=20
-            bounds = { min: [-cr-pad, -cr-pad, -ch-pad], max: [cr+pad, cr+pad, ch+pad] };
-            objectSdf = (x, y, z) => {
-              const dRadial = Math.sqrt(x * x + y * y) - cr;
-              const dAxial = Math.abs(z) - ch;
-              const outside = Math.sqrt(Math.max(dRadial, 0) ** 2 + Math.max(dAxial, 0) ** 2);
-              const inside = Math.min(Math.max(dRadial, dAxial), 0);
-              return outside + inside;
-            };
-            sdf = isSurfacePolygon ? objectSdf : buildCylinderLattice(cr, ch, fieldParams, generationSeed);
-            break;
-          }
-          case 'torus': {
-            const mR = 20, tR = 8; // major=20, tube=8
-            const xy = mR + tR + pad;
-            bounds = { min: [-xy, -xy, -(tR+pad)], max: [xy, xy, tR+pad] };
-            objectSdf = (x, y, z) => {
-              const qx = Math.sqrt(x * x + y * y) - mR;
-              return Math.sqrt(qx * qx + z * z) - tR;
-            };
-            sdf = isSurfacePolygon ? objectSdf : buildTorusLattice(mR, tR, fieldParams, generationSeed);
-            break;
-          }
-          case 'capsule': {
-            const capR = 12, capHH = 15; // R=12, H=30 → halfH=15, total extent = 15+12
-            const capExt = capHH + capR + pad;
-            bounds = { min: [-(capR+pad), -(capR+pad), -capExt], max: [capR+pad, capR+pad, capExt] };
-            objectSdf = (x, y, z) => {
-              const cz = Math.max(-capHH, Math.min(capHH, z));
-              return Math.sqrt(x * x + y * y + (z - cz) * (z - cz)) - capR;
-            };
-            sdf = isSurfacePolygon ? objectSdf : buildCapsuleLattice(capR, capHH, fieldParams, generationSeed);
-            break;
-          }
-        }
+        const requestedRadius = msg.sphereRadius ?? 0;
+        if (shape === 'sphere') sphereRadius = sampleSphereRadius(requestedRadius);
+        bounds = sampleShapeBounds(shape, requestedRadius, pad);
+        objectSdf = sampleShapeObjectSdf(shape, requestedRadius);
+        sdf = isSurfacePolygon
+          ? objectSdf
+          : buildSampleShapeLattice(shape, requestedRadius, fieldParams, generationSeed);
         postMessage({ type: 'progress', progress: 0.05, message: `${shape} SDF ready` } as WorkerResponse);
         if (isSurfacePolygon) {
+          const { cube, cylinder, torus, capsule } = SAMPLE_SHAPE_DIMENSIONS;
           const areaEstimate = (() => {
             switch (shape) {
-              case 'sphere': return 4 * Math.PI * (sphereRadius ?? 25) ** 2;
-              case 'cube': return 6 * (15 ** 2) * 4;
-              case 'cylinder': return 2 * Math.PI * 15 * (40) + 2 * Math.PI * 15 * 15;
-              case 'torus': return 4 * Math.PI * Math.PI * 20 * 8;
-              case 'capsule': return 2 * Math.PI * 12 * (30) + 4 * Math.PI * 12 * 12;
+              case 'sphere': return 4 * Math.PI * (sphereRadius ?? DEFAULT_SAMPLE_SPHERE_RADIUS) ** 2;
+              case 'cube': return 6 * (cube.halfSize ** 2) * 4;
+              case 'cylinder': return 2 * Math.PI * cylinder.radius * (2 * cylinder.halfHeight)
+                + 2 * Math.PI * cylinder.radius * cylinder.radius;
+              case 'torus': return 4 * Math.PI * Math.PI * torus.majorRadius * torus.tubeRadius;
+              case 'capsule': return 2 * Math.PI * capsule.radius * (2 * capsule.halfHeight)
+                + 4 * Math.PI * capsule.radius * capsule.radius;
               default: return 1000;
             }
           })();
           const sampleCount = surfaceSampleTargetCount(areaEstimate, params.cellSize);
           if (shape === 'sphere') {
-            surfaceSamples = buildFibonacciSphereSamples(sphereRadius ?? 25, sampleCount);
+            surfaceSamples = buildFibonacciSphereSamples(sphereRadius ?? DEFAULT_SAMPLE_SPHERE_RADIUS, sampleCount);
           } else {
             const samplerParams = {
-              radius: sphereRadius ?? 25,
-              halfSize: 15,
-              cylRadius: 15,
-              cylHalfHeight: 20,
-              torusMajor: 20,
-              torusTube: 8,
-              capRadius: 12,
-              capHalfHeight: 15,
+              radius: sphereRadius ?? DEFAULT_SAMPLE_SPHERE_RADIUS,
+              halfSize: cube.halfSize,
+              cylRadius: cylinder.radius,
+              cylHalfHeight: cylinder.halfHeight,
+              torusMajor: torus.majorRadius,
+              torusTube: torus.tubeRadius,
+              capRadius: capsule.radius,
+              capHalfHeight: capsule.halfHeight,
             };
             const fallbackRandom = createDeterministicRandom(
               generationSeed,

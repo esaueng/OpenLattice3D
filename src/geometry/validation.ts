@@ -4,6 +4,12 @@ import type { MeshBVH } from './bvh';
 import type { LatticeParams, ValidationResult } from '../types/project';
 import type { MarchingCubesResult } from './marching-cubes';
 import { buildEdgeTopology, countEdgeDefects, findConnectedComponents } from './mesh-topology';
+import { sphereSdf } from './sample-shapes';
+import {
+  checkAnalyticOuterDeviation,
+  OUTER_DEVIATION_SAMPLE_COUNT,
+  type OuterDeviationMeasurement,
+} from './shape-deviation';
 
 /** Signed volume enclosed by a set of triangles (divergence theorem). */
 function signedVolumeOf(positions: Float32Array, triangles: number[]): number {
@@ -65,30 +71,34 @@ export function checkTopology(result: MarchingCubesResult): {
   };
 }
 
+/** Shown whenever outer deviation was not measured (`sampled: 0`). */
+export const OUTER_DEVIATION_UNMEASURED_WARNING = 'Outer deviation could not be measured';
+/** Shown when there is neither a reference mesh nor an analytic shape to measure against. */
+export const NO_DEVIATION_REFERENCE_WARNING = 'No reference mesh for deviation check';
+
+/**
+ * Outer deviation that was not measured. It fails and carries `sampled: 0`,
+ * the same representation `checkAnalyticOuterDeviation` uses, so it can never
+ * read as a 0 mm pass.
+ */
+export function unmeasuredOuterDeviation(): OuterDeviationMeasurement {
+  return { passed: false, maxDeviation: 0, sampled: 0 };
+}
+
 /** Check outer deviation: sample points on the result surface and measure distance to original mesh */
 export function checkOuterDeviation(
   result: MarchingCubesResult,
   originalBvh: MeshBVH,
   tolerance: number,
-  sampleCount: number = 2000
-): { passed: boolean; maxDeviation: number } {
-  const { positions, triCount } = result;
-  let maxDev = 0;
-  const step = Math.max(1, Math.floor(triCount / sampleCount));
-
-  for (let i = 0; i < triCount; i += step) {
-    // Sample triangle centroid
-    const o = i * 9;
-    const cx = (positions[o] + positions[o + 3] + positions[o + 6]) / 3;
-    const cy = (positions[o + 1] + positions[o + 4] + positions[o + 7]) / 3;
-    const cz = (positions[o + 2] + positions[o + 5] + positions[o + 8]) / 3;
-
-    // Only count as outer deviation if the point is outside the original mesh
-    const signed = originalBvh.signedDistance([cx, cy, cz]);
-    if (signed > maxDev) maxDev = signed;
-  }
-
-  return { passed: maxDev <= tolerance, maxDeviation: maxDev };
+  sampleCount: number = OUTER_DEVIATION_SAMPLE_COUNT
+): OuterDeviationMeasurement {
+  // Only points outside the original mesh count as outer deviation.
+  return checkAnalyticOuterDeviation(
+    result,
+    (x, y, z) => originalBvh.signedDistance([x, y, z]),
+    tolerance,
+    sampleCount,
+  );
 }
 
 /** Check outer deviation for sphere (fast path) */
@@ -96,24 +106,9 @@ export function checkSphereDeviation(
   result: MarchingCubesResult,
   radius: number,
   tolerance: number,
-  sampleCount: number = 2000
-): { passed: boolean; maxDeviation: number } {
-  const { positions, triCount } = result;
-  let maxDev = 0;
-  const step = Math.max(1, Math.floor(triCount / sampleCount));
-
-  for (let i = 0; i < triCount; i += step) {
-    const o = i * 9;
-    const cx = (positions[o] + positions[o + 3] + positions[o + 6]) / 3;
-    const cy = (positions[o + 1] + positions[o + 4] + positions[o + 7]) / 3;
-    const cz = (positions[o + 2] + positions[o + 5] + positions[o + 8]) / 3;
-    const r = Math.sqrt(cx * cx + cy * cy + cz * cz);
-    const dev = Math.abs(r - radius);
-    // Only if outside
-    if (r > radius && dev > maxDev) maxDev = dev;
-  }
-
-  return { passed: maxDev <= tolerance, maxDeviation: maxDev };
+  sampleCount: number = OUTER_DEVIATION_SAMPLE_COUNT
+): OuterDeviationMeasurement {
+  return checkAnalyticOuterDeviation(result, sphereSdf(radius), tolerance, sampleCount);
 }
 
 function sdfNormal(
@@ -304,16 +299,18 @@ export function runValidation(
 ): ValidationResult {
   const warnings: string[] = [];
 
-  // Outer deviation
-  let outerDeviation: { passed: boolean; maxDeviation: number };
+  // Outer deviation. Without a reference there is nothing to measure against:
+  // report it as unmeasured (sampled 0, failing), never as a 0 mm pass.
+  let outerDeviation: OuterDeviationMeasurement;
   if (sphereRadius !== null) {
     outerDeviation = checkSphereDeviation(result, sphereRadius, params.toleranceMm);
   } else if (originalBvh) {
     outerDeviation = checkOuterDeviation(result, originalBvh, params.toleranceMm);
   } else {
-    outerDeviation = { passed: true, maxDeviation: 0 };
-    warnings.push('No reference mesh for deviation check');
+    outerDeviation = unmeasuredOuterDeviation();
   }
+  if (sphereRadius === null && !originalBvh) warnings.push(NO_DEVIATION_REFERENCE_WARNING);
+  else if (outerDeviation.sampled === 0) warnings.push(OUTER_DEVIATION_UNMEASURED_WARNING);
 
   // Min thickness
   const minThickness = checkMinThickness(sdf, result, params.minFeatureSize);

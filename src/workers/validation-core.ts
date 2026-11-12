@@ -2,25 +2,17 @@
 // so it can be unit-tested in Node.
 import { MeshBVH } from '../geometry/bvh';
 import {
-  buildCapsuleLattice,
   buildCombinedSDF,
-  buildCubeLattice,
-  buildCylinderLattice,
-  buildSphereLattice,
+  buildSampleShapeLattice,
   buildSurfaceHexLattice,
-  buildTorusLattice,
 } from '../geometry/lattice';
 import type { SurfaceHexSample } from '../geometry/lattice';
-import {
-  SAMPLE_SHAPE_DIMENSIONS,
-  sampleShapeObjectSdf,
-  sampleSphereRadius,
-  type ObjectSdf,
-} from '../geometry/sample-shapes';
+import { sampleShapeObjectSdf, type ObjectSdf } from '../geometry/sample-shapes';
 import { checkAnalyticOuterDeviation } from '../geometry/shape-deviation';
 import {
   checkMinThickness,
   checkTopology,
+  OUTER_DEVIATION_UNMEASURED_WARNING,
   runValidation,
   topologyWarnings,
 } from '../geometry/validation';
@@ -81,29 +73,10 @@ export function sampleShapeFields(shape: SampleShape, sphereRadius: number, gene
   objectSdf: ObjectSdf;
   latticeSdf: (params: LatticeParams) => SdfFunction;
 } {
-  const objectSdf = sampleShapeObjectSdf(shape, sphereRadius);
-  switch (shape) {
-    case 'sphere': {
-      const r = sampleSphereRadius(sphereRadius);
-      return { objectSdf, latticeSdf: (params) => buildSphereLattice(r, params, generationSeed) };
-    }
-    case 'cube': {
-      const { halfSize } = SAMPLE_SHAPE_DIMENSIONS.cube;
-      return { objectSdf, latticeSdf: (params) => buildCubeLattice(halfSize, params, generationSeed) };
-    }
-    case 'cylinder': {
-      const { radius, halfHeight } = SAMPLE_SHAPE_DIMENSIONS.cylinder;
-      return { objectSdf, latticeSdf: (params) => buildCylinderLattice(radius, halfHeight, params, generationSeed) };
-    }
-    case 'torus': {
-      const { majorRadius, tubeRadius } = SAMPLE_SHAPE_DIMENSIONS.torus;
-      return { objectSdf, latticeSdf: (params) => buildTorusLattice(majorRadius, tubeRadius, params, generationSeed) };
-    }
-    case 'capsule': {
-      const { radius, halfHeight } = SAMPLE_SHAPE_DIMENSIONS.capsule;
-      return { objectSdf, latticeSdf: (params) => buildCapsuleLattice(radius, halfHeight, params, generationSeed) };
-    }
-  }
+  return {
+    objectSdf: sampleShapeObjectSdf(shape, sphereRadius),
+    latticeSdf: (params) => buildSampleShapeLattice(shape, sphereRadius, params, generationSeed),
+  };
 }
 
 export function runProceduralValidation(
@@ -119,7 +92,7 @@ export function runProceduralValidation(
   const minThickness = checkMinThickness(sdf, result, msg.params.minFeatureSize, 200, onProgress);
   const { manifold, disconnected } = checkTopology(result);
   const warnings: string[] = [];
-  if (outerDeviation.sampled === 0) warnings.push('Outer deviation could not be measured');
+  if (outerDeviation.sampled === 0) warnings.push(OUTER_DEVIATION_UNMEASURED_WARNING);
   if (minThickness.sampled === 0) warnings.push('Minimum thickness could not be measured');
 
   warnings.push(...topologyWarnings(disconnected, msg.params));
@@ -163,6 +136,11 @@ export function validateGeneratedResult(
     return runProceduralValidation(msg, objectSdf, baseSdf, onProgress);
   }
 
+  // An imported model's lattice field is built from its mesh, so without that
+  // mesh there is nothing to validate at all: reject the request. When the mesh
+  // is present it is always the deviation reference, and an unmeasurable
+  // deviation is reported exactly like the sample-shape path (sampled 0,
+  // failing, with a warning) by runValidation.
   if (!msg.meshPositions || !msg.meshNormals || msg.meshTriCount === undefined) {
     throw new Error('Validation needs the original mesh or a sample shape');
   }
