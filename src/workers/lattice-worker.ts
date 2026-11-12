@@ -43,6 +43,7 @@ import {
   normalizeGenerationSeed,
 } from '../geometry/deterministic-random';
 import { createProgressReporter } from './progress-reporter';
+import { sampleSurfaceStreams, type SampleWorkerLike } from './surface-sample-pool';
 
 type SdfFunction = ((x: number, y: number, z: number) => number) & Partial<GridSdfSampler>;
 type WorkerPostMessage = (message: unknown, transfer: Transferable[]) => void;
@@ -160,22 +161,6 @@ export interface WorkerResponse {
 
 let cancelled = false;
 
-type SurfaceSampleWorkerResponse = {
-  streamId: number;
-  positions: Float32Array;
-  normals: Float32Array;
-};
-
-type ShapeSampleWorkerMessage = {
-  mode: 'shape';
-  shape: SampleShape;
-  params: ShapeSampleParams;
-  targetCount: number;
-  minDistance: number;
-  streamSeed: number;
-  streamId: number;
-};
-
 async function generatePoissonSamplesParallel(
   shape: SampleShape,
   params: ShapeSampleParams,
@@ -185,61 +170,26 @@ async function generatePoissonSamplesParallel(
   maxWorkers = Math.max(1, Math.min(4, (self.navigator?.hardwareConcurrency ?? 2) - 1))
 ): Promise<SurfaceHexSample[]> {
   const jobs = buildSurfaceSampleJobs(generationSeed, shape, targetCount);
-  const results: SurfaceHexSample[][] = Array.from({ length: jobs.length }, () => []);
-  let nextJob = 0;
-
-  const runJob = async () => {
-    while (nextJob < jobs.length) {
-      const job = jobs[nextJob++];
-      if (maxWorkers <= 1) {
-        results[job.streamId] = generateShapeSurfaceSamples(
-          shape,
-          params,
-          job.targetCount,
-          minDistance,
-          job.streamSeed,
-        );
-        continue;
-      }
-
-      const worker = new Worker(new URL('./surface-sample-worker.ts', import.meta.url), { type: 'module' });
-      const response = await new Promise<SurfaceSampleWorkerResponse>((resolve, reject) => {
-        worker.onmessage = (event: MessageEvent<SurfaceSampleWorkerResponse>) => resolve(event.data);
-        worker.onerror = () => reject(new Error('Surface sampling worker failed'));
-        worker.onmessageerror = () => reject(new Error('Surface sampling worker returned an unreadable response'));
-        const payload: ShapeSampleWorkerMessage = {
-          mode: 'shape',
-          shape,
-          params,
-          targetCount: job.targetCount,
-          minDistance,
-          streamSeed: job.streamSeed,
-          streamId: job.streamId,
-        };
-        worker.postMessage(payload);
-      }).finally(() => worker.terminate());
-      if (
-        response.streamId !== job.streamId
-        || !(response.positions instanceof Float32Array)
-        || !(response.normals instanceof Float32Array)
-        || response.positions.length !== response.normals.length
-        || response.positions.length % 3 !== 0
-      ) {
-        throw new Error('Surface sampling worker returned a malformed response');
-      }
-      const samples: SurfaceHexSample[] = [];
-      for (let j = 0; j < response.positions.length; j += 3) {
-        samples.push({
-          pos: [response.positions[j], response.positions[j + 1], response.positions[j + 2]],
-          normal: normalize([response.normals[j], response.normals[j + 1], response.normals[j + 2]]),
-        });
-      }
-      results[job.streamId] = samples;
-    }
-  };
-
-  const physicalWorkers = Math.min(Math.max(1, maxWorkers), jobs.length);
-  await Promise.all(Array.from({ length: physicalWorkers }, () => runJob()));
+  // The pool stops scheduling after the first failed stream and terminates the
+  // helpers still running; on success results come back in stream order.
+  const results = await sampleSurfaceStreams({
+    shape,
+    params,
+    jobs,
+    minDistance,
+    maxWorkers,
+    sampleInline: (job) => generateShapeSurfaceSamples(
+      shape,
+      params,
+      job.targetCount,
+      minDistance,
+      job.streamSeed,
+    ),
+    createWorker: () => new Worker(
+      new URL('./surface-sample-worker.ts', import.meta.url),
+      { type: 'module' },
+    ) as unknown as SampleWorkerLike,
+  });
   return results.flat().slice(0, targetCount);
 }
 type SurfaceSamplerTarget = {

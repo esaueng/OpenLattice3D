@@ -177,6 +177,61 @@ describe('generation inputs and validation lifecycle', () => {
     expect(useStore.getState().validation).toBeNull();
   });
 
+  const lastLog = () => useStore.getState().logs.at(-1);
+
+  it.each([
+    ['onerror', (worker: FakeWorker) => worker.onerror?.({ message: 'crash' }), 'Validation worker failed'],
+    ['onmessageerror', (worker: FakeWorker) => worker.onmessageerror?.(), 'Validation worker returned an unreadable response'],
+    ['an error reply', (worker: FakeWorker) => worker.emit({ type: 'error', message: 'boom' }), 'Validation error: boom'],
+  ] as const)('clears validation progress when the worker fails via %s', (_name, fail, logged) => {
+    controls.startGeneration();
+    const worker = finishGeneration();
+    worker.emit({ type: 'progress', progress: 0.4 });
+    expect(useStore.getState().validationProgress).toBe(0.4);
+    fail(worker);
+    expect(useStore.getState().validationProgress).toBeNull();
+    expect(worker.terminated).toBe(true);
+    expect(lastLog()).toMatchObject({ message: logged, level: 'error' });
+    expect(useStore.getState().validation).toBeNull();
+    // The run is over: a late result from the dead worker is ignored.
+    worker.emit({ type: 'result', validation });
+    expect(useStore.getState().validation).toBeNull();
+  });
+
+  it.each([
+    ['a result without a verdict', { type: 'result' }],
+    ['a result with a partial verdict', { type: 'result', validation: { passed: true } }],
+    ['a result with a non-numeric deviation', {
+      type: 'result',
+      validation: { ...validation, outerDeviation: { passed: true, maxDeviation: 'none', tolerance: 0.2 } },
+    }],
+    ['out-of-range progress', { type: 'progress', progress: 7 }],
+    ['an unknown message type', { type: 'validation', validation }],
+    ['a non-object', 'result'],
+  ])('rejects %s from the validation worker without storing a verdict', (_name, data) => {
+    controls.startGeneration();
+    const worker = finishGeneration();
+    expect(useStore.getState().validationProgress).toBe(0);
+    worker.emit(data);
+    expect(useStore.getState().validation).toBeNull();
+    expect(useStore.getState().validationProgress).toBeNull();
+    expect(worker.terminated).toBe(true);
+    expect(lastLog()).toMatchObject({ message: 'Validation worker returned a malformed response', level: 'error' });
+  });
+
+  it('stores a not-measured deviation verdict as reported', () => {
+    controls.startGeneration();
+    const worker = finishGeneration();
+    const unmeasured: ValidationResult = {
+      ...validation,
+      passed: false,
+      outerDeviation: { passed: false, maxDeviation: 0, tolerance: 0.2, sampled: 0 },
+    };
+    worker.emit({ type: 'result', validation: unmeasured });
+    expect(useStore.getState().validation).toEqual(unmeasured);
+    expect(useStore.getState().validationProgress).toBeNull();
+  });
+
   it('rejects empty generation results and keeps the previous result', () => {
     useStore.getState().setResultMesh(mesh);
     useStore.getState().setValidation(validation);
