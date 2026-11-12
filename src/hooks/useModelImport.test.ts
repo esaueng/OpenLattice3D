@@ -9,6 +9,7 @@ import { exportBinarySTL } from '../geometry/stl-parser';
 import { createProjectFile } from '../utils/project-file';
 import { readModelFile, type IntakeRequest } from '../workers/model-intake';
 import { modelIntake } from './model-intake-client';
+import { usePendingReplacement } from './pending-model-replacement';
 import type { GenerationWorkerLike, WorkerErrorLike } from './generation-worker-controller';
 
 // Exercise actual file reads/parsers in Node while retaining worker lifecycle
@@ -178,5 +179,85 @@ describe('shared model intake ownership', () => {
     expect(useStore.getState().sampleShape).toBe('cube');
     expect(useStore.getState().importNotice).toEqual(notice);
     expect(useStore.getState().logs.some((entry) => entry.message.includes('older STL failure'))).toBe(false);
+  });
+});
+
+describe('confirm before replacing work', () => {
+  function stlFile(name: string, size = 10) {
+    const mesh = generateCubeMesh(size);
+    const stl = exportBinarySTL(mesh.positions, mesh.normals, mesh.triCount);
+    return { name, size: stl.byteLength, arrayBuffer: async () => stl };
+  }
+
+  it('loads a sample straight away when nothing would be lost', () => {
+    const intake = controls();
+    intake.loadSample('sphere');
+    intake.loadSample('cube');
+    expect(useStore.getState().sampleShape).toBe('cube');
+    expect(usePendingReplacement.getState().pending).toBeNull();
+  });
+
+  it('holds a sample load while a result exists, and loads it only on confirmation', () => {
+    const intake = controls();
+    intake.loadSample('sphere');
+    useStore.getState().setResultMesh(generateCubeMesh(10), null);
+    intake.loadSample('cube');
+    expect(useStore.getState().sampleShape).toBe('sphere');
+    expect(useStore.getState().resultMesh).not.toBeNull();
+    expect(usePendingReplacement.getState().pending).toMatchObject({ kind: 'sample', shape: 'cube' });
+    expect(useStore.getState().logs.at(-1)?.message).toContain('would discard the generated lattice');
+
+    intake.confirmReplacement();
+    expect(useStore.getState().sampleShape).toBe('cube');
+    expect(useStore.getState().resultMesh).toBeNull();
+    expect(usePendingReplacement.getState().pending).toBeNull();
+  });
+
+  it('keeps an imported STL with painted faces when the user cancels a new STL', async () => {
+    const intake = controls();
+    await change(intake, '.stl')(event(stlFile('first.stl')));
+    useStore.getState().markFaces([0, 1, 2], 'keep_out');
+    await change(intake, '.stl')(event(stlFile('second.stl', 20)));
+    expect(useStore.getState().meshFileName).toBe('first.stl');
+    expect(useStore.getState().keepOutTris.size).toBe(3);
+    expect(usePendingReplacement.getState().pending).toMatchObject({ kind: 'stl', fileName: 'second.stl' });
+
+    intake.cancelReplacement();
+    expect(usePendingReplacement.getState().pending).toBeNull();
+    expect(useStore.getState().meshFileName).toBe('first.stl');
+    expect(useStore.getState().keepOutTris.size).toBe(3);
+    // Undo history survives a cancelled replacement.
+    expect(useStore.getState().selectionUndo.length).toBeGreaterThan(0);
+  });
+
+  it('commits a held STL import with its notice once confirmed', async () => {
+    const intake = controls();
+    await change(intake, '.stl')(event(stlFile('first.stl')));
+    useStore.getState().markFaces([0], 'keep_in');
+    await intake.importFile(stlFile('second.stl', 20) as unknown as File);
+    intake.confirmReplacement();
+    expect(useStore.getState().meshFileName).toBe('second.stl');
+    expect(useStore.getState().keepInTris.size).toBe(0);
+    expect(useStore.getState().importNotice).not.toBeNull();
+  });
+
+  it('drops a held replacement once the model changes another way', () => {
+    const intake = controls();
+    intake.loadSample('sphere');
+    useStore.getState().setResultMesh(generateCubeMesh(10), null);
+    intake.loadSample('torus');
+    expect(usePendingReplacement.getState().pending).not.toBeNull();
+    useStore.getState().resetProject();
+    expect(usePendingReplacement.getState().pending).toBeNull();
+    intake.confirmReplacement();
+    expect(useStore.getState().sampleShape).toBeNull();
+  });
+
+  it('explains an unsupported dropped file and keeps the model', async () => {
+    const intake = controls();
+    intake.loadSample('cube');
+    await intake.importFile({ name: 'part.obj', size: 10 } as File);
+    expect(useStore.getState().sampleShape).toBe('cube');
+    expect(useStore.getState().importNotice).toMatchObject({ level: 'error', detail: 'The previous model is still loaded.' });
   });
 });

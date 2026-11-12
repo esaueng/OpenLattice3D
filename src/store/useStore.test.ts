@@ -235,6 +235,22 @@ describe('selection history', () => {
     useStore.getState().undoSelection();
     expect(useStore.getState().keepInTris.size).toBe(0);
   });
+
+  it('marks faces in bulk as one undo step, exclusive across regions, ignoring bad indices', () => {
+    const mesh = generateCubeMesh(10);
+    useStore.getState().setOriginalMesh(mesh, analyzeMesh(mesh), 'cube.stl');
+    useStore.getState().markFaces([0, 1, 2], 'keep_in');
+    useStore.getState().markFaces([2, 3, -1, 99, 1.5], 'keep_out');
+    expect(Array.from(useStore.getState().keepInTris)).toEqual([0, 1]);
+    expect(Array.from(useStore.getState().keepOutTris)).toEqual([2, 3]);
+    expect(useStore.getState().selectionUndo).toHaveLength(2);
+    // Marking what is already marked is not a new undo step.
+    useStore.getState().markFaces([2, 3], 'keep_out');
+    expect(useStore.getState().selectionUndo).toHaveLength(2);
+    useStore.getState().undoSelection();
+    expect(Array.from(useStore.getState().keepInTris)).toEqual([0, 1, 2]);
+    expect(useStore.getState().keepOutTris.size).toBe(0);
+  });
 });
 
 describe('project restoration', () => {

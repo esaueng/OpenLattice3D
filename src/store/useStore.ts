@@ -513,6 +513,8 @@ interface AppState {
   toggleKeepOut: (triIdx: number) => void;
   toggleKeepIn: (triIdx: number) => void;
   selectAllKeepOut: () => void;
+  /** Add faces to one region as a single undoable step (keyboard bulk selection). */
+  markFaces: (triIndices: readonly number[], region: 'keep_out' | 'keep_in') => void;
   clearSelection: () => void;
   undoSelection: () => void;
   redoSelection: () => void;
@@ -856,6 +858,23 @@ export const useStore = create<AppState>((set, get) => ({
     const all = new Set<number>();
     for (let i = 0; i < s.originalMesh.triCount; i++) all.add(i);
     return { keepOutTris: all, keepInTris: new Set<number>(), ...pushSelectionHistory(s) };
+  }),
+
+  markFaces: (triIndices, region) => set((s) => {
+    const triCount = s.originalMesh?.triCount ?? 0;
+    const target = new Set(region === 'keep_out' ? s.keepOutTris : s.keepInTris);
+    const other = new Set(region === 'keep_out' ? s.keepInTris : s.keepOutTris);
+    let changed = false;
+    for (const triIdx of triIndices) {
+      if (!Number.isInteger(triIdx) || triIdx < 0 || triIdx >= triCount) continue;
+      if (!target.has(triIdx)) { target.add(triIdx); changed = true; }
+      if (other.delete(triIdx)) changed = true;
+    }
+    if (!changed) return {};
+    const selection = region === 'keep_out'
+      ? { keepOutTris: target, keepInTris: other }
+      : { keepOutTris: other, keepInTris: target };
+    return { ...selection, ...pushSelectionHistory(s) };
   }),
 
   clearSelection: () => set((s) => ({

@@ -4,6 +4,7 @@ import { useModelImport } from '../../hooks/useModelImport';
 import { describeMeshCondition, formatDimensions, formatVolume, modelExtents } from '../../utils/model-summary';
 import { PanelSection, StepPanel } from '../PanelChrome';
 import { FolderOpenIcon, UploadIcon } from '../icons';
+import { ConfirmButton } from '../ConfirmButton';
 import type { WorkflowInputs } from '../workflow';
 
 export function ModelStep({ inputs }: { inputs: WorkflowInputs }) {
@@ -22,7 +23,7 @@ export function ModelStep({ inputs }: { inputs: WorkflowInputs }) {
           <button
             type="button"
             className={`btn ${hasModel ? '' : 'btn-primary'}`}
-            title="Upload an STL mesh to generate a lattice from."
+            aria-describedby="model-import-hint"
             onClick={intake.pickStl}
           >
             <UploadIcon size={15} />
@@ -31,13 +32,17 @@ export function ModelStep({ inputs }: { inputs: WorkflowInputs }) {
           <button
             type="button"
             className="btn"
-            title="Open a saved project, or apply a parameter-only JSON file."
+            aria-describedby="model-import-hint"
             onClick={intake.pickProject}
           >
             <FolderOpenIcon size={15} />
             Open project
           </button>
         </div>
+        <p className="field-hint" id="model-import-hint">
+          STL in millimetres, or a saved project (.json). You can also drop a file onto the page;
+          it is read on this device, never uploaded.
+        </p>
 
         {notice && (
           <div className={`import-notice level-${notice.level}`} role={notice.level === 'error' ? 'alert' : 'status'}>
@@ -88,17 +93,12 @@ export function ModelStep({ inputs }: { inputs: WorkflowInputs }) {
         <PanelSection
           title="This part"
           aside={(
-            <button
-              type="button"
-              className={`text-button text-button-danger${intake.clearAllArmed ? ' armed' : ''}`}
-              title={intake.clearAllArmed
-                ? 'Confirm reset of the project, parameters, and generated results.'
-                : 'Reset the project, parameters, and generated results.'}
-              aria-live="polite"
-              onClick={intake.reset}
-            >
-              {intake.clearAllArmed ? 'Confirm start over' : 'Start over'}
-            </button>
+            <ConfirmButton
+              action="Start over"
+              className="text-button text-button-danger"
+              title="Reset the project, parameters, and generated results."
+              onConfirm={intake.startOver}
+            />
           )}
         >
           <dl className="facts">
