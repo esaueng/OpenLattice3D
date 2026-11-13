@@ -1,4 +1,5 @@
 // Core data model for the lattice design project
+import { MAX_EXPORT_RESOLUTION_LEVEL } from '../geometry/generation-limits';
 
 export type ProcessPreset = 'SLS_MJF' | 'SLA_DLP' | 'FDM';
 
@@ -243,7 +244,7 @@ const PARAM_VALIDATORS: Record<keyof LatticeParams, ParamValidator> = {
   gradientStrength: isFiniteNumberIn(0, 1),
   keepInDepth: isFiniteNumberIn(0.01, 100),
   thinSectionFilter: isFiniteNumberIn(0, 10),
-  exportResolution: isFiniteNumberIn(1, 10),
+  exportResolution: isFiniteNumberIn(1, MAX_EXPORT_RESOLUTION_LEVEL),
   escapeHoles: isBoolean,
   escapeHoleDiameter: isFiniteNumberIn(0.1, 100),
   escapeHoleCount: isFiniteNumberIn(0, 100),

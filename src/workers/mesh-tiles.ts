@@ -16,7 +16,7 @@ import {
   escapeHolesSdf,
   shouldApplyEscapeHoles,
 } from '../geometry/escape-holes';
-import { assertGenerationOutputBudget, generationSampleCount } from '../geometry/generation-limits';
+import { assertGenerationGrid, assertGenerationOutputBudget, generationSampleCount } from '../geometry/generation-limits';
 import { buildCombinedSDF, type SdfFunction } from '../geometry/lattice';
 import {
   marchingCubesFromFieldWindow,
@@ -63,7 +63,7 @@ export interface MeshTileContext {
  * rebuilt (they are small distance-only BVHs built from the same triangles).
  */
 export function createMeshTileContext(init: MeshTileInit): MeshTileContext {
-  generationSampleCount(init.gridCells);
+  assertGenerationGrid(init.gridCells, 'cpu-tiled');
   const bvh = MeshBVH.fromSerialized(unpackSerializedMeshBVH(init.bvh));
   return {
     sdf: buildImportedMeshSdf(bvh, init.fieldParams, init.generationSeed, init.keepOutTris, init.keepInTris),
@@ -499,7 +499,7 @@ export function planMeshTiles(options: {
 }): MeshTilePlan {
   const { bvh, serialized, params, bounds, resolution, tileSize } = options;
   const cells: Vec3 = [resolution, resolution, resolution];
-  generationSampleCount(cells);
+  assertGenerationGrid(cells, 'cpu-tiled');
   const sparseSkipping = options.enableSparseSkipping && signIsReliableForSkipping(serialized);
   const outsideMargin = featureMargin(params);
   const insideMargin = outsideMargin + surfaceOnlyReach(params, options.hasKeepOut, options.hasKeepIn);
