@@ -30,6 +30,11 @@ export interface XmlHandlers {
 }
 
 const XML_NAMESPACE = 'http://www.w3.org/XML/1998/namespace';
+// Namespace scopes are copied when a declaration changes. Bound both axes:
+// deep extension markup retains all copies, while a wide parent makes even
+// shallow sibling declarations expensive. The implicit xml prefix counts.
+const MAX_XML_DEPTH = 128;
+const MAX_XML_NAMESPACES = 128;
 const utf8 = new TextDecoder('utf-8', { fatal: false });
 
 /** First attribute with this local name and namespace (undefined = unprefixed). */
@@ -165,6 +170,7 @@ export function scanXml(bytes: Uint8Array, handlers: XmlHandlers, label: string)
     }
 
     if (sawRoot && open.length === 0) fail('content after the root element');
+    if (open.length >= MAX_XML_DEPTH) fail(`XML element depth exceeds ${MAX_XML_DEPTH}`);
     const qualified = readName();
     const raw: [string, string][] = [];
     let selfClosing = false;
@@ -197,8 +203,12 @@ export function scanXml(bytes: Uint8Array, handlers: XmlHandlers, label: string)
     let scope = scopes[scopes.length - 1];
     for (const [name, value] of raw) {
       if (name === 'xmlns' || name.startsWith('xmlns:')) {
+        const prefix = name === 'xmlns' ? '' : name.slice(6);
+        if (!scope.has(prefix) && scope.size >= MAX_XML_NAMESPACES) {
+          fail(`XML namespace scope exceeds ${MAX_XML_NAMESPACES}`);
+        }
         if (scope === scopes[scopes.length - 1]) scope = new Map(scope);
-        scope.set(name === 'xmlns' ? '' : name.slice(6), value);
+        scope.set(prefix, value);
       }
     }
     const attributes: XmlAttribute[] = [];
