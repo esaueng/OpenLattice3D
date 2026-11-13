@@ -85,9 +85,9 @@ export function binaryStlCube(size = 20): Buffer {
 export const WORKFLOW_STEPS = ['Model', 'Regions', 'Lattice', 'Shell', 'Generate', 'Results'] as const
 export type WorkflowStage = 'Start' | (typeof WORKFLOW_STEPS)[number]
 
-/** Import the generated cube through the hidden STL picker (enables the Regions step). */
+/** Import the generated cube through the hidden model picker (enables the Regions step). */
 export async function importCube(page: Page, name = 'e2e-cube.stl'): Promise<void> {
-  await page.locator('input[type="file"][accept=".stl"]').first().setInputFiles({
+  await page.locator('input[type="file"][accept*=".stl"]').first().setInputFiles({
     name,
     mimeType: 'model/stl',
     buffer: binaryStlCube(),

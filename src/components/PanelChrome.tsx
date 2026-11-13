@@ -41,11 +41,13 @@ export function StepPanel({ step, inputs, heading, children, primaryAction }: St
           className="workflow-nav-back"
           disabled={!previous}
           title="Previous step (B)"
-          aria-label={previous ? `Back to ${previous.label}. Shortcut B` : 'Back. Shortcut B'}
+          aria-keyshortcuts="B"
           onClick={() => previous && setWorkflowStep(previous.id)}
         >
+          {/* The accessible name starts with the visible text (WCAG 2.5.3). */}
           <span>Back</span>
-          <kbd>B</kbd>
+          {previous && <span className="visually-hidden"> to {previous.label}</span>}
+          <kbd aria-hidden="true">B</kbd>
         </button>
         {primaryAction ?? (next ? (
           <button
@@ -53,11 +55,11 @@ export function StepPanel({ step, inputs, heading, children, primaryAction }: St
             className="btn btn-primary workflow-nav-next"
             disabled={!canGoNext}
             title="Next step (N)"
-            aria-label={`Continue to ${next.label}. Shortcut N`}
+            aria-keyshortcuts="N"
             onClick={() => canGoNext && setWorkflowStep(next.id)}
           >
             <span className="workflow-nav-label">Continue to {next.label.toLowerCase()}</span>
-            <kbd>N</kbd>
+            <kbd aria-hidden="true">N</kbd>
           </button>
         ) : <span />)}
       </footer>

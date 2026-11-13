@@ -18,7 +18,7 @@ async function expectCubeImported(page: Page) {
 
 test('imports a binary STL through the file input', async ({ page }) => {
   await openWorkspace(page)
-  // The hidden STL picker behind "Import STL"; set its files directly.
+  // The hidden model picker behind "Import model"; set its files directly.
   await importCube(page, FILE_NAME)
   await expectCubeImported(page)
 })
@@ -35,7 +35,7 @@ test('imports a binary STL dropped onto the page', async ({ page }) => {
     }
   }, { bytes, name: FILE_NAME })
   // The drop overlay is shown while files hover over the page.
-  await expect(page.getByText('Drop an STL to import it')).toBeVisible()
+  await expect(page.getByText('Drop an STL, 3MF or OBJ to import it')).toBeVisible()
 
   await page.evaluate(({ bytes, name }) => {
     const transfer = new DataTransfer()
@@ -44,6 +44,6 @@ test('imports a binary STL dropped onto the page', async ({ page }) => {
     target.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer }))
   }, { bytes, name: FILE_NAME })
 
-  await expect(page.getByText('Drop an STL to import it')).toBeHidden()
+  await expect(page.getByText('Drop an STL, 3MF or OBJ to import it')).toBeHidden()
   await expectCubeImported(page)
 })

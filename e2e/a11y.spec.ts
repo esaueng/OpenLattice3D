@@ -7,17 +7,8 @@ const BLOCKING_IMPACTS = new Set(['serious', 'critical'])
 /**
  * Known findings awaiting a fix in src/, matched by rule AND exact node target
  * so the rule still fails anywhere else. Remove an entry once it is fixed.
- *
- * label-content-name-mismatch (WCAG 2.5.3): the step footer buttons in
- * src/components/PanelChrome.tsx (`StepPanel`) render visible text "Back" +
- * <kbd>B</kbd> and "Continue to regions" + <kbd>N</kbd>, but their aria-label
- * ("Back to Model. Shortcut B", "Continue to Regions. Shortcut N") does not
- * contain that visible text.
  */
-const KNOWN_ISSUES: readonly { rule: string; target: string }[] = [
-  { rule: 'label-content-name-mismatch', target: '.workflow-nav-back' },
-  { rule: 'label-content-name-mismatch', target: '.workflow-nav-next' },
-]
+const KNOWN_ISSUES: readonly { rule: string; target: string }[] = []
 
 function isKnownIssue(rule: string, target: string): boolean {
   return KNOWN_ISSUES.some((known) => known.rule === rule && known.target === target)
