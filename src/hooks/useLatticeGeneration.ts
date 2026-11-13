@@ -253,6 +253,7 @@ export function useLatticeGeneration(): LatticeGenerationControls {
         const validationResp = parseValidationResponse(event.data);
         if (!validationResp) {
           failValidation('Validation worker returned a malformed response');
+          trackDiagnostic('error_worker');
           return;
         }
         const current = useStore.getState();
@@ -281,7 +282,13 @@ export function useLatticeGeneration(): LatticeGenerationControls {
       };
 
       useStore.getState().setValidationProgress(0);
-      validationWorker.postMessage(validationMsg, buildValidationTransferList(validationMsg));
+      try {
+        validationWorker.postMessage(validationMsg, buildValidationTransferList(validationMsg));
+      } catch (error) {
+        failValidation('Could not send data to the validation worker');
+        trackDiagnostic('error_worker');
+        trackFailure(null, error);
+      }
     };
 
     workerController.start(worker as unknown as GenerationWorkerLike, {

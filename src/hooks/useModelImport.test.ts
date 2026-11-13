@@ -78,7 +78,7 @@ afterEach(() => { modelIntake.dispose(); vi.unstubAllGlobals(); });
 
 describe('import analytics wiring', () => {
   beforeEach(() => vi.clearAllMocks());
-  it('records an import action for a model, a project and parameters', async () => {
+  it('records an import action for a model and parameters', async () => {
     const mesh = generateCubeMesh(10);
     const stl = exportBinarySTL(mesh.positions, mesh.normals, mesh.triCount);
     const intake = controls();
@@ -275,8 +275,11 @@ describe('confirm before replacing work', () => {
     const intake = controls();
     await change(intake, 'mesh')(event(stlFile('first.stl')));
     useStore.getState().markFaces([0], 'keep_in');
+    vi.mocked(trackFeature).mockClear();
     await intake.importFile(stlFile('second.stl', 20) as unknown as File);
+    expect(trackFeature).not.toHaveBeenCalled();
     intake.confirmReplacement();
+    expect(trackFeature).toHaveBeenCalledExactlyOnceWith('import');
     expect(useStore.getState().meshFileName).toBe('second.stl');
     expect(useStore.getState().keepInTris.size).toBe(0);
     expect(useStore.getState().importNotice).not.toBeNull();

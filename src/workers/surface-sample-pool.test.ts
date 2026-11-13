@@ -146,7 +146,7 @@ describe('sampleSurfaceStreams', () => {
     const [failing, sibling] = FakeSampleWorker.instances;
 
     failing.onerror?.({});
-    await expect(pending).rejects.toThrow('Surface sampling worker failed');
+    await expect(pending).rejects.toMatchObject({ message: 'Surface sampling worker failed', diagnostic: 'worker' });
     expect(FakeSampleWorker.instances).toHaveLength(2);
     expect(failing.terminated).toBe(true);
     expect(sibling.terminated).toBe(true);

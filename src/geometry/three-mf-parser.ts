@@ -2,10 +2,9 @@
 //
 // Supports the core spec's <object>/<mesh>/<components> and <build>/<item>
 // with 3x4 transforms, plus production-extension p:path references to model
-// parts elsewhere in the package (common in slicer-saved projects). Other
-// extensions (materials, beam lattices, slices) are ignored. The declared
-// model unit is converted to millimetres explicitly and reported to the
-// caller, so it can be logged; nothing is rescaled silently.
+// parts elsewhere in the package (common in slicer-saved projects).
+// Optional extension data such as materials and slices is ignored. Declared
+// units are converted to millimetres and reported to the caller for logging.
 import { alignNormalsToWinding } from './mesh-analysis';
 import { DEFAULT_IMPORT_LIMITS, formatByteCount, validateMeshPositions, type ImportLimits } from './mesh-limits';
 import type { TriangleMesh } from './stl-parser';
@@ -138,7 +137,7 @@ class ModelBudget {
   }
 }
 
-function parseModelPart(bytes: Uint8Array, path: string, budget: ModelBudget): ModelPart {
+function parseModelPart(bytes: Uint8Array, path: string, budget: ModelBudget, isRoot: boolean): ModelPart {
   const part: ModelPart = { path, unit: null, objects: new Map(), build: [] };
   let rootSeen = false;
   let object: ModelObject | null = null;
@@ -149,14 +148,23 @@ function parseModelPart(bytes: Uint8Array, path: string, budget: ModelBudget): M
     const objectId = xmlAttribute(element, 'objectid');
     if (!objectId) throw new Error(`3MF model is invalid: ${what} has no objectid`);
     const rawPath = xmlAttribute(element, 'path', THREE_MF_PRODUCTION_NAMESPACE);
+    if (rawPath && !isRoot) throw new Error(`3MF child model part ${path} cannot reference another model part`);
     return { objectId, path: rawPath ? normalizePartName(rawPath) : null, transform: parseTransform(xmlAttribute(element, 'transform')) };
   };
 
   scanXml(bytes, {
-    start(element) {
+    start(element, namespaces) {
       if (!rootSeen) {
         rootSeen = true;
         if (element.local !== 'model' || !core(element)) throw new Error(`3MF part ${path} is not a 3MF model (root element <${element.local}>)`);
+        const required = xmlAttribute(element, 'requiredextensions')?.trim();
+        if (required) {
+          for (const prefix of required.split(/\s+/)) {
+            if (namespaces.get(prefix) !== THREE_MF_PRODUCTION_NAMESPACE) {
+              throw new Error(`3MF part ${path} requires an unsupported extension ("${prefix.slice(0, 40)}")`);
+            }
+          }
+        }
         part.unit = xmlAttribute(element, 'unit') ?? null;
         return;
       }
@@ -199,7 +207,7 @@ function parseModelPart(bytes: Uint8Array, path: string, budget: ModelBudget): M
           inBuild = true;
           break;
         case 'item':
-          if (inBuild) part.build.push(reference(element, 'build <item>'));
+          if (inBuild && isRoot) part.build.push(reference(element, 'build <item>'));
           break;
       }
     },
@@ -278,7 +286,7 @@ export async function parse3MF(input: ArrayBuffer | Uint8Array, limits: ImportLi
   while (pending.length > 0) {
     const path = pending.pop()!;
     if (parts.has(path)) continue;
-    const part = parseModelPart(await extract(path), path, budget);
+    const part = parseModelPart(await extract(path), path, budget, path === rootPath);
     parts.set(path, part);
     const referenced = [...part.build, ...[...part.objects.values()].flatMap((object) => object.components)];
     for (const ref of referenced) if (ref.path && !parts.has(ref.path)) pending.push(ref.path);

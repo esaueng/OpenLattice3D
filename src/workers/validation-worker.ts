@@ -1,11 +1,11 @@
 // Runs expensive mesh validation after generation has already returned geometry.
 // The pipeline itself lives in validation-core.ts so it can be tested without a Worker.
+import { failureCause } from '../utils/failure-cause';
 import {
   validateGeneratedResult,
   type ValidationWorkerMessage,
   type ValidationWorkerResponse,
 } from './validation-core';
-import { failureCause } from '../utils/failure-cause';
 
 export type { ValidationWorkerMessage, ValidationWorkerResponse } from './validation-core';
 
@@ -26,7 +26,7 @@ self.onmessage = (event: MessageEvent<ValidationWorkerMessage>) => {
     const validation = validateGeneratedResult(msg, reportValidationProgress);
     postMessage({ type: 'result', validation } as ValidationWorkerResponse);
   } catch (err: unknown) {
-    const message = err instanceof Error && err.message ? err.message : 'Unknown validation error';
+    const message = err instanceof Error && err.message.trim() ? err.message : 'Unknown validation error';
     postMessage({ type: 'error', message, diagnostic: failureCause(err) } as ValidationWorkerResponse);
   }
 };

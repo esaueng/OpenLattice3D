@@ -1,12 +1,6 @@
 import { useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import {
-  trackExportLatency,
-  trackFailure,
-  trackFeature,
-  trackProjectSize,
-  trackUsage,
-} from '../analytics';
+import { trackExportLatency, trackFailure, trackFeature, trackProjectSize, trackUsage } from '../analytics';
 import { useStore } from '../store/useStore';
 import { useResultStaleness } from '../store/useResultStaleness';
 import { summarizeValidation } from '../utils/validation-summary';

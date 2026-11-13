@@ -333,6 +333,16 @@ describe('targeted-subset wiring', () => {
     FakeWorker.instances[0].emit({ type: 'progress', progress: 0.12, message: 'fallback', diagnostic: 'worker' });
     expect(trackFailureCause).toHaveBeenCalledWith('worker');
   });
+  it.each([['out_of_memory', 'out_of_memory'], ['private.stl', undefined]])(
+    'reports only allowlisted validation failure causes',
+    (diagnostic, expected) => {
+      controls.startGeneration();
+      const validator = finishGeneration();
+      validator.emit({ type: 'error', message: 'Validation failed', diagnostic });
+      expect(trackFailureCause).toHaveBeenCalledExactlyOnceWith(expected);
+      expect(useStore.getState().validationProgress).toBeNull();
+    },
+  );
   it('records a crashed validation worker', () => {
     controls.startGeneration();
     const validator = finishGeneration();

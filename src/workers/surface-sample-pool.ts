@@ -2,10 +2,10 @@
 //
 // Kept free of `self`/`Worker` globals so the scheduling, failure and response
 // handling can be unit-tested in Node with fake workers.
-import { workerFailure } from '../utils/failure-cause';
 import type { SurfaceHexSample } from '../geometry/lattice';
 import { normalize } from '../geometry/vec3';
 import type { SampleShape } from '../types/project';
+import { failureCause, workerFailure } from '../utils/failure-cause';
 import type { ShapeSampleWorkerMessage } from './surface-sample-worker';
 import type { ShapeSampleParams, SurfaceSampleJob } from './surface-sampling';
 
@@ -109,7 +109,12 @@ export function runSurfaceSampleWorkerJob(
   signal: AbortSignal,
 ): Promise<SurfaceHexSample[]> {
   if (signal.aborted) return Promise.reject(new Error('Surface sampling was stopped'));
-  const worker = createWorker();
+  let worker: SampleWorkerLike;
+  try {
+    worker = createWorker();
+  } catch (error) {
+    return Promise.reject(failureCause(error) ? error : workerFailure('Could not start surface sampling worker'));
+  }
   let onAbort: (() => void) | null = null;
   return new Promise<SurfaceHexSample[]>((resolve, reject) => {
     onAbort = () => reject(new Error('Surface sampling was stopped'));
@@ -123,7 +128,11 @@ export function runSurfaceSampleWorkerJob(
     };
     worker.onerror = () => reject(workerFailure('Surface sampling worker failed'));
     worker.onmessageerror = () => reject(workerFailure('Surface sampling worker returned an unreadable response'));
-    worker.postMessage(payload);
+    try {
+      worker.postMessage(payload);
+    } catch (error) {
+      reject(failureCause(error) ? error : workerFailure('Could not send data to the surface sampling worker'));
+    }
   }).finally(() => {
     if (onAbort) signal.removeEventListener('abort', onAbort);
     worker.onmessage = null;

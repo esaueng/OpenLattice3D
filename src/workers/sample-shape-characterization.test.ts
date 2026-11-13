@@ -6,6 +6,7 @@
 // a golden may only change together with an intentional, documented change to
 // generated output. Print fresh values with
 //   CAPTURE_SAMPLE_SHAPE_GOLDENS=1 npx vitest run <this file> --silent=false
+import { arch } from 'node:os';
 import { describe, expect, it } from 'vitest';
 import { buildShapeSdf } from '../backend/fixtures';
 import { buildSampleShapeLattice } from '../geometry/lattice';
@@ -233,6 +234,8 @@ function jobsHash(jobs: LatticeTileJob[]): string {
 }
 
 // Golden values captured from the pre-consolidation code (see file header).
+// V8's x64 and arm64 floating-point implementations give different low bits
+// in some gyroid field samples. Both sets were captured on the original code.
 const GOLDEN_FIELDS: Record<string, string> = {
   'sphere/gyroid-shell': 'cd78672d',
   'sphere/bcc-noShell': 'dfab840a',
@@ -254,6 +257,12 @@ const GOLDEN_FIELDS: Record<string, string> = {
   'capsule/bcc-noShell': 'c0ee38b2',
   'capsule/voronoi-surface': 'ed917977',
   'capsule/object': '56f61b5f',
+};
+const ARM64_GYROID_FIELDS: Record<string, string> = {
+  'sphere/gyroid-shell': 'd43c2467',
+  'cube/gyroid-shell': '9d4aab9d',
+  'cylinder/gyroid-shell': 'c340a5cb',
+  'capsule/gyroid-shell': '811e34a2',
 };
 const GOLDEN_BOUNDS: Record<string, string> = {
   'sphere/22/1.5': '49507d65',
@@ -301,7 +310,10 @@ describe('sample-shape characterization', () => {
       expect(validation).toBe(fixture);
       expect(generation).toBe(fixture);
       if (capture) captured.fields[key] = fixture;
-      else expect(fixture).toBe(GOLDEN_FIELDS[key]);
+      else {
+        const arm64Hash = arch() === 'arm64' ? ARM64_GYROID_FIELDS[key] : undefined;
+        expect(fixture).toBe(arm64Hash ?? GOLDEN_FIELDS[key]);
+      }
     });
 
     it('keeps the object field bit-identical', () => {

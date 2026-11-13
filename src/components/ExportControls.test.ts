@@ -175,6 +175,7 @@ describe('results footer export', () => {
     await vi.runAllTimersAsync();
     expect(download3MF).toHaveBeenCalledTimes(1);
     expect(vi.mocked(download3MF).mock.calls[0][1]).toMatch(/-lattice\.3mf$/);
+    expect(trackFeature).toHaveBeenCalledExactlyOnceWith('export');
   });
 
   it('carries the same "anyway" caution as the Export section when checks failed', () => {
