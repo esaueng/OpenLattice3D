@@ -127,6 +127,19 @@ function expectClose(actual: ArrayLike<number>, expected: ArrayLike<number>, tol
 }
 
 describe('3MF import round trip', () => {
+  it.each(['model', 'relationships'])('bounds ignored extension XML in the %s part', async (part) => {
+    const goodModel = model(`<resources>${cubeObject(1)}</resources><build><item objectid="1"/></build>`);
+    const deep = '<ignored>'.repeat(128) + '</ignored>'.repeat(128);
+    const wide = `<ignored ${Array.from({ length: 128 }, (_, i) => `xmlns:p${i}="urn:${i}"`).join(' ')}/>`;
+    for (const extension of [deep, wide]) {
+      const bytes = await zip([
+        { name: '_rels/.rels', data: part === 'relationships' ? RELS.replace('</Relationships>', `${extension}</Relationships>`) : RELS },
+        { name: '3D/3dmodel.model', data: part === 'model' ? goodModel.replace('</model>', `${extension}</model>`) : goodModel },
+      ]);
+      await expect(parse3MF(bytes)).rejects.toThrow(/XML (element depth|namespace scope) exceeds 128/);
+    }
+  });
+
   it('reads back the repo 3MF writer output with identical geometry', async () => {
     for (const mesh of [generateCubeMesh(30), generateSphereMesh(12.5, 24)]) {
       const parsed = await parse3MF(create3MF(mesh, 0x1234abcd));

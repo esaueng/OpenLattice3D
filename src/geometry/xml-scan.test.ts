@@ -12,6 +12,31 @@ function scan(xml: string | Uint8Array) {
 }
 
 describe('XML tag scanner', () => {
+  it('bounds element depth before visiting a deeply nested start or empty tag', () => {
+    expect(() => scan('<a>'.repeat(128) + '</a>'.repeat(128))).not.toThrow();
+    for (const last of ['<a></a>', '<a/>']) {
+      const start = () => scan('<a>'.repeat(128) + last + '</a>'.repeat(128));
+      expect(start).toThrow(/XML element depth exceeds 128/);
+    }
+  });
+
+  it('bounds in-scope namespaces even in a shallow document', () => {
+    const declarations = Array.from({ length: 128 }, (_, i) => `xmlns:p${i}="urn:${i}"`).join(' ');
+    expect(() => scan(`<a ${declarations}/>`)).toThrow(/XML namespace scope exceeds 128/);
+  });
+
+  it('allows namespace rebinding at the limit and restores the parent scope', () => {
+    // The implicit xml prefix occupies one of the 128 scope entries.
+    const declarations = Array.from({ length: 127 }, (_, i) => `xmlns:p${i}="urn:${i}"`).join(' ');
+    const { starts } = scan(`<a ${declarations}><p0:b xmlns:p0="urn:shadow"/><p0:b/></a>`);
+    expect(starts.map((element) => element.ns)).toEqual([undefined, 'urn:shadow', 'urn:0']);
+  });
+
+  it('does not accumulate namespaces from closed siblings', () => {
+    const siblings = Array.from({ length: 256 }, (_, i) => `<b xmlns:p${i}="urn:${i}"/>`).join('');
+    expect(scan(`<a>${siblings}</a>`).starts).toHaveLength(257);
+  });
+
   it('resolves namespaces per scope and decodes attribute entities and UTF-8', () => {
     const { starts, ends } = scan('﻿<?xml version="1.0"?><!-- c --><a xmlns="urn:a" xmlns:p="urn:p" p:path="/x&amp;y" t=\'&lt;&#65;&#x42;\'>'
       + '<p:b k="ü"/><c xmlns="urn:c"><![CDATA[<d/>]]><d/></c><d/></a>');

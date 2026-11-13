@@ -33,6 +33,9 @@ export const MAX_PROJECT_FILE_BYTES = 256 * 1024 * 1024;
 // - Components can instance one object many times, so the expanded instance
 //   count is capped separately from triangles (which are counted after
 //   expansion, before the output mesh is allocated).
+// - All extracted XML, including ignored extensions and relationships, is
+//   limited by xml-scan to 128 element levels and 128 in-scope namespaces.
+//   These structural bounds apply before namespace scopes are copied.
 // - OBJ is text at roughly 2-3x the bytes of binary STL per triangle, so it
 //   gets the project budget rather than the STL one.
 export const MAX_MESH_VERTICES = 3 * MAX_MESH_TRIANGLES;
