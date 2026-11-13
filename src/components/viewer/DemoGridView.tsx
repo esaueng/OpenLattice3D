@@ -7,6 +7,8 @@ import type { MarchingCubesResult } from '../../geometry/marching-cubes';
 import type { ClipPlaneState } from '../../store/useStore';
 import type { LatticeParams, LatticeType, SampleShape } from '../../types/project';
 import type { WorkerMessage, WorkerResponse } from '../../workers/lattice-worker';
+import { trackDiagnostic, trackFailureCause, watchContextLoss } from '../../analytics';
+import { parseFailureCause } from '../../utils/failure-cause';
 import {
   CrossSectionView,
   generateSampleMesh,
@@ -83,7 +85,11 @@ function DemoTileViewer({ tile, viewMode, clipPlane, placeholder, selectedLattic
       onKeyDown={handleKeyDown}
     >
       <div className="demo-window-label">{tile.label}</div>
-      <Canvas camera={{ fov: 58, near: 0.1, far: 10000, position: [22, -22, 16], up: [0, 0, 1] }} gl={{ localClippingEnabled: true }}>
+      <Canvas
+        camera={{ fov: 58, near: 0.1, far: 10000, position: [22, -22, 16], up: [0, 0, 1] }}
+        gl={{ localClippingEnabled: true }}
+        onCreated={(state) => { watchContextLoss(state.gl.domElement); }}
+      >
         <ambientLight intensity={0.5} />
         <directionalLight position={[40, 40, 40]} intensity={0.8} />
         {showPlaceholder ? (
@@ -234,6 +240,7 @@ export function DemoGridView({ params, demoParamsByType, generationSeed, runId, 
         setTiles((current) => current.map((tile) => tile.type === type
           ? { ...tile, status: 'error', error: response.message }
           : tile));
+        trackFailureCause(parseFailureCause(response.diagnostic));
         finish();
       }
     };
@@ -242,6 +249,7 @@ export function DemoGridView({ params, demoParamsByType, generationSeed, runId, 
         setTiles((current) => current.map((tile) => tile.type === type
           ? { ...tile, status: 'error', error: 'Worker failed' }
           : tile));
+        trackDiagnostic('error_worker');
       }
       finish();
     };

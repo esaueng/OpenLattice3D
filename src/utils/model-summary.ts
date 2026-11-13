@@ -51,6 +51,18 @@ export function cellsAcrossShortestSide(size: [number, number, number], cellSize
 }
 
 /**
+ * Unit cells spanning the model's bounding box at a cell size: whole cells per
+ * axis, at least one each. An upper-bound estimate of the lattice's cell count
+ * (the shell, keep-in regions and the part's own shape are not subtracted), used
+ * only to pick a coarse size range. Null when the inputs cannot give a count.
+ */
+export function latticeCellCount(size: readonly [number, number, number] | null, cellSize: number): number | null {
+  if (!size || !(cellSize > 0) || !Number.isFinite(cellSize)) return null;
+  if (size.some((extent) => !Number.isFinite(extent) || extent < 0)) return null;
+  return size.reduce((cells, extent) => cells * Math.max(1, Math.ceil(extent / cellSize - 1e-9)), 1);
+}
+
+/**
  * Brush radius for a first stroke: about 4% of the bounding-box diagonal,
  * never below half a millimetre, rounded to a tenth.
  */

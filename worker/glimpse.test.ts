@@ -11,12 +11,33 @@ const request = (body: unknown = value, headers: Record<string, string> = {}) =>
 beforeEach(() => { vi.clearAllMocks(); record.mockResolvedValue(undefined); limit.mockResolvedValue({ success: true }); });
 
 describe('Glimpse relay', () => {
-  it('accepts only six fixed usage events and coarse buckets', () => {
+  it('accepts only the original usage events and coarse buckets', () => {
     for (const key of ['email', 'filename', 'geometry', 'url', 'app', 'level', 'count', 'timestamp', 'consent']) {
       expect(parseUsage({ ...value, [key]: 'private' })).toBeNull();
     }
     for (const invalid of [null, [], {}, { ...value, event: 'api_request' }, { ...value, event: 'solver_completed' }, { ...value, bucket: 'private.stl' }]) expect(parseUsage(invalid)).toBeNull();
     expect(parseUsage({ event: 'operation_latency', bucket: '100ms_1s' })).toEqual({ level: 'optional', event: 'operation_latency', bucket: '100ms_1s' });
+  });
+  it('accepts exactly the targeted subset (Glimpse LATTICE_EXPANDED) and nothing else from v2', () => {
+    for (const code of ['error_runtime', 'error_import', 'error_export', 'error_storage', 'error_render', 'error_unresponsive', 'error_gpu_lost', 'error_out_of_memory', 'error_worker']) {
+      expect(parseUsage({ event: code, bucket: 'none' })).toEqual({ level: 'optional', event: code, bucket: 'none' });
+      expect(parseUsage({ event: code, bucket: 'lt_1k' })).toBeNull();
+    }
+    for (const [event, bucket] of [['export_latency', 'gte_60s'], ['project_size', 'gte_100mib'], ['feature_category', 'measure'], ['lattice_cells', 'gte_100k'], ['lattice_cells', 'lt_1k']]) {
+      expect(parseUsage({ event, bucket })).toEqual({ level: 'optional', event, bucket });
+    }
+    for (const [event, bucket] of [
+      ['error_mesh', 'none'], ['error_solver', 'none'], ['error_cloud_save', 'none'], ['error_cloud_load', 'none'], ['error_feature', 'none'],
+      ['feature_category', 'edit'], ['feature_category', 'mesh'], ['feature_category', 'solve'], ['save_latency', 'lt_100ms'],
+      ['mesh_latency', 'lt_100ms'], ['solver_backend', 'cpu'], ['part_count', '1'], ['transfer_upload', 'lt_1mib'],
+      ['cloud_status', 'network'], ['feature_operation', 'transaction'], ['lattice_cells', '12345'], ['project_size', '5000000'],
+    ]) expect(parseUsage({ event, bucket })).toBeNull();
+  });
+  it('drops a subset event an older Glimpse rejects, but still reports v1 outages', async () => {
+    record.mockRejectedValue(new Error('Invalid metric'));
+    expect((await handleGlimpseUsage(request({ event: 'lattice_cells', bucket: '1k_10k' }), enabled)).status).toBe(204);
+    expect(record).toHaveBeenCalledExactlyOnceWith({ level: 'optional', event: 'lattice_cells', bucket: '1k_10k' });
+    expect((await handleGlimpseUsage(request(), enabled)).status).toBe(503);
   });
   it('constructs a minimal RPC and excludes telemetry, health and assets from basic counts', async () => {
     const waitUntil = vi.fn();

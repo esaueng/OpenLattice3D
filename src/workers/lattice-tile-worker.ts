@@ -9,6 +9,7 @@ import {
 } from '../geometry/lattice';
 import type { SampleShape } from '../types/project';
 import type { LatticeTileJob, LatticeTileResponse } from './tile-types';
+import { failureCause } from '../utils/failure-cause';
 
 type SdfFunction = (x: number, y: number, z: number) => number;
 type WorkerPostMessage = (message: unknown, transfer: Transferable[]) => void;
@@ -62,6 +63,6 @@ self.onmessage = (event: MessageEvent<LatticeTileJob>) => {
     postWorkerMessage(response, [positions.buffer, result.normals.buffer]);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown tile worker error';
-    postMessage({ type: 'error', tileId: msg.tileId, message } as LatticeTileResponse);
+    postMessage({ type: 'error', tileId: msg.tileId, message, diagnostic: failureCause(err) } as LatticeTileResponse);
   }
 };

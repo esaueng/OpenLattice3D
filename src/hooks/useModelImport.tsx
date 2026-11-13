@@ -8,6 +8,7 @@ import { modelIntake } from './model-intake-client';
 import { SAMPLE_SHAPE_INFO } from '../store/useStore';
 import { formatGenerationSeed } from '../geometry/deterministic-random';
 import { formatDimensions, modelExtents } from '../utils/model-summary';
+import { trackFailure, trackFeature } from '../analytics';
 
 function errorMessage(err: unknown): string {
   if (err instanceof Error) return err.message.replace(/^Error:\s*/, '');
@@ -52,8 +53,10 @@ export function useModelImport() {
       store.setOriginalMesh(result.mesh, result.info, file.name);
       if (!result.info.isManifold || !result.info.isWatertight) store.setMeshRepaired(result.info.repaired);
       store.setImportNotice(result.notice);
+      trackFeature('import');
     } catch (err) {
       if (useStore.getState().modelIntakeEpoch !== epoch) return;
+      trackFailure('error_import', err);
       const message = errorMessage(err);
       const current = useStore.getState();
       store.addLog(`Import failed: ${message}`, 'error');
@@ -96,6 +99,7 @@ export function useModelImport() {
           message: `Opened project ${file.name}. Generate to rebuild the lattice.`,
           detail,
         });
+        trackFeature('import');
       } else {
         if (parsed.accepted.length === 0) {
           store.addLog('JSON import: no valid parameters found', 'error');
@@ -104,6 +108,7 @@ export function useModelImport() {
             message: `${file.name} contains no usable lattice parameters.`,
             detail,
           });
+          trackFailure('error_import');
           return;
         }
         store.importParams(parsed.params);
@@ -113,9 +118,11 @@ export function useModelImport() {
           message: `Applied ${parsed.accepted.length} parameter(s) from ${file.name}: ${parsed.accepted.join(', ')}.`,
           detail,
         });
+        trackFeature('import');
       }
     } catch (err) {
       if (useStore.getState().modelIntakeEpoch !== epoch) return;
+      trackFailure('error_import', err);
       const message = errorMessage(err);
       store.addLog(`JSON import failed: ${message}`, 'error');
       store.setImportNotice({ level: 'error', message: `Could not read ${file.name}: ${message}` });
