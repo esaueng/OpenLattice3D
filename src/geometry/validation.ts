@@ -1,7 +1,7 @@
 // Validation: check deviation, thickness, manifoldness, disconnected pieces
 import type { Vec3 } from './vec3';
 import type { MeshBVH } from './bvh';
-import type { LatticeParams, ValidationResult } from '../types/project';
+import type { LatticeParams, ValidationResult, ValidationWarning, ValidationWarningCode } from '../types/project';
 import type { MarchingCubesResult } from './marching-cubes';
 import { buildEdgeTopology, countEdgeDefects, findConnectedComponents } from './mesh-topology';
 import { sphereSdf } from './sample-shapes';
@@ -75,6 +75,56 @@ export function checkTopology(result: MarchingCubesResult): {
 export const OUTER_DEVIATION_UNMEASURED_WARNING = 'Outer deviation could not be measured';
 /** Shown when there is neither a reference mesh nor an analytic shape to measure against. */
 export const NO_DEVIATION_REFERENCE_WARNING = 'No reference mesh for deviation check';
+/** Shown when no thickness ray produced a measurement (`sampled: 0`). */
+export const THICKNESS_UNMEASURED_WARNING = 'Minimum thickness could not be measured';
+/** Shown for FDM with an open lattice exterior. */
+export const FDM_OPEN_LATTICE_WARNING = 'FDM with open lattice exterior can be difficult to print';
+
+export function validationWarning(code: ValidationWarningCode, message: string): ValidationWarning {
+  return { code, message };
+}
+
+/**
+ * Both warning fields of a ValidationResult from one coded list, so the
+ * plain-text `warnings` kept for compatibility always match `warningDetails`.
+ */
+export function warningFields(details: readonly ValidationWarning[]): Pick<ValidationResult, 'warnings' | 'warningDetails'> {
+  return {
+    warnings: details.map((warning) => warning.message),
+    warningDetails: details.map((warning) => ({ ...warning })),
+  };
+}
+
+/** Append one coded warning to a result, keeping both warning fields in step. */
+export function appendValidationWarning(validation: ValidationResult, warning: ValidationWarning): void {
+  validation.warnings.push(warning.message);
+  if (validation.warningDetails) validation.warningDetails.push({ ...warning });
+}
+
+/** Warnings shared by both validation paths for checks that produced no samples. */
+export function unmeasuredWarnings(
+  outerDeviation: { sampled: number },
+  minThickness: { sampled: number },
+  hasDeviationReference: boolean,
+): ValidationWarning[] {
+  const warnings: ValidationWarning[] = [];
+  if (!hasDeviationReference) {
+    warnings.push(validationWarning('no-deviation-reference', NO_DEVIATION_REFERENCE_WARNING));
+  } else if (outerDeviation.sampled === 0) {
+    warnings.push(validationWarning('deviation-unmeasured', OUTER_DEVIATION_UNMEASURED_WARNING));
+  }
+  if (minThickness.sampled === 0) {
+    warnings.push(validationWarning('thickness-unmeasured', THICKNESS_UNMEASURED_WARNING));
+  }
+  return warnings;
+}
+
+/** Process-specific warnings, shared by both validation paths. */
+export function processWarnings(params: LatticeParams): ValidationWarning[] {
+  return params.processPreset === 'FDM' && params.variant === 'implicit_conformal'
+    ? [validationWarning('fdm-open-lattice', FDM_OPEN_LATTICE_WARNING)]
+    : [];
+}
 
 /**
  * Outer deviation that was not measured. It fails and carries `sampled: 0`,
@@ -273,18 +323,22 @@ export function checkMinThickness(
 export function topologyWarnings(
   disconnected: { fragmentCount: number; voidCount: number; sliverCount: number },
   params: LatticeParams,
-): string[] {
-  const warnings: string[] = [];
+): ValidationWarning[] {
+  const warnings: ValidationWarning[] = [];
   if (disconnected.fragmentCount > 1) {
-    warnings.push(`${disconnected.fragmentCount} separate solid bodies detected`);
+    warnings.push(validationWarning('multiple-bodies', `${disconnected.fragmentCount} separate solid bodies detected`));
   }
   if (disconnected.voidCount > 0 && !params.escapeHoles) {
-    warnings.push(
+    warnings.push(validationWarning(
+      'trapped-voids',
       `${disconnected.voidCount} enclosed void network${disconnected.voidCount === 1 ? '' : 's'} and no escape holes: trapped powder/resin likely`,
-    );
+    ));
   }
   if (disconnected.sliverCount > 0) {
-    warnings.push(`${disconnected.sliverCount} zero-volume sliver${disconnected.sliverCount === 1 ? '' : 's'} (negligible, but present in the export)`);
+    warnings.push(validationWarning(
+      'zero-volume-slivers',
+      `${disconnected.sliverCount} zero-volume sliver${disconnected.sliverCount === 1 ? '' : 's'} (negligible, but present in the export)`,
+    ));
   }
   return warnings;
 }
@@ -297,8 +351,6 @@ export function runValidation(
   originalBvh: MeshBVH | null,
   sphereRadius: number | null,
 ): ValidationResult {
-  const warnings: string[] = [];
-
   // Outer deviation. Without a reference there is nothing to measure against:
   // report it as unmeasured (sampled 0, failing), never as a 0 mm pass.
   let outerDeviation: OuterDeviationMeasurement;
@@ -309,20 +361,16 @@ export function runValidation(
   } else {
     outerDeviation = unmeasuredOuterDeviation();
   }
-  if (sphereRadius === null && !originalBvh) warnings.push(NO_DEVIATION_REFERENCE_WARNING);
-  else if (outerDeviation.sampled === 0) warnings.push(OUTER_DEVIATION_UNMEASURED_WARNING);
 
   // Min thickness
   const minThickness = checkMinThickness(sdf, result, params.minFeatureSize);
-  if (minThickness.sampled === 0) warnings.push('Minimum thickness could not be measured');
 
   const { manifold, disconnected } = checkTopology(result);
-  warnings.push(...topologyWarnings(disconnected, params));
-
-  // Process-specific warnings
-  if (params.processPreset === 'FDM' && params.variant === 'implicit_conformal') {
-    warnings.push('FDM with open lattice exterior can be difficult to print');
-  }
+  const warnings = [
+    ...unmeasuredWarnings(outerDeviation, minThickness, sphereRadius !== null || Boolean(originalBvh)),
+    ...topologyWarnings(disconnected, params),
+    ...processWarnings(params),
+  ];
 
   const passed = outerDeviation.passed && minThickness.passed && manifold.passed && disconnected.passed;
 
@@ -332,6 +380,6 @@ export function runValidation(
     minThickness: { ...minThickness, required: params.minFeatureSize },
     manifold,
     disconnected,
-    warnings,
+    ...warningFields(warnings),
   };
 }

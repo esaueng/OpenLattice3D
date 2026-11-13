@@ -94,7 +94,26 @@ describe('procedural validation measures outer deviation for every sample shape'
     const validation = validateGeneratedResult(message('torus', empty));
     expect(validation.outerDeviation).toMatchObject({ passed: false, sampled: 0 });
     expect(validation.warnings).toContain('Outer deviation could not be measured');
+    expect(validation.warningDetails).toContainEqual({ code: 'deviation-unmeasured', message: 'Outer deviation could not be measured' });
+    expect(validation.warningDetails).toContainEqual({ code: 'thickness-unmeasured', message: 'Minimum thickness could not be measured' });
+    expect(validation.warnings).toEqual(validation.warningDetails?.map((warning) => warning.message));
     expect(validation.passed).toBe(false);
+  });
+
+  it.each([
+    ['a sample shape', 'cube' as const, {}],
+    ['an imported mesh', null, {
+      meshPositions: generateCubeMesh(20).positions,
+      meshNormals: generateCubeMesh(20).normals,
+      meshTriCount: generateCubeMesh(20).triCount,
+    }],
+  ])('codes a skipped thin-section filter and the FDM warning for %s', (_name, shape, extra) => {
+    const skipped = 'Cannot remove features under 0.8mm at this grid: samples are 0.60mm apart.';
+    const fdm = { ...params, processPreset: 'FDM' as const, variant: 'implicit_conformal' as const };
+    const validation = validateGeneratedResult(message(shape, generated('cube'), { ...extra, params: fdm, thinFilterSkipped: skipped }));
+    expect(validation.warningDetails).toContainEqual({ code: 'thin-filter-skipped', message: skipped });
+    expect(validation.warningDetails).toContainEqual({ code: 'fdm-open-lattice', message: 'FDM with open lattice exterior can be difficult to print' });
+    expect(validation.warnings).toEqual(validation.warningDetails?.map((warning) => warning.message));
   });
 
   it('forwards thickness progress', () => {
@@ -128,6 +147,7 @@ describe('procedural validation measures outer deviation for every sample shape'
     expect(imported.outerDeviation).toEqual(procedural.outerDeviation);
     expect(imported.outerDeviation).toMatchObject({ passed: false, maxDeviation: 0, sampled: 0 });
     expect(imported.warnings).toContain('Outer deviation could not be measured');
+    expect(imported.warningDetails).toEqual(procedural.warningDetails);
     expect(imported.passed).toBe(false);
   });
 

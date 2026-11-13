@@ -4,6 +4,8 @@ import { modelExtents } from './model-summary';
 import {
   actionableWarningCount,
   checkSuggestion,
+  codedWarnings,
+  inferWarningCode,
   ESCAPE_HOLES_ACTION,
   resultNotes,
   suggestedResolution,
@@ -39,7 +41,7 @@ describe('result notes', () => {
     const v = validation({ disconnected: { passed: true, fragmentCount: 1, voidCount: 1, sliverCount: 0 }, warnings: [TRAPPED] });
     expect(actionableWarningCount(v)).toBe(1);
     expect(resultNotes(v, context())).toEqual([
-      { kind: 'trapped-voids', message: TRAPPED, actionable: true, action: ESCAPE_HOLES_ACTION },
+      { kind: 'trapped-voids', code: 'trapped-voids', message: TRAPPED, actionable: true, action: ESCAPE_HOLES_ACTION },
     ]);
     expect(ESCAPE_HOLES_ACTION).toMatchObject({ step: 'shell', controlId: 'escape-holes' });
     expect(ESCAPE_HOLES_ACTION.params).toBeUndefined();
@@ -67,6 +69,72 @@ describe('result notes', () => {
 
   it('treats unknown warnings as worth a look', () => {
     expect(actionableWarningCount(validation({ warnings: ['FDM with open lattice exterior can be difficult to print', 'Something new'] }))).toBe(2);
+  });
+});
+
+describe('warning classification by code', () => {
+  it('classifies by the validator code, not the wording', () => {
+    // Reworded text that the old matcher would misread either way.
+    const v = validation({
+      warnings: ['Powder cannot drain from 2 sealed pockets', 'Tiny trapped slivers, negligible'],
+      warningDetails: [
+        { code: 'trapped-voids', message: 'Powder cannot drain from 2 sealed pockets' },
+        { code: 'zero-volume-slivers', message: 'Tiny trapped slivers, negligible' },
+      ],
+    });
+    expect(actionableWarningCount(v)).toBe(1);
+    expect(resultNotes(v, context())).toEqual([
+      { kind: 'trapped-voids', code: 'trapped-voids', message: 'Powder cannot drain from 2 sealed pockets', actionable: true, action: ESCAPE_HOLES_ACTION },
+      { kind: 'sliver', code: 'zero-volume-slivers', message: 'Tiny trapped slivers, negligible', actionable: false, action: undefined },
+    ]);
+  });
+
+  it.each([
+    ['trapped-voids', 'trapped-voids', true],
+    ['thin-filter-skipped', 'thin-filter-skipped', true],
+    ['fdm-open-lattice', 'fdm-open-lattice', true],
+    ['zero-volume-slivers', 'sliver', false],
+    ['multiple-bodies', 'repeats-check', false],
+    ['deviation-unmeasured', 'repeats-check', false],
+    ['thickness-unmeasured', 'repeats-check', false],
+    ['no-deviation-reference', 'repeats-check', false],
+  ] as const)('maps %s to %s (actionable: %s)', (code, kind, actionable) => {
+    const v = validation({ warnings: ['text'], warningDetails: [{ code, message: 'text' }] });
+    expect(resultNotes(v)[0]).toMatchObject({ kind, code, actionable });
+    expect(actionableWarningCount(v)).toBe(actionable ? 1 : 0);
+  });
+
+  it('infers codes from the text of older results without warning details', () => {
+    const legacy = [
+      ['1 enclosed void network and no escape holes: trapped powder/resin likely', 'trapped-voids'],
+      ['Cannot remove features under 0.8mm at this grid: samples are 0.60mm apart.', 'thin-filter-skipped'],
+      ['FDM with open lattice exterior can be difficult to print', 'fdm-open-lattice'],
+      ['2 zero-volume slivers (negligible, but present in the export)', 'zero-volume-slivers'],
+      ['3 separate solid bodies detected', 'multiple-bodies'],
+      ['Outer deviation could not be measured', 'deviation-unmeasured'],
+      ['Minimum thickness could not be measured', 'thickness-unmeasured'],
+      ['No reference mesh for deviation check', 'no-deviation-reference'],
+    ] as const;
+    for (const [message, code] of legacy) expect(inferWarningCode(message)).toBe(code);
+    expect(inferWarningCode('Something new')).toBeUndefined();
+    const v = validation({ warnings: legacy.map(([message]) => message) });
+    expect(codedWarnings(v).map((warning) => warning.code)).toEqual(legacy.map(([, code]) => code));
+    expect(actionableWarningCount(v)).toBe(3);
+  });
+
+  it('falls back to the text when the details do not line up with the warnings', () => {
+    const v = validation({
+      warnings: [TRAPPED, 'Minimum thickness could not be measured'],
+      warningDetails: [{ code: 'zero-volume-slivers', message: TRAPPED }],
+    });
+    expect(codedWarnings(v).map((warning) => warning.code)).toEqual(['trapped-voids', 'thickness-unmeasured']);
+    expect(actionableWarningCount(v)).toBe(1);
+  });
+
+  it('keeps an unknown warning in an older result actionable with no code', () => {
+    const [note] = resultNotes(validation({ warnings: ['Something new'] }));
+    expect(note).toEqual({ kind: 'other', message: 'Something new', actionable: true, action: undefined });
+    expect(note).not.toHaveProperty('code');
   });
 });
 

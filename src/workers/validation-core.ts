@@ -10,11 +10,15 @@ import type { SurfaceHexSample } from '../geometry/lattice';
 import { sampleShapeObjectSdf, type ObjectSdf } from '../geometry/sample-shapes';
 import { checkAnalyticOuterDeviation } from '../geometry/shape-deviation';
 import {
+  appendValidationWarning,
   checkMinThickness,
   checkTopology,
-  OUTER_DEVIATION_UNMEASURED_WARNING,
+  processWarnings,
   runValidation,
   topologyWarnings,
+  unmeasuredWarnings,
+  validationWarning,
+  warningFields,
 } from '../geometry/validation';
 import type { LatticeParams, SampleShape, ValidationResult } from '../types/project';
 import type { Vec3 } from '../geometry/vec3';
@@ -91,15 +95,12 @@ export function runProceduralValidation(
   const outerDeviation = checkAnalyticOuterDeviation(result, objectSdf, msg.params.toleranceMm);
   const minThickness = checkMinThickness(sdf, result, msg.params.minFeatureSize, 200, onProgress);
   const { manifold, disconnected } = checkTopology(result);
-  const warnings: string[] = [];
-  if (outerDeviation.sampled === 0) warnings.push(OUTER_DEVIATION_UNMEASURED_WARNING);
-  if (minThickness.sampled === 0) warnings.push('Minimum thickness could not be measured');
-
-  warnings.push(...topologyWarnings(disconnected, msg.params));
-  if (msg.params.processPreset === 'FDM' && msg.params.variant === 'implicit_conformal') {
-    warnings.push('FDM with open lattice exterior can be difficult to print');
-  }
-  if (msg.thinFilterSkipped) warnings.push(msg.thinFilterSkipped);
+  const warnings = [
+    ...unmeasuredWarnings(outerDeviation, minThickness, true),
+    ...topologyWarnings(disconnected, msg.params),
+    ...processWarnings(msg.params),
+  ];
+  if (msg.thinFilterSkipped) warnings.push(validationWarning('thin-filter-skipped', msg.thinFilterSkipped));
 
   return {
     passed: outerDeviation.passed && minThickness.passed && manifold.passed && disconnected.passed,
@@ -107,7 +108,7 @@ export function runProceduralValidation(
     minThickness: { ...minThickness, required: msg.params.minFeatureSize },
     manifold,
     disconnected,
-    warnings,
+    ...warningFields(warnings),
   };
 }
 
@@ -162,6 +163,6 @@ export function validateGeneratedResult(
     bvh,
     null
   );
-  if (msg.thinFilterSkipped) validation.warnings.push(msg.thinFilterSkipped);
+  if (msg.thinFilterSkipped) appendValidationWarning(validation, validationWarning('thin-filter-skipped', msg.thinFilterSkipped));
   return validation;
 }
