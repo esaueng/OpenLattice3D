@@ -26,6 +26,7 @@ import { describeGenerationProgress } from './utils/generation-progress';
 import { compareChecksSummary, solverStatus as describeSolverStatus } from './utils/status-bar';
 import { useResultStaleness } from './store/useResultStaleness';
 import { trackUsage } from './analytics';
+import { CONFIRM_TIMEOUT_MS, confirmActionLabel, confirmHint } from './components/confirm';
 import './App.css';
 
 function App() {
@@ -461,7 +462,7 @@ const BottomLogDrawer = forwardRef<HTMLDivElement, BottomLogDrawerProps>(functio
 
   useEffect(() => {
     if (!clearPromptVisible) return undefined;
-    const timeoutId = window.setTimeout(() => setClearPromptVisible(false), 2200);
+    const timeoutId = window.setTimeout(() => setClearPromptVisible(false), CONFIRM_TIMEOUT_MS);
     return () => window.clearTimeout(timeoutId);
   }, [clearPromptVisible]);
 
@@ -576,10 +577,10 @@ const BottomLogDrawer = forwardRef<HTMLDivElement, BottomLogDrawerProps>(functio
               className="log-clear-button"
               disabled={!logs.length}
               aria-live="polite"
-              title={clearPromptVisible ? 'Activate again to clear run logs' : 'Clear run logs'}
+              title={clearPromptVisible ? confirmHint('Clear logs') : 'Clear run logs'}
               onClick={clearLogEntries}
             >
-              {clearPromptVisible ? 'Click again to clear' : 'Clear logs'}
+              {clearPromptVisible ? confirmActionLabel('Clear logs') : 'Clear logs'}
             </button>
           </div>
         </div>
