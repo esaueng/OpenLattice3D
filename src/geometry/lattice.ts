@@ -462,7 +462,7 @@ export function hexagonPrismSDF(x: number, y: number, z: number, cellSize: numbe
   return d - r;
 }
 
-export function trianglePrismSDF(x: number, y: number, z: number, cellSize: number, strutDiameter: number): number {
+export function trianglePrismSDF(x: number, y: number, _z: number, cellSize: number, strutDiameter: number): number {
   const r = strutDiameter / 2;
   const spacing = cellSize * SQRT3 / 2;
   const n0 = [0, 1];
