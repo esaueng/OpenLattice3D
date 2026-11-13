@@ -37,10 +37,26 @@ export function formatDimensions(size: [number, number, number]): string {
   return `${size.map((value) => value.toFixed(digits)).join(' × ')} mm`;
 }
 
+/** Volumes at or above this many mm³ read in cm³ (1 cm³ = 1000 mm³). */
+export const CM3_THRESHOLD_MM3 = 1000;
+
+function groupedFixed(value: number, digits: number): string {
+  return value.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+}
+
+/**
+ * The one volume formatter for every panel: cm³ from 1000 mm³ up, mm³ below,
+ * with thousands separators, split so a KPI can style the unit separately.
+ */
+export function volumeParts(volumeMm3: number): { value: string; unit: 'mm³' | 'cm³' } {
+  if (Math.abs(volumeMm3) >= CM3_THRESHOLD_MM3) return { value: groupedFixed(volumeMm3 / 1000, 2), unit: 'cm³' };
+  return { value: groupedFixed(volumeMm3, Math.abs(volumeMm3) >= 10 ? 1 : 2), unit: 'mm³' };
+}
+
 export function formatVolume(volumeMm3: number | null): string {
   if (volumeMm3 === null || !Number.isFinite(volumeMm3)) return 'unknown (mesh is open)';
-  if (volumeMm3 >= 1000) return `${(volumeMm3 / 1000).toFixed(2)} cm³`;
-  return `${volumeMm3.toFixed(volumeMm3 >= 10 ? 1 : 2)} mm³`;
+  const { value, unit } = volumeParts(volumeMm3);
+  return `${value} ${unit}`;
 }
 
 /** How many lattice cells fit across the shortest side of the model. */

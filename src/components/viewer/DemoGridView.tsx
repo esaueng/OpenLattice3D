@@ -17,6 +17,8 @@ import {
 } from './ViewerMeshViews';
 import { demoGridResolution, demoGridWorkerLimit } from './demo-grid-limits';
 import { useStore } from '../../store/useStore';
+import { meshVolumeMm3 } from '../../geometry/mesh-stats';
+import { formatFraction, relativeDensity, sourceSolidVolumeMm3 } from '../../utils/part-statistics';
 
 const DEMO_VIEW_TARGET_RADIUS = 8;
 const DEMO_TILE_ITEMS: Array<{ type: LatticeType; label: string }> = [
@@ -39,6 +41,8 @@ type DemoTileState = {
   label: string;
   status: 'pending' | 'running' | 'done' | 'error';
   result: MarchingCubesResult | null;
+  /** Lattice volume over solid volume, measured on the coarse preview mesh. */
+  relativeDensity?: number | null;
   error?: string;
 };
 
@@ -82,7 +86,14 @@ function DemoTileViewer({ tile, viewMode, clipPlane, placeholder, selectedLattic
       onClick={select}
       onKeyDown={handleKeyDown}
     >
-      <div className="demo-window-label">{tile.label}</div>
+      <div className="demo-window-label">
+        {tile.label}
+        {tile.status === 'done' && tile.relativeDensity != null && (
+          <span className="demo-window-density" aria-label={`about ${formatFraction(tile.relativeDensity, 0)} relative density`}>
+            {' · ≈'}{formatFraction(tile.relativeDensity, 0)}
+          </span>
+        )}
+      </div>
       <Canvas camera={{ fov: 58, near: 0.1, far: 10000, position: [22, -22, 16], up: [0, 0, 1] }} gl={{ localClippingEnabled: true }}>
         <ambientLight intensity={0.5} />
         <directionalLight position={[40, 40, 40]} intensity={0.8} />
@@ -124,6 +135,12 @@ export function DemoGridView({ params, demoParamsByType, generationSeed, runId, 
 }) {
   const [tiles, setTiles] = useState<DemoTileState[]>(() => DEMO_TILE_ITEMS.map((item) => ({ ...item, status: 'pending', result: null })));
   const setDemoQueue = useStore((s) => s.setDemoQueue);
+  const meshInfo = useStore((s) => s.meshInfo);
+  // Relative density needs the solid volume; open meshes have none, so tiles then omit it.
+  const sourceVolume = useMemo(
+    () => (sourceMesh || sphereMode ? sourceSolidVolumeMm3({ sampleShape, sphereRadius, originalMesh: sourceMesh, meshInfo }) : null),
+    [meshInfo, sampleShape, sourceMesh, sphereMode, sphereRadius],
+  );
   useEffect(() => {
     setDemoQueue({
       done: tiles.filter((tile) => tile.status === 'done' || tile.status === 'error').length,
@@ -223,10 +240,14 @@ export function DemoGridView({ params, demoParamsByType, generationSeed, runId, 
       const response = event.data;
       if (response.type === 'result') {
         completedSignatureRef.current[type] = signature;
+        const raw = { positions: response.positions!, normals: response.normals!, triCount: response.triCount! };
+        // Measured before normalisation rescales the preview to the tile.
+        const density = relativeDensity(meshVolumeMm3(raw), sourceVolume);
         setTiles((current) => current.map((tile) => tile.type === type ? {
           ...tile,
           status: 'done',
-          result: normalizeDemoResult({ positions: response.positions!, normals: response.normals!, triCount: response.triCount! }, DEMO_VIEW_TARGET_RADIUS),
+          result: normalizeDemoResult(raw, DEMO_VIEW_TARGET_RADIUS),
+          relativeDensity: density,
           error: undefined,
         } : tile));
         finish();
@@ -246,7 +267,7 @@ export function DemoGridView({ params, demoParamsByType, generationSeed, runId, 
       finish();
     };
     worker.postMessage(message);
-  }, [generationSeed, keepInTris, keepOutTris, sampleShape, sourceMesh, sphereMode, sphereRadius]);
+  }, [generationSeed, keepInTris, keepOutTris, sampleShape, sourceMesh, sourceVolume, sphereMode, sphereRadius]);
 
   const drainQueue = useCallback(() => {
     while (workersRef.current.size < workerLimit) {

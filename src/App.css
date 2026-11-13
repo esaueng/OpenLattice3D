@@ -573,6 +573,78 @@ summary:focus-visible,
   display: block;
 }
 
+/* Generating: dim the previous result and name the phase; orbiting still works. */
+.viewer-shell.is-generating canvas {
+  filter: brightness(0.55) saturate(0.7);
+  transition: filter 200ms ease;
+}
+
+.viewer-busy {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-viewer-overlay);
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
+.viewer-busy-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  max-width: calc(100% - 32px);
+  padding: var(--sp-2) var(--sp-3);
+  color: var(--color-text);
+  background: rgba(17, 24, 33, 0.88);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.viewer-busy-spinner {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--color-accent-dim);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: viewer-busy-spin 900ms linear infinite;
+}
+
+@keyframes viewer-busy-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .viewer-busy-spinner { animation: none; }
+}
+
+.viewer-restore-notice {
+  position: absolute;
+  top: calc(var(--sp-3) + 40px);
+  left: var(--sp-3);
+  right: var(--sp-3);
+  z-index: var(--z-viewer-overlay);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  max-width: 560px;
+  padding: var(--sp-15) var(--sp-15) var(--sp-15) var(--sp-3);
+  color: var(--color-text-muted);
+  background: rgba(17, 24, 33, 0.9);
+  border: var(--border-thin);
+  border-radius: var(--radius-md);
+  font-size: var(--fs-sm);
+}
+
+.viewer-restore-notice .btn {
+  flex: none;
+}
+
 .viewer-canvas-surface {
   width: 100%;
   height: 100%;
@@ -1724,6 +1796,25 @@ summary:focus-visible,
   gap: var(--sp-15);
 }
 
+.warning.has-fix,
+.warning.result-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-15) var(--sp-2);
+}
+
+.warning.result-note.is-info {
+  color: var(--color-text-muted);
+  background: transparent;
+  border-color: var(--color-border);
+}
+
+.guidance-action {
+  flex: none;
+}
+
 .preflight-summary {
   margin: 0;
   padding: var(--sp-25) var(--sp-3);
@@ -1843,6 +1934,12 @@ summary:focus-visible,
   transition: width 200ms ease;
 }
 
+.generate-progress-track .progress-text {
+  color: var(--color-text);
+  font-family: var(--font-ui);
+  font-size: var(--fs-sm);
+}
+
 /* ─────────────────────────── Results ─────────────────────────── */
 
 .result-verdict {
@@ -1864,6 +1961,7 @@ summary:focus-visible,
 .result-verdict.is-fail .result-verdict-icon { color: var(--color-error); }
 .result-verdict.is-warn .result-verdict-icon { color: var(--color-warning); }
 .result-verdict.is-running .result-verdict-icon { color: var(--color-text-muted); }
+.result-verdict.is-attention .result-verdict-icon { color: var(--color-warning); }
 
 .result-verdict h2 {
   color: var(--color-text);
@@ -1977,6 +2075,22 @@ summary:focus-visible,
   color: var(--color-text-subtle);
 }
 
+.check-fix {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-15) var(--sp-2);
+  margin-top: var(--sp-15);
+  color: var(--color-text);
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+}
+
+.check-fix-label {
+  color: var(--color-text-muted);
+  font-weight: var(--fw-medium);
+}
+
 .export-section .export-simplify label {
   flex: none;
 }
@@ -2013,6 +2127,25 @@ summary:focus-visible,
 
 .export-controls-actions .btn:only-child {
   grid-column: 1 / -1;
+}
+
+/* "Export STL anyway" in a third of a phone-width panel wraps instead of touching the edges. */
+.export-controls-actions .btn {
+  padding: var(--sp-1) var(--sp-15);
+  line-height: 1.2;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
+.workflow-nav .export-primary {
+  justify-content: center;
+}
+
+.export-primary-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ─────────────────────────── Project menu ─────────────────────────── */
@@ -2254,6 +2387,7 @@ summary:focus-visible,
 .validation-chip.is-fail { color: var(--color-error-ink); border-color: rgba(239, 68, 68, 0.5); }
 .validation-chip.is-stale { color: var(--color-warning-ink); border-color: rgba(245, 158, 11, 0.45); }
 .validation-chip.is-running { color: var(--color-accent); border-color: var(--color-accent-border); }
+.validation-chip.is-warn { color: var(--color-warning); border-color: rgba(245, 158, 11, 0.6); border-style: dashed; }
 
 .status-links {
   flex: none;
@@ -2466,6 +2600,11 @@ summary:focus-visible,
 .demo-window-status {
   bottom: 6px;
   color: var(--color-text-muted);
+}
+
+.demo-window-density {
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
 }
 
 /* ─────────────────────────── Boot shell ─────────────────────────── */

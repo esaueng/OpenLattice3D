@@ -488,6 +488,8 @@ interface AppState {
 
   // Boot
   persistenceHydrated: boolean;
+  /** Parameters came back from a saved session; generated results never do. */
+  sessionRestored: boolean;
 
   // Workflow
   workflowStep: WorkflowStep;
@@ -633,6 +635,7 @@ export const useStore = create<AppState>((set, get) => ({
   workflowStep: 'model',
   // IndexedDB is asynchronous, so the UI waits for saved preferences before rendering.
   persistenceHydrated: false,
+  sessionRestored: Boolean(persisted),
 
   beginModelIntake: () => {
     const epoch = get().modelIntakeEpoch + 1;
@@ -1280,6 +1283,7 @@ export function hydrateFromSnapshot(snapshot: Partial<PersistedAppState>): Parti
     demoSuspended: null,
     demoRunId: 0,
     logs: [],
+    sessionRestored: true,
   };
 }
 
