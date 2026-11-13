@@ -598,6 +598,19 @@ describe('parameter undo', () => {
     expect(useStore.getState().params.cellSize).toBe(12);
   });
 
+  it('undoes graded-density edits like other parameters', () => {
+    useStore.getState().updateParams({ gradientEnabled: true });
+    useStore.getState().updateParams({ gradientStrength: 0.8 });
+    expect(useStore.getState().selectionUndo).toHaveLength(2);
+    useStore.getState().undoSelection();
+    expect(useStore.getState().params.gradientStrength).toBe(0.5);
+    expect(useStore.getState().params.gradientEnabled).toBe(true);
+    useStore.getState().undoSelection();
+    expect(useStore.getState().params.gradientEnabled).toBe(false);
+    useStore.getState().redoSelection();
+    expect(useStore.getState().params.gradientEnabled).toBe(true);
+  });
+
   it('collapses rapid edits of one field into a single undo step', () => {
     useStore.getState().updateParams({ cellSize: 9 });
     useStore.getState().updateParams({ cellSize: 9.5 });

@@ -61,6 +61,17 @@ describe('generation snapshot', () => {
     expect(changes).toEqual(['model', 'cell size', 'escape holes', 'seed', 'painted faces']);
   });
 
+  it('treats graded density as a generation input', () => {
+    const snapshot = buildGenerationSnapshot(inputs());
+    const enabled = { ...DEFAULT_PARAMS, gradientEnabled: true };
+    expect(isSnapshotStale(snapshot, inputs({ params: enabled }))).toBe(true);
+    expect(describeSnapshotChanges(snapshot, inputs({ params: enabled }))).toEqual(['graded density']);
+    const graded = buildGenerationSnapshot(inputs({ params: enabled }));
+    const stronger = { ...enabled, gradientStrength: 0.9 };
+    expect(isSnapshotStale(graded, inputs({ params: stronger }))).toBe(true);
+    expect(describeSnapshotChanges(graded, inputs({ params: stronger }))).toEqual(['graded density strength']);
+  });
+
   it('reports repainted faces even when the counts match', () => {
     const snapshot = buildGenerationSnapshot(inputs({ keepOutTris: new Set([1]) }));
     expect(describeSnapshotChanges(snapshot, inputs({ keepOutTris: new Set([2]) }))).toEqual(['painted faces']);
