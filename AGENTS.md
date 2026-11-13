@@ -76,9 +76,10 @@ and the smoke workflow is disabled by default (see
 - `src/workers/` — `lattice-worker.ts` orchestrates one generation job
   (SDF sampling, marching cubes, cleanup, escape holes).
   `useLatticeGeneration.ts` starts `validation-worker.ts` separately for
-  deviation, min thickness, manifoldness, and connectivity. `tiled-generation.ts` fans procedural jobs out to bounded
+  deviation, min thickness, manifoldness, and connectivity. `tiled-generation.ts` fans procedural and imported-mesh jobs out to bounded
   `lattice-tile-worker.ts` instances (max 8, sparse tile skipping, merge by
-  tile id). `surface-sample-worker.ts` Poisson-samples surfaces for
+  tile id; imported meshes share a serialized BVH and merge in grid order, see
+  `mesh-tiles.ts`). `surface-sample-worker.ts` Poisson-samples surfaces for
   hex/triangle surface lattices.
 - `src/hooks/generation-worker-controller.ts` — worker session lifecycle;
   malformed, stale, and post-cancel results are rejected by session id.

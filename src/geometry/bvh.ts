@@ -23,6 +23,34 @@ export interface ClosestResult {
 const LEAF_SIZE = 4;
 
 /**
+ * Every array a MeshBVH queries, so another thread can rebuild a read-only
+ * instance without recomputing the tree or the pseudonormal tables. All
+ * arrays use 4-byte elements; see `packSerializedMeshBVH` in
+ * `bvh-serialization.ts` for the single-buffer transport form.
+ */
+export interface SerializedMeshBVH {
+  triCount: number;
+  positions: Float32Array;
+  normals: Float32Array;
+  nodeMin: Float32Array;
+  nodeMax: Float32Array;
+  leftFirst: Int32Array;
+  count: Int32Array;
+  triIndices: Uint32Array;
+  triA: Float32Array;
+  triAB: Float32Array;
+  triAC: Float32Array;
+  triBC: Float32Array;
+  triVertex: Uint32Array;
+  triEdge: Uint32Array;
+  vertexNormals: Float32Array;
+  edgeNormals: Float32Array;
+}
+
+/** Set only while `MeshBVH.fromSerialized` runs the constructor. */
+let restoringFrom: SerializedMeshBVH | null = null;
+
+/**
  * Relative feature-snapping tolerance for the sign test.
  *
  * A closest point closer than SNAP_REL x (longest edge of its triangle) to an
@@ -276,6 +304,30 @@ function bridgeDegenerateTriangles(
   }
 }
 
+function validateSerialized(data: SerializedMeshBVH): void {
+  const { triCount } = data;
+  if (!Number.isInteger(triCount) || triCount <= 0) {
+    throw new Error(`Serialized MeshBVH requires at least one triangle (got ${triCount})`);
+  }
+  const nodeCount = data.count.length;
+  const ok = nodeCount > 0
+    && data.positions.length >= triCount * 9
+    && data.normals.length >= triCount * 3
+    && data.nodeMin.length === nodeCount * 3
+    && data.nodeMax.length === nodeCount * 3
+    && data.leftFirst.length === nodeCount
+    && data.triIndices.length === triCount
+    && data.triA.length === triCount * 3
+    && data.triAB.length === triCount * 3
+    && data.triAC.length === triCount * 3
+    && data.triBC.length === triCount * 3
+    && data.triVertex.length === triCount * 3
+    && data.triEdge.length === triCount * 3
+    && data.vertexNormals.length % 3 === 0
+    && data.edgeNormals.length % 3 === 0;
+  if (!ok) throw new Error('Serialized MeshBVH arrays do not match its triangle and node counts');
+}
+
 function expandBounds(
   positions: Float32Array,
   triIndex: number,
@@ -492,6 +544,27 @@ export class MeshBVH {
     this.positions = positions;
     this.normals = normals;
     this.triCount = triCount;
+    const restored = restoringFrom;
+    if (restored) {
+      restoringFrom = null;
+      this.nodeMin = restored.nodeMin;
+      this.nodeMax = restored.nodeMax;
+      this.leftFirst = restored.leftFirst;
+      this.count = restored.count;
+      this.triIndices = restored.triIndices;
+      this.triA = restored.triA;
+      this.triAB = restored.triAB;
+      this.triAC = restored.triAC;
+      this.triBC = restored.triBC;
+      this.pseudonormals = {
+        triVertex: restored.triVertex,
+        triEdge: restored.triEdge,
+        vertexNormals: restored.vertexNormals,
+        edgeNormals: restored.edgeNormals,
+      };
+      this.stack = new Int32Array(Math.max(1, this.count.length));
+      return;
+    }
     this.triIndices = new Uint32Array(triCount);
     this.triA = new Float32Array(triCount * 3);
     this.triAB = new Float32Array(triCount * 3);
@@ -540,6 +613,50 @@ export class MeshBVH {
     this.leftFirst = new Int32Array(leftFirst);
     this.count = new Int32Array(count);
     this.stack = new Int32Array(Math.max(1, this.count.length));
+  }
+
+  /**
+   * Snapshot of the tree, triangle tables and pseudonormal tables. The
+   * pseudonormals are built now if no signed query has needed them yet, so a
+   * restored copy never rebuilds them. The arrays are this instance's own
+   * storage, not copies: pack them before handing them to another thread.
+   */
+  serialize(): SerializedMeshBVH {
+    const pn = this.getPseudonormals();
+    return {
+      triCount: this.triCount,
+      positions: this.positions,
+      normals: this.normals,
+      nodeMin: this.nodeMin,
+      nodeMax: this.nodeMax,
+      leftFirst: this.leftFirst,
+      count: this.count,
+      triIndices: this.triIndices,
+      triA: this.triA,
+      triAB: this.triAB,
+      triAC: this.triAC,
+      triBC: this.triBC,
+      triVertex: pn.triVertex,
+      triEdge: pn.triEdge,
+      vertexNormals: pn.vertexNormals,
+      edgeNormals: pn.edgeNormals,
+    };
+  }
+
+  /**
+   * Rebuild a query-only BVH over serialized arrays without recomputing
+   * anything. The arrays are used in place (they may live in shared memory)
+   * and are never written; queries on the result are bit-identical to the
+   * source instance's.
+   */
+  static fromSerialized(data: SerializedMeshBVH): MeshBVH {
+    validateSerialized(data);
+    restoringFrom = data;
+    try {
+      return new MeshBVH(data.positions, data.normals, data.triCount);
+    } finally {
+      restoringFrom = null;
+    }
   }
 
   getBounds(): { min: Vec3; max: Vec3 } {
