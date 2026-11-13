@@ -118,10 +118,11 @@ less-used settings sit under **More options**. Generate is always available in t
 
 ### 1. Import a Model
 
-- **Import STL**: load any STL file (binary or ASCII). The model card shows its size,
-  volume, and how many lattice cells fit across the shortest side. STL carries no units, so
-  a part under 5 mm or over 1 m across gets a prompt to keep it as millimetres or convert
-  (from inches, ×10, ×0.1). Open or non-manifold meshes get their face normals recomputed
+- **Import a model**: load an STL (binary or ASCII), 3MF, or OBJ file, from the picker or
+  by dropping it onto the page. The model card shows its size, volume, and how many lattice
+  cells fit across the shortest side. 3MF files declare their unit, which is converted to
+  millimetres explicitly. STL and OBJ carry no units, so a part under 5 mm or over 1 m across
+  gets a prompt to keep it as millimetres or convert (from inches, ×10, ×0.1). Open or non-manifold meshes get their face normals recomputed
   and the card says so plainly; **Close holes** fills the boundary loops so the mesh can be
   used. Your lattice parameters survive a model change.
 - **Open project**: resume a versioned project with its parameters, embedded source mesh,
