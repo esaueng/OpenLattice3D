@@ -70,3 +70,48 @@ describe('manual escape hole sanitization', () => {
     expect(nan.rejected).toEqual(['escapeHoleManualCenters']);
   });
 });
+
+describe('lattice orientation sanitization', () => {
+  it('defaults to the identity orientation', () => {
+    expect(DEFAULT_PARAMS.latticeRotationDeg).toEqual([0, 0, 0]);
+    expect(DEFAULT_PARAMS.cellScale).toEqual([1, 1, 1]);
+  });
+
+  it('accepts in-range xyz triples and copies them', () => {
+    const rotation = [-180, 45.5, 180];
+    const scale = [0.25, 1, 4];
+    const { params, rejected } = sanitizeLatticeParams({ latticeRotationDeg: rotation, cellScale: scale });
+    expect(rejected).toEqual([]);
+    expect(params.latticeRotationDeg).toEqual(rotation);
+    expect(params.cellScale).toEqual(scale);
+    expect(params.latticeRotationDeg).not.toBe(rotation);
+    expect(params.cellScale).not.toBe(scale);
+  });
+
+  it.each([
+    ['an angle beyond 180°', { latticeRotationDeg: [0, 181, 0] }],
+    ['a non-finite angle', { latticeRotationDeg: [0, Number.NaN, 0] }],
+    ['a string angle', { latticeRotationDeg: ['0', 0, 0] }],
+    ['two angles', { latticeRotationDeg: [0, 0] }],
+    ['a scalar rotation', { latticeRotationDeg: 45 }],
+    ['a stretch below 0.25', { cellScale: [1, 0.2, 1] }],
+    ['a stretch above 4', { cellScale: [1, 1, 4.5] }],
+    ['a zero stretch', { cellScale: [0, 1, 1] }],
+    ['four stretch entries', { cellScale: [1, 1, 1, 1] }],
+    ['a null stretch', { cellScale: null }],
+  ])('rejects %s', (_label, input) => {
+    const { params, accepted, rejected } = sanitizeLatticeParams(input);
+    expect(accepted).toEqual([]);
+    expect(params).toEqual({});
+    expect(rejected).toEqual(Object.keys(input));
+  });
+
+  it('leaves older parameter sets without orientation fields valid', () => {
+    const legacy: Record<string, unknown> = { ...DEFAULT_PARAMS };
+    delete legacy.latticeRotationDeg;
+    delete legacy.cellScale;
+    const { params, rejected } = sanitizeLatticeParams(legacy);
+    expect(rejected).toEqual([]);
+    expect({ ...DEFAULT_PARAMS, ...params }).toEqual(DEFAULT_PARAMS);
+  });
+});

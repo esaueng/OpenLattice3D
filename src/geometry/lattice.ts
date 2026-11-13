@@ -22,6 +22,7 @@ import {
   deriveGenerationSeed,
   normalizeGenerationSeed,
 } from './deterministic-random';
+import { latticeTransformFor, type LatticeTransform } from './lattice-transform';
 
 const TWO_PI = 2 * Math.PI;
 const SQRT3 = Math.sqrt(3);
@@ -547,6 +548,10 @@ export function buildLatticeEvaluator(
   const fieldSeed = normalizedSeed === DEFAULT_GENERATION_SEED
     ? DEFAULT_GENERATION_SEED
     : deriveGenerationSeed(normalizedSeed, 'lattice-field', latticeType);
+  // Rotated or stretched lattices take a separate path; the identity
+  // orientation keeps the original evaluators below, bit for bit.
+  const transform = latticeTransformFor(params);
+  if (transform) return buildTransformedLatticeEvaluator(params, fieldSeed, transform);
   switch (latticeType) {
     // Gyroid: sin(kx)cos(ky) + sin(ky)cos(kz) + sin(kz)cos(kx)
     case 'gyroid': {
@@ -734,6 +739,284 @@ function tpmsValueFromTrig(
 }
 
 // ═══════════════════════════════════════════════════════════
+//  Rotated / stretched lattices
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * Implicit TPMS value at lattice coordinate (ux, uy, uz). Its gradient with
+ * respect to the lattice coordinate, divided by k, is written to `grad`.
+ * Same formulas as the axis-aligned evaluators above.
+ */
+function tpmsImplicit(
+  latticeType: OptimizedTpmsType,
+  ux: number,
+  uy: number,
+  uz: number,
+  k: number,
+  grad: Float64Array,
+): number {
+  const sx = Math.sin(k * ux), sy = Math.sin(k * uy), sz = Math.sin(k * uz);
+  const cx = Math.cos(k * ux), cy = Math.cos(k * uy), cz = Math.cos(k * uz);
+  switch (latticeType) {
+    case 'gyroid':
+      grad[0] = cx * cy - sz * sx;
+      grad[1] = cy * cz - sx * sy;
+      grad[2] = cz * cx - sy * sz;
+      return sx * cy + sy * cz + sz * cx;
+    case 'schwarzP':
+      grad[0] = -sx;
+      grad[1] = -sy;
+      grad[2] = -sz;
+      return cx + cy + cz;
+    case 'schwarzD':
+      grad[0] = cx * sy * sz + cx * cy * cz - sx * sy * cz - sx * cy * sz;
+      grad[1] = sx * cy * sz - sx * sy * cz + cx * cy * cz - cx * sy * sz;
+      grad[2] = sx * sy * cz - sx * cy * sz - cx * sy * sz + cx * cy * cz;
+      return sx * sy * sz + sx * cy * cz + cx * sy * cz + cx * cy * sz;
+    case 'neovius':
+      grad[0] = -sx * (3 + 4 * cy * cz);
+      grad[1] = -sy * (3 + 4 * cx * cz);
+      grad[2] = -sz * (3 + 4 * cx * cy);
+      return 3 * (cx + cy + cz) + 4 * cx * cy * cz;
+    case 'iwp':
+      grad[0] = 2 * sx * (2 * cx - cy - cz);
+      grad[1] = 2 * sy * (2 * cy - cx - cz);
+      grad[2] = 2 * sz * (2 * cz - cx - cy);
+      return 2 * (cx * cy + cy * cz + cz * cx)
+        - (Math.cos(2 * k * ux) + Math.cos(2 * k * uy) + Math.cos(2 * k * uz));
+  }
+}
+
+/** A segment in lattice-frame millimetres (cell coordinates times the stretch). */
+type ScaledSegment = readonly [Vec3, Vec3];
+
+function scaleSegments(segments: readonly (readonly [Vec3, Vec3])[], s: Vec3): ScaledSegment[] {
+  const scale = (v: Vec3): Vec3 => [v[0] * s[0], v[1] * s[1], v[2] * s[2]];
+  return segments.map(([a, b]) => [scale(a), scale(b)] as const);
+}
+
+/** Largest neighbour-cell search radius per axis for stretched Voronoi cells. */
+const VORONOI_MAX_SEARCH_CELLS = 4;
+
+/**
+ * Lattice field for a rotated and/or stretched lattice (see
+ * lattice-transform.ts for the frame convention). Every type evaluates its
+ * unit cell at u = S⁻¹Rᵀp and measures distance in world millimetres:
+ *
+ * - Strut types (BCC, octet, diamond), Voronoi and the hexagon/triangle
+ *   prisms measure exact Euclidean distance in the metric |S·Δu|, i.e. to the
+ *   stretched skeleton, so strut diameter and the wall between holes stay
+ *   exact in mm. Periodic wrapping keeps its axis-aligned justification: the
+ *   BCC and octet cell contents are mirror-symmetric about the cell faces, and
+ *   axis-aligned mirrors preserve a diagonal metric. Diamond's exact-distance
+ *   cull margin becomes 0.3 · cellSize · min(cellScale) in mm.
+ * - TPMS sheets keep the first-order |f| / |∇f| distance with the gradient
+ *   taken in world space (|∇ₚf| = |S⁻¹∇ᵤf|; the rotation drops out). The zero
+ *   set is exactly the transformed surface and wall thickness stays nominal to
+ *   first order: the same approximation the axis-aligned sheets already make.
+ *   Dividing by the Lipschitz factor instead would make stretched walls thinner
+ *   or thicker by up to max/min cellScale.
+ * - Spinodal wave vectors are transformed once (kₚ = R S⁻¹ kᵤ), so its
+ *   gradient normalisation is as exact as before.
+ *
+ * Approximation (Voronoi only): the neighbour-site search widens along the
+ * axes whose cells are relatively compressed, up to VORONOI_MAX_SEARCH_CELLS
+ * cells, so F1/F2 may miss a nearer site at stretch ratios above that.
+ */
+function buildTransformedLatticeEvaluator(
+  params: LatticeParams,
+  fieldSeed: number,
+  transform: LatticeTransform,
+): (x: number, y: number, z: number) => number {
+  const { latticeType, cellSize, wallThickness, strutDiameter } = params;
+  const m = transform.m;
+  const m0 = m[0], m1 = m[1], m2 = m[2];
+  const m3 = m[3], m4 = m[4], m5 = m[5];
+  const m6 = m[6], m7 = m[7], m8 = m[8];
+  const [s0, s1, s2] = transform.scale;
+  const L = cellSize;
+  const r = strutDiameter / 2;
+  const wrap = (v: number) => ((v % L) + L) % L;
+
+  switch (latticeType) {
+    case 'gyroid':
+    case 'schwarzP':
+    case 'schwarzD':
+    case 'neovius':
+    case 'iwp': {
+      const k = TWO_PI / cellSize;
+      const grad = new Float64Array(3);
+      const i0 = 1 / s0, i1 = 1 / s1, i2 = 1 / s2;
+      return (x, y, z) => {
+        const val = tpmsImplicit(
+          latticeType,
+          m0 * x + m1 * y + m2 * z,
+          m3 * x + m4 * y + m5 * z,
+          m6 * x + m7 * y + m8 * z,
+          k,
+          grad,
+        );
+        return sheetDistance(val, grad[0] * i0, grad[1] * i1, grad[2] * i2, k, wallThickness);
+      };
+    }
+    case 'spinodal': {
+      const k0 = TWO_PI / cellSize;
+      // The same hashed wave set as the axis-aligned field, with each wave
+      // vector mapped to world space: kᵤ · (m p) = (mᵀ kᵤ) · p.
+      const waves = Array.from({ length: N_WAVES }, (_, i) => {
+        const phi = TWO_PI * hashF(i, 0, fieldSeed);
+        const cosTheta = 1 - 2 * hashF(i, 1, fieldSeed);
+        const sinTheta = Math.sqrt(1 - cosTheta * cosTheta);
+        const kx = k0 * sinTheta * Math.cos(phi);
+        const ky = k0 * sinTheta * Math.sin(phi);
+        const kz = k0 * cosTheta;
+        return {
+          kx: m0 * kx + m3 * ky + m6 * kz,
+          ky: m1 * kx + m4 * ky + m7 * kz,
+          kz: m2 * kx + m5 * ky + m8 * kz,
+          phase: TWO_PI * hashF(i, 2, fieldSeed),
+        };
+      });
+      const gradientFloor = (k0 / transform.maxScale) * TPMS_GRADIENT_EPSILON_FACTOR;
+      const scale = 1 / Math.sqrt(N_WAVES);
+      return (x, y, z) => {
+        let sum = 0;
+        let gx = 0;
+        let gy = 0;
+        let gz = 0;
+        for (let i = 0; i < waves.length; i++) {
+          const w = waves[i];
+          const phase = w.kx * x + w.ky * y + w.kz * z + w.phase;
+          sum += Math.cos(phase);
+          const derivative = -Math.sin(phase);
+          gx += derivative * w.kx;
+          gy += derivative * w.ky;
+          gz += derivative * w.kz;
+        }
+        const safeGradient = Math.max(Math.hypot(gx, gy, gz) * scale, gradientFloor);
+        return Math.abs(sum * scale) / safeGradient - wallThickness * 0.5;
+      };
+    }
+    case 'bcc':
+    case 'octet': {
+      const cache = getStrutCache(L);
+      const center: Vec3 = [L / 2, L / 2, L / 2];
+      const segments: (readonly [Vec3, Vec3])[] = latticeType === 'bcc'
+        ? [...cache.corners.map((corner) => [center, corner] as const), ...cache.edges]
+        : cache.octetStruts;
+      const scaled = scaleSegments(segments, transform.scale);
+      return (x, y, z) => {
+        const p: Vec3 = [
+          wrap(m0 * x + m1 * y + m2 * z) * s0,
+          wrap(m3 * x + m4 * y + m5 * z) * s1,
+          wrap(m6 * x + m7 * y + m8 * z) * s2,
+        ];
+        let minDist = Infinity;
+        for (let i = 0; i < scaled.length; i++) {
+          const d = distToSegment(p, scaled[i][0], scaled[i][1]);
+          if (d < minDist) minDist = d;
+        }
+        return minDist - r;
+      };
+    }
+    case 'diamond': {
+      const bins = getStrutCache(L).diamondBins.map((bin) => scaleSegments(bin, transform.scale));
+      const n = DIAMOND_BINS_PER_AXIS;
+      const binOf = (v: number) => Math.min(n - 1, Math.floor((v / L) * n));
+      return (x, y, z) => {
+        const lx = wrap(m0 * x + m1 * y + m2 * z);
+        const ly = wrap(m3 * x + m4 * y + m5 * z);
+        const lz = wrap(m6 * x + m7 * y + m8 * z);
+        const bin = bins[binOf(lx) + binOf(ly) * n + binOf(lz) * n * n];
+        const p: Vec3 = [lx * s0, ly * s1, lz * s2];
+        let minDist = Infinity;
+        for (let i = 0; i < bin.length; i++) {
+          const d = distToSegment(p, bin[i][0], bin[i][1]);
+          if (d < minDist) minDist = d;
+        }
+        return minDist - r;
+      };
+    }
+    case 'voronoi': {
+      const reach = (s: number) => Math.min(
+        VORONOI_MAX_SEARCH_CELLS,
+        Math.max(1, Math.ceil(transform.maxScale / s - 1e-9)),
+      );
+      const rx = reach(s0), ry = reach(s1), rz = reach(s2);
+      const invL = 1 / L;
+      return (x, y, z) => {
+        const ux = m0 * x + m1 * y + m2 * z;
+        const uy = m3 * x + m4 * y + m5 * z;
+        const uz = m6 * x + m7 * y + m8 * z;
+        const ix = Math.floor(ux * invL);
+        const iy = Math.floor(uy * invL);
+        const iz = Math.floor(uz * invL);
+        let f1 = Infinity;
+        let f2 = Infinity;
+        for (let dz = -rz; dz <= rz; dz++) {
+          for (let dy = -ry; dy <= ry; dy++) {
+            for (let dx = -rx; dx <= rx; dx++) {
+              const cx = ix + dx, cy = iy + dy, cz = iz + dz;
+              const ddx = (ux - (cx + hash3f(cx, cy, cz, 0, fieldSeed)) * L) * s0;
+              const ddy = (uy - (cy + hash3f(cx, cy, cz, 1, fieldSeed)) * L) * s1;
+              const ddz = (uz - (cz + hash3f(cx, cy, cz, 2, fieldSeed)) * L) * s2;
+              const d = Math.sqrt(ddx * ddx + ddy * ddy + ddz * ddz);
+              if (d < f1) { f2 = f1; f1 = d; }
+              else if (d < f2) { f2 = d; }
+            }
+          }
+        }
+        return (f2 - f1) * 0.5 - r;
+      };
+    }
+    case 'hexagon': {
+      const side = cellSize / SQRT3;
+      const outline = unitPolygonVertices(6).map(([vx, vy]) => [vx * side * s0, vy * side * s1] as const);
+      return (x, y, z) => {
+        if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return Infinity;
+        const ux = m0 * x + m1 * y + m2 * z;
+        const uy = m3 * x + m4 * y + m5 * z;
+        if (!Number.isFinite(ux / side) || !Number.isFinite(uy / side)) return Infinity;
+        // Cell membership is affine-invariant, so the nearest centre in cell
+        // coordinates names the containing cell, whose walls are nearest in mm.
+        const [cx, cy] = hexCellCenter(ux, uy, side);
+        const px = (ux - cx) * s0;
+        const py = (uy - cy) * s1;
+        let minDist = Infinity;
+        for (let i = 0; i < outline.length; i++) {
+          const a = outline[i];
+          const b = outline[(i + 1) % outline.length];
+          const d = distToSegment2D(px, py, a[0], a[1], b[0], b[1]);
+          if (d < minDist) minDist = d;
+        }
+        return minDist - r;
+      };
+    }
+    case 'triangle': {
+      const spacing = cellSize * SQRT3 / 2;
+      // The plane n·u = c lies |n·u - c| / |S⁻¹n| mm from a world point.
+      const families = [[0, 1], [-SQRT3 / 2, 0.5], [SQRT3 / 2, 0.5]].map(([nx, ny]) => ({
+        nx,
+        ny,
+        toMm: 1 / Math.hypot(nx / s0, ny / s1),
+      }));
+      return (x, y, z) => {
+        const ux = m0 * x + m1 * y + m2 * z;
+        const uy = m3 * x + m4 * y + m5 * z;
+        let d = Infinity;
+        for (const family of families) {
+          const proj = ux * family.nx + uy * family.ny;
+          const mod = ((proj % spacing) + spacing) % spacing;
+          const dist = Math.min(mod, spacing - mod) * family.toMm;
+          if (dist < d) d = dist;
+        }
+        return d - r;
+      };
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
 //  Graded density
 // ═══════════════════════════════════════════════════════════
 
@@ -817,6 +1100,9 @@ function attachTpmsGridSampler(
   applyConstraints: ConstraintApplier | null = null,
 ): SdfFunction {
   if (!supportsOptimizedTpms(params.latticeType)) return target;
+  // The separable sin/cos tables only hold for an axis-aligned, unstretched
+  // lattice; transformed fields are sampled pointwise instead.
+  if (latticeTransformFor(params)) return target;
 
   const latticeType = params.latticeType;
   const k = TWO_PI / params.cellSize;
@@ -1034,6 +1320,12 @@ function surfaceHexHolesSdf(
   return minD;
 }
 
+/**
+ * Perforated surface band from Poisson-sampled surface points. Each hole is
+ * oriented by its sample's surface normal and the samples have no global
+ * lattice frame, so latticeRotationDeg and cellScale do not apply here (they
+ * do apply to the hexagon/triangle prism fields used by the other variants).
+ */
 export function buildSurfaceHexLattice(
   objectSdf: (x: number, y: number, z: number) => number,
   params: LatticeParams,

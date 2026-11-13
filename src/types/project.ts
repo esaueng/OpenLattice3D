@@ -77,6 +77,18 @@ export interface LatticeParams {
   escapeHoleManualCenters: number[];
   materialDensityGPerCm3: number; // 0 disables mass estimation
   toleranceMm: number;         // outer deviation tolerance
+  /**
+   * Lattice orientation: Euler angles in degrees, applied in XYZ order (the
+   * same convention as three.js `Euler(x, y, z, 'XYZ')`), each in [-180, 180].
+   * [0, 0, 0] keeps the lattice axis-aligned.
+   */
+  latticeRotationDeg: [number, number, number];
+  /**
+   * Per-axis multipliers on cellSize along the lattice's own (rotated) axes,
+   * each in [CELL_SCALE_MIN, CELL_SCALE_MAX]. [1, 1, 1] keeps cubic cells.
+   * Wall and strut thickness stay in millimetres; only the period stretches.
+   */
+  cellScale: [number, number, number];
 }
 
 /**
@@ -187,13 +199,29 @@ export const DEFAULT_PARAMS: LatticeParams = {
   escapeHoleManualCenters: [],
   materialDensityGPerCm3: 0,
   toleranceMm: 0.2,
+  latticeRotationDeg: [0, 0, 0],
+  cellScale: [1, 1, 1],
 };
+
+/** Bounds of each lattice rotation angle, degrees. */
+export const LATTICE_ROTATION_LIMIT_DEG = 180;
+/** Bounds of each per-axis cell stretch multiplier. */
+export const CELL_SCALE_MIN = 0.25;
+export const CELL_SCALE_MAX = 4;
 
 export const PROCESS_DEFAULTS: Record<ProcessPreset, Partial<LatticeParams>> = {
   SLS_MJF: { minFeatureSize: 0.8, escapeHoleDiameter: 5.0, escapeHoleCount: 2 },
   SLA_DLP: { minFeatureSize: 0.5, escapeHoleDiameter: 3.5, escapeHoleCount: 2 },
   FDM: { minFeatureSize: 0.8, escapeHoleDiameter: 5.0, escapeHoleCount: 2 },
 };
+
+/** Value equality for parameter entries; array entries compare element-wise. */
+export function paramValuesEqual(a: unknown, b: unknown): boolean {
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return a.length === b.length && a.every((entry, index) => entry === b[index]);
+  }
+  return a === b;
+}
 
 // ── Parameter sanitization (untrusted JSON import) ───────────
 
@@ -217,6 +245,11 @@ type ParamValidator = (value: unknown) => boolean;
 
 function isFiniteNumberIn(min: number, max: number): ParamValidator {
   return (value) => typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max;
+}
+
+function isVec3In(min: number, max: number): ParamValidator {
+  const inRange = isFiniteNumberIn(min, max);
+  return (value) => Array.isArray(value) && value.length === 3 && value.every(inRange);
 }
 
 const isBoolean: ParamValidator = (value) => typeof value === 'boolean';
@@ -252,6 +285,8 @@ const PARAM_VALIDATORS: Record<keyof LatticeParams, ParamValidator> = {
   escapeHoleManualCenters: isManualCenterList,
   materialDensityGPerCm3: isFiniteNumberIn(0, 100),
   toleranceMm: isFiniteNumberIn(0.001, 50),
+  latticeRotationDeg: isVec3In(-LATTICE_ROTATION_LIMIT_DEG, LATTICE_ROTATION_LIMIT_DEG),
+  cellScale: isVec3In(CELL_SCALE_MIN, CELL_SCALE_MAX),
 };
 
 export interface SanitizedParams {
@@ -276,7 +311,8 @@ export function sanitizeLatticeParams(input: unknown): SanitizedParams {
     if (!(key in source)) continue;
     const value = source[key];
     if (PARAM_VALIDATORS[key](value)) {
-      (params as Record<string, unknown>)[key] = value;
+      // Copy arrays so imported params never alias the untrusted source.
+      (params as Record<string, unknown>)[key] = Array.isArray(value) ? [...value] : value;
       accepted.push(key);
     } else {
       rejected.push(key);

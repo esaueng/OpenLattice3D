@@ -1,6 +1,6 @@
 // The inputs that decide what a generation run produces, frozen at run start so
 // the UI can tell whether the result on screen still matches the form.
-import type { LatticeParams, SampleShape } from '../types/project';
+import { paramValuesEqual, type LatticeParams, type SampleShape } from '../types/project';
 import type { TriangleMesh } from '../geometry/stl-parser';
 
 export interface GenerationInputs {
@@ -50,6 +50,8 @@ const PARAM_LABELS: Record<keyof LatticeParams, string> = {
   escapeHoleManualCenters: 'hole positions',
   materialDensityGPerCm3: 'material density',
   toleranceMm: 'tolerance',
+  latticeRotationDeg: 'lattice rotation',
+  cellScale: 'cell stretch',
 };
 
 /** Parameters that change the reported statistics but not the geometry. */
@@ -103,7 +105,7 @@ export function describeSnapshotChanges(snapshot: GenerationSnapshot, inputs: Ge
   if (current.sourceKey !== snapshot.sourceKey) changes.push('model');
   for (const key of Object.keys(PARAM_LABELS) as (keyof LatticeParams)[]) {
     if (NON_GEOMETRY_PARAMS.has(key)) continue;
-    if (current.params[key] !== snapshot.params[key]) changes.push(PARAM_LABELS[key]);
+    if (!paramValuesEqual(current.params[key], snapshot.params[key])) changes.push(PARAM_LABELS[key]);
   }
   if (current.generationSeed !== snapshot.generationSeed) changes.push('seed');
   if (current.keepOutCount !== snapshot.keepOutCount || current.keepInCount !== snapshot.keepInCount) {
