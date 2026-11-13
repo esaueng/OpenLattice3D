@@ -1,10 +1,17 @@
 import { useStore } from '../../store/useStore';
-import type { LatticeType } from '../../types/project';
+import {
+  CELL_SCALE_MAX,
+  CELL_SCALE_MIN,
+  DEFAULT_PARAMS,
+  LATTICE_ROTATION_LIMIT_DEG,
+  type LatticeType,
+} from '../../types/project';
+import { isIdentityLatticeOrientation } from '../../geometry/lattice-transform';
 import { isSheetType } from '../../geometry/lattice';
-import { cellsAcrossShortestSide, modelExtents } from '../../utils/model-summary';
+import { cellsAcrossShortestSide, effectiveCellSizes, modelExtents } from '../../utils/model-summary';
 import { useModelImport } from '../../hooks/useModelImport';
 import { NumericInput } from '../NumericInput';
-import { PanelSection, StepPanel } from '../PanelChrome';
+import { Collapsible, PanelSection, StepPanel } from '../PanelChrome';
 import { GridIcon } from '../icons';
 import { LatticeThumbnail } from '../LatticeThumbnail';
 import { useRadioGroup } from '../../hooks/useRadioGroup';
@@ -51,13 +58,22 @@ const LATTICE_FAMILIES: readonly { family: string; note: string; types: readonly
   },
 ];
 
+const AXES = ['X', 'Y', 'Z'] as const;
+
+function withAxis(values: readonly [number, number, number], axis: number, value: number): [number, number, number] {
+  const next: [number, number, number] = [values[0], values[1], values[2]];
+  next[axis] = value;
+  return next;
+}
+
 const LATTICE_ORDER: readonly LatticeType[] = LATTICE_FAMILIES.flatMap((group) => group.types.map((type) => type.id));
 
 export function LatticeStep({ inputs }: { inputs: WorkflowInputs }) {
   const store = useStore();
   const intake = useModelImport();
   const extents = modelExtents(store.meshInfo, store.sampleShape, store.sphereRadius);
-  const cellsAcross = extents ? cellsAcrossShortestSide(extents.size, store.params.cellSize) : 0;
+  const fitCellSize = effectiveCellSizes(store.params.cellSize, store.params.cellScale).largest;
+  const cellsAcross = extents ? cellsAcrossShortestSide(extents.size, fitCellSize) : 0;
   const sheet = isSheetType(store.params.latticeType);
   // Hexagon/triangle in conformal mode generate a perforated surface band that
   // ignores the lattice field, so grading has nothing to thicken.
@@ -67,6 +83,12 @@ export function LatticeStep({ inputs }: { inputs: WorkflowInputs }) {
   const gradientPercent = Math.round(store.params.gradientStrength * 1000) / 10;
   const nominalThickness = sheet ? store.params.wallThickness : store.params.strutDiameter;
   const gradientSkinThickness = (nominalThickness * (1 + store.params.gradientStrength)).toFixed(2);
+  const rotation = store.params.latticeRotationDeg ?? DEFAULT_PARAMS.latticeRotationDeg;
+  const cellScale = store.params.cellScale ?? DEFAULT_PARAMS.cellScale;
+  const orientationIsDefault = isIdentityLatticeOrientation(store.params);
+  const orientationSummary = orientationIsDefault
+    ? 'Axis-aligned'
+    : `${rotation.map((angle) => `${angle}°`).join(' / ')} · ×${cellScale.join(' / ')}`;
   const radio = useRadioGroup({
     values: LATTICE_ORDER,
     selected: store.params.latticeType,
@@ -169,10 +191,65 @@ export function LatticeStep({ inputs }: { inputs: WorkflowInputs }) {
         </p>
         {inputs.hasModel && extents && (
           <p className="panel-copy">
-            <span className="mono">{cellsAcross.toFixed(1)}</span> cells across the shortest side at {store.params.cellSize} mm.
+            <span className="mono">{cellsAcross.toFixed(1)}</span> cells across the shortest side at {Number(fitCellSize.toFixed(2))} mm{fitCellSize !== store.params.cellSize ? ' (longest stretched cell edge)' : ''}.
           </p>
         )}
       </PanelSection>
+
+      <Collapsible title="Orientation" subtitle={orientationSummary}>
+        <p className="field-hint" id="lattice-orientation-hint">
+          Rotate the lattice to align struts with load paths or print direction. Angles turn the lattice about the
+          part's X, then Y, then Z axes.
+        </p>
+        {AXES.map((axis, index) => (
+          <div className="row" key={`rotation-${axis}`}>
+            <label htmlFor={`lattice-rotation-${axis.toLowerCase()}`}>Rotation {axis} (°)</label>
+            <NumericInput
+              captureUndoCheckpoint={store.captureUndoCheckpoint}
+              id={`lattice-rotation-${axis.toLowerCase()}`}
+              title={`Lattice rotation about the ${axis} axis, in degrees.`}
+              describedBy="lattice-orientation-hint"
+              value={rotation[index]}
+              min={-LATTICE_ROTATION_LIMIT_DEG} max={LATTICE_ROTATION_LIMIT_DEG} step={5}
+              onCommit={(angle) => store.updateParams({ latticeRotationDeg: withAxis(rotation, index, angle) })}
+            />
+          </div>
+        ))}
+        <p className="field-hint" id="lattice-stretch-hint">
+          Stretch cells: multiplies the cell size along each lattice axis. Wall and strut thickness stay in millimetres.
+        </p>
+        {AXES.map((axis, index) => (
+          <div className="row" key={`stretch-${axis}`}>
+            <label htmlFor={`lattice-stretch-${axis.toLowerCase()}`}>Stretch {axis} (×)</label>
+            <NumericInput
+              captureUndoCheckpoint={store.captureUndoCheckpoint}
+              id={`lattice-stretch-${axis.toLowerCase()}`}
+              title={`Cell size multiplier along the lattice ${axis} axis.`}
+              describedBy="lattice-stretch-hint"
+              value={cellScale[index]}
+              min={CELL_SCALE_MIN} max={CELL_SCALE_MAX} step={0.25}
+              onCommit={(factor) => store.updateParams({ cellScale: withAxis(cellScale, index, factor) })}
+            />
+          </div>
+        ))}
+        {perforatedBand && (
+          <p className="field-hint" id="lattice-orientation-perforated-hint">
+            Perforated skins place each hole along the local surface normal, so orientation and stretch do not change them.
+          </p>
+        )}
+        <button
+          type="button"
+          className="btn btn-small"
+          title="Return to an axis-aligned lattice with cubic cells."
+          disabled={orientationIsDefault}
+          onClick={() => store.updateParams({
+            latticeRotationDeg: [...DEFAULT_PARAMS.latticeRotationDeg],
+            cellScale: [...DEFAULT_PARAMS.cellScale],
+          })}
+        >
+          Reset orientation
+        </button>
+      </Collapsible>
 
       <PanelSection title="Density">
         <label className="check-label">

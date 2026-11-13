@@ -2,30 +2,11 @@
 import { useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../store/useStore';
-import { describeSnapshotChanges, type GenerationSnapshot } from '../store/generation-snapshot';
+import { describeSnapshotChanges } from '../store/generation-snapshot';
 import { selectGenerationInputs } from '../store/useResultStaleness';
 import { summarizeValidation } from '../utils/validation-summary';
-import type { LatticeParams } from '../types/project';
+import { diffSnapshotParams } from './pinned-run-diff';
 import { Collapsible } from './PanelChrome';
-
-const DIFF_LABELS: Partial<Record<keyof LatticeParams, string>> = {
-  latticeType: 'type', cellSize: 'cell', wallThickness: 'wall', strutDiameter: 'strut',
-  shellThickness: 'shell', exportResolution: 'resolution', minFeatureSize: 'min feature',
-  toleranceMm: 'tolerance', escapeHoles: 'holes', surfaceOnly: 'surface-only', noShell: 'no shell',
-  thinSectionFilter: 'remove features', surfaceDepth: 'depth', escapeHoleCount: 'hole count',
-  escapeHoleDiameter: 'hole Ø',
-};
-
-function diffParams(a: GenerationSnapshot | null, b: GenerationSnapshot | null): string[] {
-  if (!a || !b) return [];
-  const out: string[] = [];
-  for (const key of Object.keys(DIFF_LABELS) as (keyof LatticeParams)[]) {
-    if (a.params[key] !== b.params[key]) out.push(`${DIFF_LABELS[key]} ${String(a.params[key])} → ${String(b.params[key])}`);
-  }
-  if (a.generationSeed !== b.generationSeed) out.push('seed');
-  if (a.keepOutCount !== b.keepOutCount || a.keepInCount !== b.keepInCount) out.push('painted faces');
-  return out;
-}
 
 export function PinnedRunPanel() {
   const resultMesh = useStore((s) => s.resultMesh);
@@ -49,7 +30,7 @@ export function PinnedRunPanel() {
   })));
   const inputs = useMemo(() => selectGenerationInputs(inputSlice), [inputSlice]);
 
-  const diff = useMemo(() => diffParams(pinnedRun?.snapshot ?? null, resultSnapshot), [pinnedRun, resultSnapshot]);
+  const diff = useMemo(() => diffSnapshotParams(pinnedRun?.snapshot ?? null, resultSnapshot), [pinnedRun, resultSnapshot]);
   const pinnedVsForm = useMemo(
     () => (pinnedRun?.snapshot ? describeSnapshotChanges(pinnedRun.snapshot, inputs) : []),
     [inputs, pinnedRun],

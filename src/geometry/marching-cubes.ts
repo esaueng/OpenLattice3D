@@ -111,6 +111,30 @@ const CORNER_X = new Uint8Array([0, 1, 1, 0, 0, 1, 1, 0]);
 const CORNER_Y = new Uint8Array([0, 0, 1, 1, 0, 0, 1, 1]);
 const CORNER_Z = new Uint8Array([0, 0, 0, 0, 1, 1, 1, 1]);
 const TRI_COUNTS = new Uint8Array(TRI_TABLE.map((triList) => triList.length / 3));
+/** Grid axis each cube edge runs along (0 = x, 1 = y, 2 = z). */
+const EDGE_AXIS = new Uint8Array([0, 1, 0, 1, 0, 1, 0, 1, 2, 2, 2, 2]);
+/** Kind code of a vertex that lies exactly on a grid sample; see GridVertexIds. */
+const CORNER_KIND = 3;
+
+/**
+ * Canonical id per vertex reference of a marching-cubes extraction, derived
+ * from the whole sampling grid so every window of the grid agrees.
+ *
+ * With `sample = x + y * (gridCells[0] + 1) + z * (gridCells[0] + 1) * (gridCells[1] + 1)`
+ * the whole-grid index of a sample, a vertex strictly inside the grid edge
+ * that starts at `sample` and runs along `axis` has id `sample * 4 + axis`,
+ * and a vertex whose Float32 position is exactly a grid sample's position
+ * (t = 0 or 1 after rounding) has id `sample * 4 + 3` whichever edge emitted
+ * it. Two vertex references share an id exactly when their Float32 positions
+ * are equal, which is the equivalence the position weld in
+ * `closeBoundaryLoops` computes. Ids are below 4 * 265^3, so they fit Uint32.
+ */
+export interface GridVertexIds {
+  /** One id per vertex reference: three per triangle, in triangle order. */
+  ids: Uint32Array;
+  /** Cell counts of the whole sampling grid the ids index. */
+  gridCells: Vec3;
+}
 
 export interface MarchingCubesResult {
   /** Optional per-vertex normals (9 per triangle) prepared off the main thread for display. */
@@ -118,6 +142,17 @@ export interface MarchingCubesResult {
   positions: Float32Array;
   normals: Float32Array;
   triCount: number;
+  /**
+   * Grid vertex ids, present only when requested with `{ vertexIds: true }`
+   * and provable for this grid (see `gridVertexIdAxes`). Any operation that
+   * moves, adds, drops or reorders triangles invalidates them.
+   */
+  vertexIds?: GridVertexIds;
+}
+
+export interface MarchingCubesOptions {
+  /** Also emit `vertexIds`, letting `closeBoundaryLoops` skip position hashing. */
+  vertexIds?: boolean;
 }
 
 export interface GridSdfSampler {
@@ -214,11 +249,74 @@ function interpolateEdgeVertices(
   }
 }
 
+/**
+ * Float32 coordinates of the whole grid's sample planes along each axis,
+ * computed exactly as extraction computes cube corners, or null when two
+ * planes round to the same Float32 value (so a corner id could not stand for
+ * a unique position) or the ids would not fit Uint32.
+ */
+function gridVertexIdAxes(bounds: { min: Vec3; max: Vec3 }, gridCells: Vec3): Float32Array[] | null {
+  const samples = (gridCells[0] + 1) * (gridCells[1] + 1) * (gridCells[2] + 1);
+  if (!Number.isSafeInteger(samples) || samples * 4 > 0x100000000) return null;
+  const axes: Float32Array[] = [];
+  for (let axis = 0; axis < 3; axis++) {
+    const n = gridCells[axis];
+    const min = bounds.min[axis];
+    const d = (bounds.max[axis] - min) / n;
+    const coords = new Float32Array(n + 1);
+    for (let k = 0; k <= n; k++) {
+      coords[k] = min + k * d;
+      if (k > 0 && !(coords[k] > coords[k - 1])) return null;
+    }
+    axes.push(coords);
+  }
+  return axes;
+}
+
+/**
+ * Canonical ids of the interpolated edge vertices of one cube at whole-grid
+ * cube coordinate (gx, gy, gz). An x-edge vertex is `ax + t * (bx - ax)` with
+ * y and z exactly the edge's grid coordinates (`ay + t * 0`), so after Float32
+ * rounding it equals the start sample, the end sample, or lies strictly
+ * between them — on no other edge or sample. Returns false if rounding put it
+ * anywhere else (or it is NaN), in which case ids cannot be trusted.
+ */
+function canonicalEdgeIds(
+  edges: number,
+  edgeVerts: Float32Array,
+  edgeIds: Uint32Array,
+  axes: Float32Array[],
+  gx: number,
+  gy: number,
+  gz: number,
+  strideY: number,
+  strideZ: number,
+): boolean {
+  const ax = axes[0], ay = axes[1], az = axes[2];
+  for (let edge = 0; edge < 12; edge++) {
+    if ((edges & (1 << edge)) === 0) continue;
+    const a = EDGE_START[edge];
+    const axis = EDGE_AXIS[edge];
+    const cx = gx + CORNER_X[a], cy = gy + CORNER_Y[a], cz = gz + CORNER_Z[a];
+    const start = cx + cy * strideY + cz * strideZ;
+    let lo: number, hi: number, step: number;
+    if (axis === 0) { lo = ax[cx]; hi = ax[cx + 1]; step = 1; }
+    else if (axis === 1) { lo = ay[cy]; hi = ay[cy + 1]; step = strideY; }
+    else { lo = az[cz]; hi = az[cz + 1]; step = strideZ; }
+    const v = edgeVerts[edge * 3 + axis];
+    if (v === lo) edgeIds[edge] = start * 4 + CORNER_KIND;
+    else if (v === hi) edgeIds[edge] = (start + step) * 4 + CORNER_KIND;
+    else if (v > lo && v < hi) edgeIds[edge] = start * 4 + axis;
+    else return false;
+  }
+  return true;
+}
+
 function emitCubeTriangles(
   triList: number[],
   edgeVerts: Float32Array,
   positions: Float32Array,
-  writeOffset: number
+  writeOffset: number,
 ): number {
   let offset = writeOffset;
   for (let i = 0; i < triList.length; i += 3) {
@@ -243,6 +341,50 @@ function emitCubeTriangles(
       continue;
     }
 
+    positions[offset++] = ax;
+    positions[offset++] = ay;
+    positions[offset++] = az;
+    positions[offset++] = bx;
+    positions[offset++] = by;
+    positions[offset++] = bz;
+    positions[offset++] = cx;
+    positions[offset++] = cy;
+    positions[offset++] = cz;
+  }
+  return offset;
+}
+
+/**
+ * `emitCubeTriangles` that also writes each emitted vertex's grid id (from
+ * `canonicalEdgeIds`) at `ids[offset / 3]`. Kept separate so extraction
+ * without ids runs the unchanged loop.
+ */
+function emitCubeTrianglesWithIds(
+  triList: number[],
+  edgeVerts: Float32Array,
+  edgeIds: Uint32Array,
+  positions: Float32Array,
+  ids: Uint32Array,
+  writeOffset: number,
+): number {
+  let offset = writeOffset;
+  let idOffset = writeOffset / 3;
+  for (let i = 0; i < triList.length; i += 3) {
+    const t0 = triList[i + 2], t1 = triList[i + 1], t2 = triList[i];
+    const e0 = t0 * 3, e1 = t1 * 3, e2 = t2 * 3;
+    const ax = edgeVerts[e0], ay = edgeVerts[e0 + 1], az = edgeVerts[e0 + 2];
+    const bx = edgeVerts[e1], by = edgeVerts[e1 + 1], bz = edgeVerts[e1 + 2];
+    const cx = edgeVerts[e2], cy = edgeVerts[e2 + 1], cz = edgeVerts[e2 + 2];
+    if (
+      (ax === bx && ay === by && az === bz) ||
+      (ax === cx && ay === cy && az === cz) ||
+      (bx === cx && by === cy && bz === cz)
+    ) {
+      continue;
+    }
+    ids[idOffset++] = edgeIds[t0];
+    ids[idOffset++] = edgeIds[t1];
+    ids[idOffset++] = edgeIds[t2];
     positions[offset++] = ax;
     positions[offset++] = ay;
     positions[offset++] = az;
@@ -381,9 +523,10 @@ export function marchingCubesFromField(
   bounds: { min: Vec3; max: Vec3 },
   cells: Vec3,
   isoValue: number = 0,
-  onProgress?: (fraction: number) => void
+  onProgress?: (fraction: number) => void,
+  options: MarchingCubesOptions = {},
 ): MarchingCubesResult {
-  return extractFieldWindow(field, bounds, cells, [0, 0, 0], cells, isoValue, onProgress, null);
+  return extractFieldWindow(field, bounds, cells, [0, 0, 0], cells, isoValue, onProgress, null, options.vertexIds === true);
 }
 
 /** Triangles extracted from one window of a larger grid. */
@@ -403,7 +546,10 @@ export interface FieldWindowResult extends MarchingCubesResult {
  * grid index `origin`. Vertex coordinates are computed from the whole grid's
  * bounds and cell counts exactly as `marchingCubesFromField` computes them for
  * the whole grid, so the triangles of every window are bit-identical to the
- * whole-grid triangles of the same cubes.
+ * whole-grid triangles of the same cubes. Requested `vertexIds` index the
+ * whole grid too, so interleaving them by `rowTriangleStarts` exactly as the
+ * positions yields the whole-grid ids. If any window returns no `vertexIds`,
+ * drop them for the merged mesh.
  */
 export function marchingCubesFromFieldWindow(
   field: Float32Array,
@@ -412,6 +558,7 @@ export function marchingCubesFromFieldWindow(
   origin: Vec3,
   cells: Vec3,
   isoValue: number = 0,
+  options: MarchingCubesOptions = {},
 ): FieldWindowResult {
   for (let axis = 0; axis < 3; axis++) {
     if (
@@ -423,7 +570,9 @@ export function marchingCubesFromFieldWindow(
     }
   }
   const rowTriangleStarts = new Uint32Array(cells[1] * cells[2] + 1);
-  const result = extractFieldWindow(field, gridBounds, gridCells, origin, cells, isoValue, undefined, rowTriangleStarts);
+  const result = extractFieldWindow(
+    field, gridBounds, gridCells, origin, cells, isoValue, undefined, rowTriangleStarts, options.vertexIds === true,
+  );
   return { ...result, rowTriangleStarts };
 }
 
@@ -436,6 +585,7 @@ function extractFieldWindow(
   isoValue: number,
   onProgress: ((fraction: number) => void) | undefined,
   rowTriangleStarts: Uint32Array | null,
+  emitVertexIds: boolean,
 ): MarchingCubesResult {
   const nx = cells[0], ny = cells[1], nz = cells[2];
   const ox = origin[0], oy = origin[1], oz = origin[2];
@@ -472,6 +622,12 @@ function extractFieldWindow(
   const allPositions = new Float32Array(maxTriCount * 9);
   let writeOffset = 0;
 
+  const idAxes = emitVertexIds ? gridVertexIdAxes(bounds, gridCells) : null;
+  let allIds = idAxes ? new Uint32Array(maxTriCount * 3) : null;
+  const edgeIds = new Uint32Array(12);
+  const gridStrideY = gridCells[0] + 1;
+  const gridStrideZ = gridStrideY * (gridCells[1] + 1);
+
   // Grid coordinates are (origin + local) * spacing from the grid minimum;
   // with a zero origin this is the whole-grid computation, bit for bit.
   for (let z = 0; z < nz; z++) {
@@ -500,7 +656,12 @@ function extractFieldWindow(
           z0,
           z1
         );
-        writeOffset = emitCubeTriangles(TRI_TABLE[cubeIndex], edgeVerts, allPositions, writeOffset);
+        if (allIds && !canonicalEdgeIds(edges, edgeVerts, edgeIds, idAxes!, ox + x, oy + y, oz + z, gridStrideY, gridStrideZ)) {
+          allIds = null;
+        }
+        writeOffset = allIds
+          ? emitCubeTrianglesWithIds(TRI_TABLE[cubeIndex], edgeVerts, edgeIds, allPositions, allIds, writeOffset)
+          : emitCubeTriangles(TRI_TABLE[cubeIndex], edgeVerts, allPositions, writeOffset);
       }
     }
   }
@@ -530,5 +691,11 @@ function extractFieldWindow(
     }
   }
 
-  return { positions, normals, triCount };
+  if (!allIds) return { positions, normals, triCount };
+  return {
+    positions,
+    normals,
+    triCount,
+    vertexIds: { ids: allIds.subarray(0, triCount * 3), gridCells: [gridCells[0], gridCells[1], gridCells[2]] },
+  };
 }

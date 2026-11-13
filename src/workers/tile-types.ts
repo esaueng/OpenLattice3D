@@ -13,6 +13,14 @@ export interface LatticeTileJob {
   sphereRadius: number;
   bounds: { min: Vec3; max: Vec3 };
   cells: Vec3;
+  /**
+   * The whole sampling grid this tile is a window of, and the tile's first
+   * cell in it. Escape holes are placed from the grid bounds and the grid's
+   * outer faces are sealed, as the single-worker path does to its field.
+   */
+  gridBounds: { min: Vec3; max: Vec3 };
+  gridCells: Vec3;
+  origin: Vec3;
 }
 
 /**
@@ -65,6 +73,14 @@ export interface LatticeTileResult {
   timing: LatticeTileTiming;
   /** Imported-mesh tiles: first triangle of each cube row, then triCount. */
   rowTriangleStarts?: Uint32Array;
+  /**
+   * Imported-mesh tiles: whole-grid vertex id per vertex reference (three per
+   * triangle, `positions.length / 3` in all), from
+   * `marchingCubesFromFieldWindow`. Absent when ids could not be proven for
+   * the grid; the merge then drops ids for every tile. Never forwarded to the
+   * main thread.
+   */
+  vertexIds?: Uint32Array;
 }
 
 export interface LatticeTileError {

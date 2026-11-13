@@ -10,7 +10,14 @@ import { arch } from 'node:os';
 import { describe, expect, it } from 'vitest';
 import { buildShapeSdf } from '../backend/fixtures';
 import { buildSampleShapeLattice } from '../geometry/lattice';
-import { marchingCubesRectangular, type MarchingCubesResult } from '../geometry/marching-cubes';
+import {
+  marchingCubesFromField,
+  marchingCubesRectangular,
+  sampleSdfField,
+  sealFieldBoundary,
+  type MarchingCubesResult,
+} from '../geometry/marching-cubes';
+import { closeBoundaryLoops, closeExtractedBoundaryLoops, type RepairWorkCounters } from '../geometry/mesh-repair';
 import { sampleShapeBounds, sampleShapeObjectSdf } from '../geometry/sample-shapes';
 import type { Vec3 } from '../geometry/vec3';
 import { DEFAULT_PARAMS, type LatticeParams, type SampleShape } from '../types/project';
@@ -364,6 +371,33 @@ describe('sample-shape characterization', () => {
       const hash = `${stats.tilesTotal}/${stats.tilesSkipped}/${stats.tilesProcessed}:${jobsHash(jobs)}:${meshHash(result)}`;
       if (capture) captured.tiled[shape] = hash;
       else expect(hash).toBe(GOLDEN_TILED[shape]);
+
+      // Procedural tiles merge by tile id, not whole-grid emission order, so
+      // they carry no grid vertex ids and cleanup keeps the position hash.
+      expect(result.vertexIds).toBeUndefined();
+      const counters: RepairWorkCounters = { corners: 0, weldProbes: 0, edgeVisits: 0, loopSteps: 0 };
+      const cleaned = closeExtractedBoundaryLoops(result, counters).result;
+      expect(counters.gridIdCorners).toBeUndefined();
+      expect(meshHash(cleaned)).toBe(meshHash(closeBoundaryLoops(result).result));
+    });
+
+    it('closes the whole-grid gyroid identically through grid vertex ids', () => {
+      // The cpu-single sequence from lattice-worker.ts (no escape holes).
+      const params: LatticeParams = { ...DEFAULT_PARAMS, latticeType: 'gyroid' };
+      const bounds = sampleShapeBounds(shape, SPHERE_RADIUS, params.cellSize * 0.5);
+      const cells: Vec3 = [96, 96, 96];
+      const field = sampleSdfField(buildSampleShapeLattice(shape, SPHERE_RADIUS, params, SEED), bounds, cells);
+      sealFieldBoundary(field, cells, 0);
+      const raw = marchingCubesFromField(field, bounds, cells, 0, undefined, { vertexIds: true });
+      expect(raw.vertexIds?.ids.length).toBe(raw.triCount * 3);
+      expect(meshHash(raw)).toBe(meshHash(marchingCubesFromField(field, bounds, cells, 0)));
+      const counters: RepairWorkCounters = { corners: 0, weldProbes: 0, edgeVisits: 0, loopSteps: 0 };
+      const viaIds = closeExtractedBoundaryLoops(raw, counters);
+      expect(counters.gridIdCorners).toBe(raw.triCount * 3);
+      expect(viaIds.result.vertexIds).toBeUndefined();
+      const viaHash = closeBoundaryLoops(raw);
+      expect(meshHash(viaIds.result)).toBe(meshHash(viaHash.result));
+      expect(viaIds.report).toEqual(viaHash.report);
     });
 
     it('keeps every sparse tile-skip decision across a sweep of grids', async () => {

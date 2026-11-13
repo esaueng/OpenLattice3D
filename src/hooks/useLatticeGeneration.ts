@@ -7,7 +7,7 @@ import {
   trackLatticeCells,
   trackUsage,
 } from '../analytics';
-import { latticeCellCount, modelExtents } from '../utils/model-summary';
+import { effectiveCellSizes, latticeCellCount, modelExtents } from '../utils/model-summary';
 import { workerFailure } from '../utils/failure-cause';
 import { useStore } from '../store/useStore';
 import type { WorkerMessage } from '../workers/lattice-worker';
@@ -142,7 +142,7 @@ export function useLatticeGeneration(): LatticeGenerationControls {
     // Counted from the run's own inputs: unit cells across the model's bounding box.
     const cellEstimate = latticeCellCount(
       modelExtents(store.meshInfo, store.sampleShape, store.sphereRadius)?.size ?? null,
-      store.params.cellSize,
+      effectiveCellSizes(store.params.cellSize, store.params.cellScale).volumeEquivalent,
     );
     const generationSeed = store.generationSeed;
     const resolution = Math.round(24 + store.params.exportResolution * 24);

@@ -1,4 +1,8 @@
-import { generationSampleCount } from '../geometry/generation-limits';
+import {
+  assertGenerationGrid,
+  fullFieldRequirement,
+  MAX_SINGLE_GENERATION_GRID,
+} from '../geometry/generation-limits';
 // Web Worker for lattice generation (SDF sampling + marching cubes)
 // This runs heavy computation off the main thread.
 
@@ -18,7 +22,7 @@ import {
   sampleSphereRadius,
 } from '../geometry/sample-shapes';
 import { MeshBVH } from '../geometry/bvh';
-import { closeBoundaryLoops } from '../geometry/mesh-repair';
+import { closeExtractedBoundaryLoops } from '../geometry/mesh-repair';
 import {
   cutEscapeHolesInField,
   shouldApplyEscapeHoles,
@@ -375,7 +379,17 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         ? { ...params, escapeHoles: false }
         : params;
       const resolution = msg.resolution ?? 64;
-      generationSampleCount([resolution, resolution, resolution]);
+      // Pick the memory limit for the path this run will take and refuse an
+      // oversized grid before building a BVH, sampling or scheduling tiles.
+      // cpu-single holds the whole field; cpu-tiled only one tile per worker.
+      const fullFieldReason = msg.demoMode
+        ? 'the comparison grid runs in a single worker'
+        : fullFieldRequirement(params);
+      assertGenerationGrid(
+        [resolution, resolution, resolution],
+        fullFieldReason === null ? 'cpu-tiled' : 'cpu-single',
+        fullFieldReason,
+      );
       let sdf: SdfFunction;
       let objectSdf: ((x: number, y: number, z: number) => number) | null = null;
       let surfaceHexSdf: SdfFunction | null = null;
@@ -585,14 +599,12 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
       }
 
       // Morphological opening is a whole-volume distance transform; tiling it
-      // would make neighbouring seams disagree.
+      // would make neighbouring seams disagree (see fullFieldRequirement).
       // Imported meshes tile too: workers share the BVH and sample windows
       // of the same grid, so the result matches the single-worker path.
       const tileWorkerPoolAvailable = Boolean(
         (shape || bvh)
-        && !isSurfacePolygon
-        && !isDemoGrid
-        && !thinFilterActive
+        && fullFieldReason === null
         && tileWorkerCount() > 0
       );
       const selectedBackend: TileBackend = tileWorkerPoolAvailable ? 'cpu-tiled' : 'cpu-single';
@@ -644,7 +656,11 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
           if (cancelled) throw new Error('Cancelled');
           // Tiles are extracted open along their seams and merged here, so the
           // whole-surface repair belongs after the merge rather than per tile.
-          const result = closeBoundaryLoops(rawTiledResult).result;
+          // Imported-mesh tiles merge in whole-grid emission order and carry
+          // grid vertex ids for a faster weld; procedural tiles carry none and
+          // use the position hash (see mergeTileResults). Output is identical
+          // either way, and the ids are dropped here, never posted.
+          const result = closeExtractedBoundaryLoops(rawTiledResult).result;
           postMessage({
             type: 'progress',
             progress: 0.95,
@@ -662,6 +678,9 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         } catch (err: unknown) {
           terminateTileWorkers();
           if (cancelled) throw new Error('Cancelled', { cause: err });
+          // Above the single-field limit there is nothing to fall back to:
+          // report the tiled failure (e.g. the triangle budget) itself.
+          if (resolution > MAX_SINGLE_GENERATION_GRID) throw err;
           const message = err instanceof Error ? err.message : 'unknown error';
           postMessage({
             type: 'progress',
@@ -755,9 +774,11 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
           overallProgress,
           `Marching cubes: ${percent}% (~${estimateLabel} remaining)`,
         );
-      });
+      }, { vertexIds: true });
 
-      const result = closeBoundaryLoops(rawResult).result;
+      // Whole-grid extraction: grid vertex ids replace position hashing in the
+      // weld (byte-identical output); they are consumed here, never posted.
+      const result = closeExtractedBoundaryLoops(rawResult).result;
 
       postMessage({ type: 'progress', progress: 0.95, message: 'Geometry ready' } as WorkerResponse);
 

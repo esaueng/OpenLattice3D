@@ -1,12 +1,13 @@
 // CPU tile worker: builds one non-overlapping marching-cubes tile.
-import { marchingCubesRectangular, type MarchingCubesResult } from '../geometry/marching-cubes';
-import { buildSampleShapeLattice } from '../geometry/lattice';
+import type { MarchingCubesResult } from '../geometry/marching-cubes';
 import { computeMeshTile, createMeshTileContext, type MeshTileContext } from './mesh-tiles';
-import type { LatticeTileJob, LatticeTileResponse, MeshTileJob, TileWorkerMessage } from './tile-types';
+import { computeShapeTile } from './shape-tiles';
+import type { LatticeTileResponse, TileWorkerMessage } from './tile-types';
 import { failureCause } from '../utils/failure-cause';
 
-type SdfFunction = (x: number, y: number, z: number) => number;
 type WorkerPostMessage = (message: unknown, transfer: Transferable[]) => void;
+
+type TileJob = Extract<TileWorkerMessage, { type: 'tile' | 'mesh-tile' }>;
 
 const postWorkerMessage = self.postMessage.bind(self) as WorkerPostMessage;
 
@@ -16,18 +17,14 @@ const postWorkerMessage = self.postMessage.bind(self) as WorkerPostMessage;
 let meshContext: MeshTileContext | null = null;
 let meshInitError: string | null = null;
 
-function buildShapeSdf(msg: LatticeTileJob): SdfFunction {
-  return buildSampleShapeLattice(msg.shape, msg.sphereRadius, msg.params, msg.generationSeed);
-}
-
-function runTile(msg: LatticeTileJob | MeshTileJob): MarchingCubesResult & { rowTriangleStarts?: Uint32Array } {
+function runTile(msg: TileJob): MarchingCubesResult & { rowTriangleStarts?: Uint32Array } {
   if (msg.type === 'mesh-tile') {
     if (!meshContext) throw new Error(meshInitError ?? 'Tile worker received a mesh tile before its mesh');
     return computeMeshTile(meshContext, msg);
   }
   // The host disables tiling whenever morphological opening is active,
   // because the distance transform must see the complete volume.
-  return marchingCubesRectangular(buildShapeSdf(msg), msg.bounds, msg.cells, 0);
+  return computeShapeTile(msg);
 }
 
 self.onmessage = (event: MessageEvent<TileWorkerMessage>) => {
@@ -52,6 +49,10 @@ self.onmessage = (event: MessageEvent<TileWorkerMessage>) => {
     const positions = result.positions.byteLength === result.positions.buffer.byteLength
       ? result.positions : result.positions.slice();
     const rowTriangleStarts = result.rowTriangleStarts;
+    // Mesh tiles: grid vertex ids, trimmed to the emitted references like the
+    // positions above. Procedural tiles have none (they merge by tile id).
+    const gridIds = result.vertexIds?.ids;
+    const vertexIds = gridIds && gridIds.byteLength !== gridIds.buffer.byteLength ? gridIds.slice() : gridIds;
     const response: LatticeTileResponse = {
       type: 'result',
       tileId: msg.tileId,
@@ -63,9 +64,11 @@ self.onmessage = (event: MessageEvent<TileWorkerMessage>) => {
         triCount: result.triCount,
       },
       ...(rowTriangleStarts ? { rowTriangleStarts } : {}),
+      ...(vertexIds ? { vertexIds } : {}),
     };
     const transfer: Transferable[] = [positions.buffer, result.normals.buffer];
     if (rowTriangleStarts) transfer.push(rowTriangleStarts.buffer);
+    if (vertexIds) transfer.push(vertexIds.buffer);
     postWorkerMessage(response, transfer);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown tile worker error';

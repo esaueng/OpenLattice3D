@@ -152,7 +152,7 @@ less-used settings sit under **More options**. Generate is always available in t
   individual holes.
 - **Wall Thickness / Strut Diameter**: lattice feature size depending on type.
 - **Min Feature Size & Tolerance**: validation targets.
-- **Export Resolution**: marching cubes sampling density (1–10).
+- **Export Resolution**: marching cubes sampling density (1–10; 11–12 run in tiles only and need roughly 1 GB of memory, see `docs/performance/large-parts.md`).
 - **Remove Features**: applies a morphological opening that removes features
   below the selected width without uniformly thinning geometry that survives.
   The run log reports when the export grid cannot resolve the requested width.

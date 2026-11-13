@@ -72,6 +72,58 @@ describe('OpenLattice3D project files', () => {
     expect(restored.warnings.join(' ')).toMatch(/fingerprint/);
   });
 
+  it('round-trips lattice orientation and stretched cells', () => {
+    const exported = createProjectFile({
+      params: { ...DEFAULT_PARAMS, latticeRotationDeg: [10, -45, 180], cellScale: [0.5, 1, 2.25] },
+      generationSeed: 9,
+      source: { kind: 'sample', fileName: 'cube', shape: 'cube', sphereRadius: 25 },
+      keepOutTris: new Set(),
+      keepInTris: new Set(),
+      validation: null,
+      clipPlane: { axis: 'z', position: 0.5, flipped: false },
+      viewerBackground: '#000000',
+    });
+    const restored = parseProjectFile(JSON.parse(JSON.stringify(exported)));
+    expect(restored.kind).toBe('project');
+    if (restored.kind !== 'project') return;
+    expect(restored.warnings).toEqual([]);
+    expect(restored.params.latticeRotationDeg).toEqual([10, -45, 180]);
+    expect(restored.params.cellScale).toEqual([0.5, 1, 2.25]);
+  });
+
+  it('loads version 3 projects saved before orientation existed at the identity', () => {
+    const exported = JSON.parse(JSON.stringify(cubeProject())) as Record<string, unknown>;
+    const parameters = exported.parameters as Record<string, unknown>;
+    delete parameters.latticeRotationDeg;
+    delete parameters.cellScale;
+    const restored = parseProjectFile(exported);
+    expect(restored.kind).toBe('project');
+    if (restored.kind !== 'project') return;
+    expect(restored.warnings).toEqual([]);
+    expect(restored.params.latticeRotationDeg).toEqual([0, 0, 0]);
+    expect(restored.params.cellScale).toEqual([1, 1, 1]);
+  });
+
+  it('drops out-of-range orientation entries with a warning', () => {
+    const exported = JSON.parse(JSON.stringify(cubeProject())) as Record<string, unknown>;
+    const parameters = exported.parameters as Record<string, unknown>;
+    parameters.latticeRotationDeg = [0, 0, 720];
+    parameters.cellScale = [1, 1, 10];
+    const restored = parseProjectFile(exported);
+    expect(restored.kind).toBe('project');
+    if (restored.kind !== 'project') return;
+    expect(restored.warnings.join(' ')).toMatch(/latticeRotationDeg, cellScale/);
+    expect(restored.params.latticeRotationDeg).toEqual([0, 0, 0]);
+    expect(restored.params.cellScale).toEqual([1, 1, 1]);
+  });
+
+  it('imports orientation from parameter-only JSON', () => {
+    const restored = parseProjectFile({ latticeType: 'octet', latticeRotationDeg: [0, 0, 45] });
+    expect(restored.kind).toBe('parameters');
+    if (restored.kind !== 'parameters') return;
+    expect(restored.params).toEqual({ latticeType: 'octet', latticeRotationDeg: [0, 0, 45] });
+  });
+
   it('keeps legacy parameter-only JSON importable', () => {
     const restored = parseProjectFile({ parameters: { latticeType: 'bcc', cellSize: 9 } });
     expect(restored.kind).toBe('parameters');

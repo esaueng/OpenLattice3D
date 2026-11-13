@@ -90,4 +90,50 @@ describe('preflight', () => {
     expect(p.estimatedTriangles).toBeGreaterThan(2_000_000);
     expect(p.warnings.some((w) => w.message.includes('M triangles'))).toBe(true);
   });
+
+  it('keeps the default estimate on the tiled path with no large-run warning', () => {
+    const p = buildPreflight(DEFAULT_PARAMS, modelExtents(null, 'sphere', 25), null);
+    expect(p.path).toBe('cpu-tiled');
+    expect(p.maxResolutionLevel).toBe(12);
+    expect(p.warnings).toEqual([]);
+  });
+
+  it('warns about memory and time for tiled levels above the single-field limit', () => {
+    const p = buildPreflight({ ...DEFAULT_PARAMS, exportResolution: 12 }, modelExtents(null, 'sphere', 25), null);
+    expect(p.grid).toBe(312);
+    expect(p.warnings.map((w) => w.level)).toEqual(['warn']);
+    expect(p.warnings[0].message).toMatch(/^Large run: the 312³ grid is above the 264³ single-worker limit and is generated in tiles\. Expect about 4\.3 M triangles, .* roughly 0\.9 GB of memory.*5,000,000 triangles\.$/);
+    expect(formatPreflight(p)).toMatch(/^312³ grid · .* · ~4\.3 M triangles · .* · ~875 MB$/);
+  });
+
+  it('blocks a tiled level whose estimated mesh exceeds the triangle budget', () => {
+    const p = buildPreflight({ ...DEFAULT_PARAMS, exportResolution: 13 }, modelExtents(null, 'sphere', 25), null);
+    expect(p.warnings[0]).toMatchObject({ level: 'block', fix: { params: { exportResolution: 12 } } });
+    expect(p.warnings[0].message).toMatch(/^Resolution 13 \(336³\) is above the 312³ limit: its mesh would likely exceed the 5,000,000 triangle memory budget\.$/);
+  });
+
+  it('blocks levels above 10 when a whole-field feature forces the single-worker path', () => {
+    const params = { ...DEFAULT_PARAMS, exportResolution: 11, thinSectionFilter: 0.5 };
+    const p = buildPreflight(params, modelExtents(null, 'sphere', 25), null);
+    expect(p.path).toBe('cpu-single');
+    expect(p.maxResolutionLevel).toBe(10);
+    expect(p.warnings[0]).toMatchObject({
+      level: 'block',
+      fix: { label: 'Lower resolution to 10', params: { exportResolution: 10 } },
+    });
+    expect(p.warnings[0].message).toMatch(/^Resolution 11 \(288³\) is above the 264³ limit because thin-feature removal needs the whole field in memory/);
+    const lowered = buildPreflight({ ...params, ...p.warnings[0].fix!.params }, modelExtents(null, 'sphere', 25), null);
+    expect(lowered.warnings.some((w) => w.level === 'block')).toBe(false);
+  });
+});
+
+describe('stretched cells in fit checks', () => {
+  it('uses the longest stretched cell edge against the shortest side', () => {
+    const cube = modelExtents(null, 'cube', 25);
+    const plain = buildPreflight({ ...DEFAULT_PARAMS, cellSize: 8 }, cube, null);
+    expect(plain.warnings.filter((w) => /cell/i.test(w.message))).toEqual([]);
+    const stretched = buildPreflight({ ...DEFAULT_PARAMS, cellSize: 8, cellScale: [1, 1, 4] }, cube, null);
+    const fit = stretched.warnings.find((w) => /Stretched cell size 32 mm/.test(w.message));
+    expect(fit?.level).toBe('block');
+  });
 });

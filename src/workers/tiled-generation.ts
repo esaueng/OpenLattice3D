@@ -1,4 +1,9 @@
-import { generationSampleCount, assertGenerationOutputBudget } from '../geometry/generation-limits';
+import {
+  assertGenerationGrid,
+  assertGenerationOutputBudget,
+  MAX_TILE_WORKERS,
+  TILE_SIZE,
+} from '../geometry/generation-limits';
 import type { MarchingCubesResult } from '../geometry/marching-cubes';
 import type { MeshBVH } from '../geometry/bvh';
 import {
@@ -22,9 +27,8 @@ import type {
 } from './tile-types';
 import { DiagnosedError, parseFailureCause, workerFailure } from '../utils/failure-cause';
 
-export const TILE_SIZE = 32;
+export { TILE_SIZE };
 export const ENABLE_SPARSE_TILE_SKIPPING = true;
-const MAX_TILE_WORKERS = 8;
 
 export interface TileWorkerLike {
   onmessage: ((event: { data: unknown }) => void) | null;
@@ -113,7 +117,8 @@ function buildTileJobs(
   resolution: number,
 ): { jobs: LatticeTileJob[]; stats: TileSkipStats } {
   const jobs: LatticeTileJob[] = [];
-  generationSampleCount([resolution, resolution, resolution]);
+  const gridCells: Vec3 = [resolution, resolution, resolution];
+  assertGenerationGrid(gridCells, 'cpu-tiled');
   const dx = (bounds.max[0] - bounds.min[0]) / resolution;
   const dy = (bounds.max[1] - bounds.min[1]) / resolution;
   const dz = (bounds.max[2] - bounds.min[2]) / resolution;
@@ -150,6 +155,9 @@ function buildTileJobs(
           sphereRadius,
           cells: [cellsX, cellsY, cellsZ],
           bounds: tileBounds,
+          gridBounds: bounds,
+          gridCells,
+          origin: [x, y, z],
         });
       }
     }
@@ -160,6 +168,15 @@ function buildTileJobs(
   };
 }
 
+/**
+ * Concatenate procedural tiles in tile-id order. Each tile is extracted over
+ * its own bounds and the tiles of one z slab follow each other whole, so the
+ * merged triangles are not in whole-grid emission order (and their vertex
+ * positions come from tile, not grid, coordinates). Grid vertex ids require
+ * that order, so procedural tiles request none and cleanup keeps the
+ * position-hash weld. Interleaving rows like mergeMeshTilesInGridOrder would
+ * reorder triangles and change the output.
+ */
 function mergeTileResults(results: LatticeTileResult[]): MarchingCubesResult {
   const sorted = [...results].sort((a, b) => a.tileId - b.tileId);
   const triangleCount = sorted.reduce((sum, result) => sum + result.triCount, 0);
@@ -360,10 +377,16 @@ function runTilePool(
           || response.positions.length < response.triCount * 9
           || response.normals.length < response.triCount * 3
           || !Number.isFinite(response.timing?.totalMs)
+          || (response.vertexIds !== undefined && (
+            !(response.vertexIds instanceof Uint32Array)
+            || response.vertexIds.length * 3 !== response.positions.length
+          ))
         ) {
           fail(workerFailure('Tile worker returned a malformed response'));
           return;
         }
+        // Grid vertex ids (at most a third of the position bytes, validated
+        // above) are left out so the triangle budget keeps its thresholds.
         const responseBytes = response.positions.buffer.byteLength
           + (response.normals.buffer === response.positions.buffer ? 0 : response.normals.buffer.byteLength);
         try {

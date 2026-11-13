@@ -8,7 +8,7 @@ import {
   sampleSdfField,
   sealFieldBoundary,
 } from '../geometry/marching-cubes';
-import { closeBoundaryLoops } from '../geometry/mesh-repair';
+import { closeExtractedBoundaryLoops } from '../geometry/mesh-repair';
 import type { Vec3 } from '../geometry/vec3';
 import { runTiledGeneration, type TileWorkerLike } from '../workers/tiled-generation';
 import type { LatticeTileJob, LatticeTileResponse } from '../workers/tile-types';
@@ -65,11 +65,13 @@ export const cpuSingleBackend: MarchingCubesBackend = {
     const fieldEnd = now();
     throwIfCancelled(hooks);
 
-    const raw = marchingCubesFromField(field, fixture.bounds, cells, 0);
+    // As lattice-worker.ts: grid vertex ids from the whole-grid extraction
+    // feed the cleanup weld (identical output, no position hashing).
+    const raw = marchingCubesFromField(field, fixture.bounds, cells, 0, undefined, { vertexIds: true });
     const extractEnd = now();
     throwIfCancelled(hooks);
 
-    const result = closeBoundaryLoops(raw).result;
+    const result = closeExtractedBoundaryLoops(raw).result;
     const cleanupEnd = now();
 
     return Promise.resolve({
@@ -112,8 +114,9 @@ export function createCpuTiledBackend(workerCount = 1): MarchingCubesBackend {
       throwIfCancelled(hooks);
 
       // Tiles are extracted open along their seams; closing belongs after the
-      // merge, exactly as lattice-worker does it.
-      const result = closeBoundaryLoops(merged).result;
+      // merge, exactly as lattice-worker does it. Procedural tiles merge by
+      // tile id and carry no grid vertex ids, so this stays a hash weld.
+      const result = closeExtractedBoundaryLoops(merged).result;
       const cleanupEnd = now();
 
       // Field sampling is fused into tile extraction on CPU, so the tile

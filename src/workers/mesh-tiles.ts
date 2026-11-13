@@ -16,7 +16,7 @@ import {
   escapeHolesSdf,
   shouldApplyEscapeHoles,
 } from '../geometry/escape-holes';
-import { assertGenerationOutputBudget, generationSampleCount } from '../geometry/generation-limits';
+import { assertGenerationGrid, assertGenerationOutputBudget, generationSampleCount } from '../geometry/generation-limits';
 import { buildCombinedSDF, type SdfFunction } from '../geometry/lattice';
 import {
   marchingCubesFromFieldWindow,
@@ -63,7 +63,7 @@ export interface MeshTileContext {
  * rebuilt (they are small distance-only BVHs built from the same triangles).
  */
 export function createMeshTileContext(init: MeshTileInit): MeshTileContext {
-  generationSampleCount(init.gridCells);
+  assertGenerationGrid(init.gridCells, 'cpu-tiled');
   const bvh = MeshBVH.fromSerialized(unpackSerializedMeshBVH(init.bvh));
   return {
     sdf: buildImportedMeshSdf(bvh, init.fieldParams, init.generationSeed, init.keepOutTris, init.keepInTris),
@@ -137,7 +137,9 @@ export function computeMeshTile(context: MeshTileContext, job: Pick<MeshTileJob,
     }
   }
 
-  return marchingCubesFromFieldWindow(field, gridBounds, gridCells, job.origin, job.cells, 0);
+  // Grid vertex ids let the merged mesh skip position hashing in
+  // closeBoundaryLoops; the merge keeps whole-grid emission order they need.
+  return marchingCubesFromFieldWindow(field, gridBounds, gridCells, job.origin, job.cells, 0, { vertexIds: true });
 }
 
 // ─── Sparse tile skipping ────────────────────────────────────────────────
@@ -499,7 +501,7 @@ export function planMeshTiles(options: {
 }): MeshTilePlan {
   const { bvh, serialized, params, bounds, resolution, tileSize } = options;
   const cells: Vec3 = [resolution, resolution, resolution];
-  generationSampleCount(cells);
+  assertGenerationGrid(cells, 'cpu-tiled');
   const sparseSkipping = options.enableSparseSkipping && signIsReliableForSkipping(serialized);
   const outsideMargin = featureMargin(params);
   const insideMargin = outsideMargin + surfaceOnlyReach(params, options.hasKeepOut, options.hasKeepIn);
@@ -563,7 +565,10 @@ export function isValidRowTable(result: LatticeTileResult, job: MeshTileJob): bo
 
 /**
  * Interleave tile rows into whole-grid emission order (z, then y, then x),
- * which reproduces the single-worker triangle order exactly.
+ * which reproduces the single-worker triangle order exactly. When every
+ * processed tile returned grid vertex ids, they are interleaved the same way
+ * and returned as `vertexIds` for `closeBoundaryLoops`; if any tile lacks
+ * them, none are returned and cleanup hashes positions (identical output).
  */
 export function mergeMeshTilesInGridOrder(
   plan: MeshTilePlan,
@@ -574,6 +579,7 @@ export function mergeMeshTilesInGridOrder(
   const byTile: (LatticeTileResult | null)[] = new Array(tilesX * tilesY * plan.tilesPerAxis[2]).fill(null);
   const jobByTile: (MeshTileJob | null)[] = new Array(byTile.length).fill(null);
   let triCount = 0;
+  let withIds = true;
   for (const job of plan.jobs) {
     const result = results[job.tileId];
     if (!result || !isValidRowTable(result, job)) {
@@ -584,10 +590,12 @@ export function mergeMeshTilesInGridOrder(
     byTile[slot] = result;
     jobByTile[slot] = job;
     triCount += result.triCount;
+    if (!(result.vertexIds instanceof Uint32Array) || result.vertexIds.length < result.triCount * 3) withIds = false;
   }
   assertGenerationOutputBudget(triCount);
   const positions = new Float32Array(triCount * 9);
   const normals = new Float32Array(triCount * 3);
+  const ids = withIds ? new Uint32Array(triCount * 3) : null;
   let written = 0;
   for (let gz = 0; gz < resolution; gz++) {
     const tz = Math.floor(gz / plan.tileSize);
@@ -606,9 +614,11 @@ export function mergeMeshTilesInGridOrder(
         if (end === start) continue;
         positions.set(result.positions.subarray(start * 9, end * 9), written * 9);
         normals.set(result.normals.subarray(start * 3, end * 3), written * 3);
+        if (ids) ids.set(result.vertexIds!.subarray(start * 3, end * 3), written * 3);
         written += end - start;
       }
     }
   }
-  return { positions, normals, triCount };
+  if (!ids) return { positions, normals, triCount };
+  return { positions, normals, triCount, vertexIds: { ids, gridCells: [resolution, resolution, resolution] } };
 }
