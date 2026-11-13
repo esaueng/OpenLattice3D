@@ -22,7 +22,7 @@ import {
   sampleSphereRadius,
 } from '../geometry/sample-shapes';
 import { MeshBVH } from '../geometry/bvh';
-import { closeBoundaryLoops } from '../geometry/mesh-repair';
+import { closeExtractedBoundaryLoops } from '../geometry/mesh-repair';
 import {
   cutEscapeHolesInField,
   shouldApplyEscapeHoles,
@@ -656,7 +656,11 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
           if (cancelled) throw new Error('Cancelled');
           // Tiles are extracted open along their seams and merged here, so the
           // whole-surface repair belongs after the merge rather than per tile.
-          const result = closeBoundaryLoops(rawTiledResult).result;
+          // Imported-mesh tiles merge in whole-grid emission order and carry
+          // grid vertex ids for a faster weld; procedural tiles carry none and
+          // use the position hash (see mergeTileResults). Output is identical
+          // either way, and the ids are dropped here, never posted.
+          const result = closeExtractedBoundaryLoops(rawTiledResult).result;
           postMessage({
             type: 'progress',
             progress: 0.95,
@@ -770,9 +774,11 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
           overallProgress,
           `Marching cubes: ${percent}% (~${estimateLabel} remaining)`,
         );
-      });
+      }, { vertexIds: true });
 
-      const result = closeBoundaryLoops(rawResult).result;
+      // Whole-grid extraction: grid vertex ids replace position hashing in the
+      // weld (byte-identical output); they are consumed here, never posted.
+      const result = closeExtractedBoundaryLoops(rawResult).result;
 
       postMessage({ type: 'progress', progress: 0.95, message: 'Geometry ready' } as WorkerResponse);
 

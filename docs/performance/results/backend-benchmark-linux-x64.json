@@ -6,7 +6,7 @@
     "cores": 4,
     "node": "v22.23.4"
   },
-  "startedAt": "2026-11-13T04:03:10.532Z",
+  "startedAt": "2026-11-13T05:51:35.978Z",
   "options": {
     "warmupIterations": 1,
     "iterations": 5
@@ -19,34 +19,34 @@
         {
           "backend": "cpu-single",
           "iterations": 5,
-          "medianTotalMs": 1240.197716999999,
-          "p95TotalMs": 1603.7088339999998,
+          "medianTotalMs": 635.8116660000001,
+          "p95TotalMs": 729.241162,
           "phases": {
-            "fieldMs": 336.17450700000063,
-            "classifyScanEmitMs": 277.468746,
+            "fieldMs": 260.74313900000016,
+            "classifyScanEmitMs": 195.21248400000013,
             "classifyMs": null,
             "scanMs": null,
             "emitMs": null,
             "readbackMs": 0,
             "mergeMs": null,
-            "cleanupMs": 506.2473299999997
+            "cleanupMs": 133.06042799999977
           },
-          "speedupVsCpuTiled": 1.0908439795168559
+          "speedupVsCpuTiled": 1.1616167105685036
         },
         {
           "backend": "cpu-tiled",
           "iterations": 5,
-          "medianTotalMs": 1352.8622129999985,
-          "p95TotalMs": 2066.570221,
+          "medianTotalMs": 738.5694560000002,
+          "p95TotalMs": 811.8459549999998,
           "phases": {
             "fieldMs": null,
-            "classifyScanEmitMs": 930.9791139999925,
+            "classifyScanEmitMs": 471.5244789999997,
             "classifyMs": null,
             "scanMs": null,
             "emitMs": null,
             "readbackMs": 0,
-            "mergeMs": 35.05582499999946,
-            "cleanupMs": 421.9748769999969
+            "mergeMs": 18.831347999997888,
+            "cleanupMs": 247.96966900000007
           },
           "speedupVsCpuTiled": null
         }
@@ -59,34 +59,34 @@
         {
           "backend": "cpu-single",
           "iterations": 5,
-          "medianTotalMs": 688.262622000002,
-          "p95TotalMs": 965.5251790000002,
+          "medianTotalMs": 553.9052840000004,
+          "p95TotalMs": 559.4940929999993,
           "phases": {
-            "fieldMs": 303.05758499999865,
-            "classifyScanEmitMs": 186.0250390000001,
+            "fieldMs": 254.2203329999993,
+            "classifyScanEmitMs": 186.58848000000035,
             "classifyMs": null,
             "scanMs": null,
             "emitMs": null,
             "readbackMs": 0,
             "mergeMs": null,
-            "cleanupMs": 208.153201000001
+            "cleanupMs": 110.52264900000046
           },
-          "speedupVsCpuTiled": 1.0835527038107802
+          "speedupVsCpuTiled": 1.2120743589079017
         },
         {
           "backend": "cpu-tiled",
           "iterations": 5,
-          "medianTotalMs": 745.7688249999992,
-          "p95TotalMs": 1172.4780900000005,
+          "medianTotalMs": 671.3743919999997,
+          "p95TotalMs": 713.345174,
           "phases": {
             "fieldMs": null,
-            "classifyScanEmitMs": 511.9650120000297,
+            "classifyScanEmitMs": 454.75012299999435,
             "classifyMs": null,
             "scanMs": null,
             "emitMs": null,
             "readbackMs": 0,
-            "mergeMs": 35.36551299998246,
-            "cleanupMs": 206.05313199999728
+            "mergeMs": 26.81950900000811,
+            "cleanupMs": 182.602535
           },
           "speedupVsCpuTiled": null
         }

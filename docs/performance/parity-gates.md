@@ -90,9 +90,11 @@ and the benchmark reports no GPU backend.
 
 Latest committed benchmark: `results/backend-benchmark-linux-x64.json`
 (Intel Xeon @ 2.10GHz, 4 cores, Node v22.23.4; November 13, 2026, on a shared
-machine). At resolution 160, cpu-single speedup relative to inline cpu-tiled
-is 1.08x to 1.09x across the two fixtures, with end-to-end medians of
-688–1353 ms. The earlier `results/backend-benchmark-darwin-arm64.json`
+machine, after cpu-single began welding through marching-cubes grid vertex
+ids; see `boundary-loop-cleanup.md`). At resolution 160, cpu-single speedup
+relative to inline cpu-tiled is 1.16x to 1.21x across the two fixtures, with
+end-to-end medians of 554–739 ms (approximate; totals vary by about ±50 ms
+between runs on this machine). The earlier `results/backend-benchmark-darwin-arm64.json`
 (Apple M5 Pro, September 8, 2026) predates the cleanup rewrite, when
 boundary-loop cleanup was 85–92% of each run. These inline CPU measurements do
 not establish GPU or browser multi-worker speedup.

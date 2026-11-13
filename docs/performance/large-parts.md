@@ -109,6 +109,7 @@ the UI uses is T ≈ 44 G².
 | Retained tile results | generator | 48 T (budget-checked per tile, backing buffers counted) | 222 MB |
 | Merge (`mergeTileResults` / `mergeMeshTilesInGridOrder`) | generator | + 48 T, so 96 T while both are live | 443 MB |
 | `closeBoundaryLoops` temporaries | generator | ≈ 56 T (weld ids, first corners, open-addressing table, edge buckets; 66 MB at 1.19 M triangles per `boundary-loop-cleanup.md`), + 48 T′ if it fills holes | ≈ 260 MB |
+| Grid vertex ids (cpu-single and imported-mesh tiles only; approximate) | generator | + 12 T retained per tile + 12 T merged; the id weld then skips the open-addressing table (≈ 27 T), so roughly neutral. Procedural tiles carry none. | n/a for this procedural sphere (an imported mesh at 4.6 M: ≈ +110 MB ids, −125 MB table) |
 | Display and validation copies | generator | vertex normals 36 T + validation positions 36 T + normals 12 T = 84 T, so 132 T live | 610 MB |
 | Transfer to the UI | — | 0 (transfer list, no copy) | — |
 | UI (`LatticeResult`) | main thread | positions 36 T + normals 12 T + vertex normals 36 T = 84 T | 388 MB |

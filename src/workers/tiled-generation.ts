@@ -168,6 +168,15 @@ function buildTileJobs(
   };
 }
 
+/**
+ * Concatenate procedural tiles in tile-id order. Each tile is extracted over
+ * its own bounds and the tiles of one z slab follow each other whole, so the
+ * merged triangles are not in whole-grid emission order (and their vertex
+ * positions come from tile, not grid, coordinates). Grid vertex ids require
+ * that order, so procedural tiles request none and cleanup keeps the
+ * position-hash weld. Interleaving rows like mergeMeshTilesInGridOrder would
+ * reorder triangles and change the output.
+ */
 function mergeTileResults(results: LatticeTileResult[]): MarchingCubesResult {
   const sorted = [...results].sort((a, b) => a.tileId - b.tileId);
   const triangleCount = sorted.reduce((sum, result) => sum + result.triCount, 0);
@@ -368,10 +377,16 @@ function runTilePool(
           || response.positions.length < response.triCount * 9
           || response.normals.length < response.triCount * 3
           || !Number.isFinite(response.timing?.totalMs)
+          || (response.vertexIds !== undefined && (
+            !(response.vertexIds instanceof Uint32Array)
+            || response.vertexIds.length * 3 !== response.positions.length
+          ))
         ) {
           fail(workerFailure('Tile worker returned a malformed response'));
           return;
         }
+        // Grid vertex ids (at most a third of the position bytes, validated
+        // above) are left out so the triangle budget keeps its thresholds.
         const responseBytes = response.positions.buffer.byteLength
           + (response.normals.buffer === response.positions.buffer ? 0 : response.normals.buffer.byteLength);
         try {

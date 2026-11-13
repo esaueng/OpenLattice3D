@@ -73,6 +73,14 @@ export interface LatticeTileResult {
   timing: LatticeTileTiming;
   /** Imported-mesh tiles: first triangle of each cube row, then triCount. */
   rowTriangleStarts?: Uint32Array;
+  /**
+   * Imported-mesh tiles: whole-grid vertex id per vertex reference (three per
+   * triangle, `positions.length / 3` in all), from
+   * `marchingCubesFromFieldWindow`. Absent when ids could not be proven for
+   * the grid; the merge then drops ids for every tile. Never forwarded to the
+   * main thread.
+   */
+  vertexIds?: Uint32Array;
 }
 
 export interface LatticeTileError {

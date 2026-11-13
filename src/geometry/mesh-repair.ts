@@ -411,3 +411,19 @@ export function closeBoundaryLoops(
     report,
   };
 }
+
+/**
+ * `closeBoundaryLoops` for a fresh extraction: welds through the extraction's
+ * own `vertexIds` when it carries them (falling back to the position hash
+ * otherwise, with identical output) and returns a plain mesh without them, so
+ * grid ids never travel further than the cleanup that consumes them.
+ */
+export function closeExtractedBoundaryLoops(
+  extracted: MarchingCubesResult,
+  counters?: RepairWorkCounters,
+): { result: MarchingCubesResult; report: RepairReport } {
+  const { result, report } = closeBoundaryLoops(extracted, counters, { vertexIds: extracted.vertexIds });
+  const mesh: MarchingCubesResult = { ...result };
+  delete mesh.vertexIds;
+  return { result: mesh, report };
+}

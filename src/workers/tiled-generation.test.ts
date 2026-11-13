@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { buildSampleShapeLattice } from '../geometry/lattice';
 import { marchingCubesRectangular, type MarchingCubesResult } from '../geometry/marching-cubes';
 import { DEFAULT_PARAMS } from '../types/project';
-import { closeBoundaryLoops } from '../geometry/mesh-repair';
+import { closeBoundaryLoops, closeExtractedBoundaryLoops, type RepairWorkCounters } from '../geometry/mesh-repair';
 import { analyzeTopology } from '../geometry/__tests__/helpers';
 import type { LatticeTileJob, LatticeTileResponse } from './tile-types';
 import { runTiledGeneration, type TileWorkerLike } from './tiled-generation';
@@ -43,6 +43,24 @@ class ComputingTileWorker implements TileWorkerLike {
   }
 
   terminate(): void { this.terminated = true; }
+}
+
+/** Answers every tile with an empty mesh plus the given `vertexIds` field. */
+class BadIdsTileWorker implements TileWorkerLike {
+  onmessage: ((event: { data: unknown }) => void) | null = null;
+  onerror: ((event: unknown) => void) | null = null;
+  onmessageerror: ((event: unknown) => void) | null = null;
+  private readonly vertexIds: unknown;
+  constructor(vertexIds: unknown) { this.vertexIds = vertexIds; }
+  postMessage(job: LatticeTileJob): void {
+    setTimeout(() => this.onmessage?.({ data: {
+      type: 'result', tileId: job.tileId,
+      positions: new Float32Array(9), normals: new Float32Array(3), triCount: 1,
+      vertexIds: this.vertexIds,
+      timing: { totalMs: 1, triCount: 1 },
+    } }), 0);
+  }
+  terminate(): void {}
 }
 
 class RejectingTileWorker implements TileWorkerLike {
@@ -86,6 +104,36 @@ describe('tile failure causes', () => {
   });
 });
 
+describe('tile response validation', () => {
+  it.each([
+    ['too few ids', new Uint32Array(2)],
+    ['too many ids', new Uint32Array(4)],
+    ['ids of the wrong type', new Int32Array(3)],
+    ['ids that are not an array', [0, 1, 2]],
+  ] as const)('rejects %s as a worker failure', async (_label, vertexIds) => {
+    const error = await runTiledGeneration(
+      DEFAULT_PARAMS, 1, 'sphere', 25,
+      { min: [-29, -29, -29], max: [29, 29, 29] }, 36,
+      () => undefined, () => false,
+      { workerCount: 1, createWorker: () => new BadIdsTileWorker(vertexIds) },
+    ).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toMatch(/malformed response/);
+    expect(failureCause(error)).toBe('worker');
+  });
+
+  it('accepts ids with one entry per vertex reference', async () => {
+    const { result } = await runTiledGeneration(
+      DEFAULT_PARAMS, 1, 'sphere', 25,
+      { min: [-29, -29, -29], max: [29, 29, 29] }, 36,
+      () => undefined, () => false,
+      { workerCount: 1, createWorker: () => new BadIdsTileWorker(new Uint32Array(3)) },
+    );
+    // Procedural merges never forward ids, even when a tile sends them.
+    expect(result.vertexIds).toBeUndefined();
+  });
+});
+
 describe('tiled generation scheduling determinism', () => {
   it.each([
     ['gyroid', 96], ['gyroid', 192], ['bcc', 192],
@@ -112,6 +160,7 @@ describe('tiled generation scheduling determinism', () => {
       exportResolution: 1,
     };
     const hashes: string[] = [];
+    const cleanedHashes: string[] = [];
     const tileCounts: number[] = [];
     for (const workerCount of [1, 2, 4, 8]) {
       const { result, stats } = await runTiledGeneration(
@@ -127,8 +176,16 @@ describe('tiled generation scheduling determinism', () => {
       );
       hashes.push(hash(result));
       tileCounts.push(stats.tilesProcessed);
+      // Procedural tiles stay on the hash weld (merged by tile id, no ids).
+      expect(result.vertexIds).toBeUndefined();
+      const counters: RepairWorkCounters = { corners: 0, weldProbes: 0, edgeVisits: 0, loopSteps: 0 };
+      const cleaned = closeExtractedBoundaryLoops(result, counters).result;
+      expect(counters.gridIdCorners).toBeUndefined();
+      expect(hash(cleaned)).toBe(hash(closeBoundaryLoops(result).result));
+      cleanedHashes.push(hash(cleaned));
     }
     expect(new Set(hashes).size).toBe(1);
+    expect(new Set(cleanedHashes).size).toBe(1);
     expect(new Set(tileCounts).size).toBe(1);
     expect(tileCounts[0]).toBeGreaterThan(1);
   });

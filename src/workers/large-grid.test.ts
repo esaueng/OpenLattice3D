@@ -13,13 +13,14 @@ import {
   type MarchingCubesResult,
 } from '../geometry/marching-cubes';
 import { MeshBVH } from '../geometry/bvh';
-import { closeBoundaryLoops } from '../geometry/mesh-repair';
-import { generateCubeMesh } from '../geometry/mesh-analysis';
+import { closeBoundaryLoops, closeExtractedBoundaryLoops, type RepairWorkCounters } from '../geometry/mesh-repair';
+import { generateCubeMesh, generateSphereMesh } from '../geometry/mesh-analysis';
 import { sampleShapeBounds } from '../geometry/sample-shapes';
 import { analyzeTopology, signedVolume } from '../geometry/__tests__/helpers';
 import { DEFAULT_PARAMS, type LatticeParams } from '../types/project';
+import { computeMeshTile, createMeshTileContext, type MeshTileContext } from './mesh-tiles';
 import { computeShapeTile } from './shape-tiles';
-import type { LatticeTileJob, LatticeTileResponse } from './tile-types';
+import type { LatticeTileJob, LatticeTileResponse, TileWorkerMessage } from './tile-types';
 import { runMeshTiledGeneration, runTiledGeneration, type TileWorkerLike } from './tiled-generation';
 
 function hash(result: MarchingCubesResult): string {
@@ -49,6 +50,36 @@ class ShapeTileWorker implements TileWorkerLike {
     setTimeout(() => this.onmessage?.({ data: response }), (7 - job.tileId % 8) % 3);
   }
   terminate(): void {}
+}
+
+/** Mirrors lattice-tile-worker.ts for imported-mesh tiles, ids included. */
+class MeshTileWorker implements TileWorkerLike {
+  onmessage: ((event: { data: unknown }) => void) | null = null;
+  onerror: ((event: unknown) => void) | null = null;
+  onmessageerror: ((event: unknown) => void) | null = null;
+  private context: MeshTileContext | null = null;
+  postMessage(message: TileWorkerMessage, transfer: Transferable[] = []): void {
+    const msg = structuredClone(message, { transfer });
+    if (msg.type === 'mesh-init') {
+      this.context = createMeshTileContext(msg);
+      return;
+    }
+    if (msg.type !== 'mesh-tile') throw new Error('unexpected job');
+    const result = computeMeshTile(this.context!, msg);
+    const response: LatticeTileResponse = {
+      type: 'result', tileId: msg.tileId,
+      positions: result.positions.slice(), normals: result.normals, triCount: result.triCount,
+      rowTriangleStarts: result.rowTriangleStarts,
+      ...(result.vertexIds ? { vertexIds: result.vertexIds.ids.slice() } : {}),
+      timing: { totalMs: 1, triCount: result.triCount },
+    };
+    setTimeout(() => this.onmessage?.({ data: structuredClone(response) }), (7 - msg.tileId % 8) % 3);
+  }
+  terminate(): void {}
+}
+
+function newCounters(): RepairWorkCounters {
+  return { corners: 0, weldProbes: 0, edgeVisits: 0, loopSteps: 0 };
 }
 
 class RecordingTileWorker implements TileWorkerLike {
@@ -121,6 +152,8 @@ describe('tiled generation above the single-field limit', () => {
         noProgress, notCancelled, { workerCount, createWorker: () => new ShapeTileWorker() },
       );
       expect(stats.tilesSkipped).toBeGreaterThan(stats.tilesProcessed);
+      // Procedural tiles carry no grid vertex ids (merged by tile id).
+      expect(result.vertexIds).toBeUndefined();
       hashes.push(hash(result));
       triangles = result.triCount;
       if (workerCount === 1) {
@@ -128,6 +161,36 @@ describe('tiled generation above the single-field limit', () => {
         expect(topology.boundaryEdges).toBe(0);
         expect(topology.nonManifoldEdges).toBe(0);
       }
+    }
+    expect(triangles).toBeGreaterThan(10_000);
+    expect(new Set(hashes).size).toBe(1);
+  });
+
+  it('welds imported-mesh tiles through grid ids above the old cap, identically for any worker count', async () => {
+    const resolution = 300;
+    expect(resolution).toBeGreaterThan(MAX_SINGLE_GENERATION_GRID);
+    const mesh = generateSphereMesh(12, 32);
+    const bvh = new MeshBVH(mesh.positions, mesh.normals, mesh.triCount);
+    const params: LatticeParams = { ...DEFAULT_PARAMS, cellSize: 6 };
+    const hashes: string[] = [];
+    let triangles = 0;
+    for (const workerCount of [1, 2, 8]) {
+      const { result, stats } = await runMeshTiledGeneration({
+        bvh, params, fieldParams: params, generationSeed: 0x5eed, keepOutTris: [], keepInTris: [],
+        bounds: { min: [-150, -150, -150], max: [150, 150, 150] }, resolution,
+      }, noProgress, notCancelled, { workerCount, shareMemory: false, createWorker: () => new MeshTileWorker() });
+      expect(stats.tilesSkipped).toBeGreaterThan(stats.tilesProcessed);
+      expect(result.vertexIds?.ids.length).toBe(result.triCount * 3);
+      expect(result.vertexIds?.gridCells).toEqual([resolution, resolution, resolution]);
+      const counters = newCounters();
+      const viaIds = closeExtractedBoundaryLoops(result, counters).result;
+      expect(counters.gridIdCorners).toBe(result.triCount * 3);
+      expect(viaIds.vertexIds).toBeUndefined();
+      expect(hash(viaIds)).toBe(hash(closeBoundaryLoops(result).result));
+      const topology = analyzeTopology(viaIds);
+      expect(topology.boundaryEdges).toBe(0);
+      hashes.push(`${hash(result)}/${hash(viaIds)}`);
+      triangles = result.triCount;
     }
     expect(triangles).toBeGreaterThan(10_000);
     expect(new Set(hashes).size).toBe(1);
