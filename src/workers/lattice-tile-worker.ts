@@ -49,6 +49,10 @@ self.onmessage = (event: MessageEvent<TileWorkerMessage>) => {
     const positions = result.positions.byteLength === result.positions.buffer.byteLength
       ? result.positions : result.positions.slice();
     const rowTriangleStarts = result.rowTriangleStarts;
+    // Mesh tiles: grid vertex ids, trimmed to the emitted references like the
+    // positions above. Procedural tiles have none (they merge by tile id).
+    const gridIds = result.vertexIds?.ids;
+    const vertexIds = gridIds && gridIds.byteLength !== gridIds.buffer.byteLength ? gridIds.slice() : gridIds;
     const response: LatticeTileResponse = {
       type: 'result',
       tileId: msg.tileId,
@@ -60,9 +64,11 @@ self.onmessage = (event: MessageEvent<TileWorkerMessage>) => {
         triCount: result.triCount,
       },
       ...(rowTriangleStarts ? { rowTriangleStarts } : {}),
+      ...(vertexIds ? { vertexIds } : {}),
     };
     const transfer: Transferable[] = [positions.buffer, result.normals.buffer];
     if (rowTriangleStarts) transfer.push(rowTriangleStarts.buffer);
+    if (vertexIds) transfer.push(vertexIds.buffer);
     postWorkerMessage(response, transfer);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown tile worker error';

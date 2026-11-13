@@ -9,7 +9,7 @@ import {
   type MarchingCubesResult,
 } from '../geometry/marching-cubes';
 import { generateCubeMesh, generateSphereMesh } from '../geometry/mesh-analysis';
-import { closeBoundaryLoops } from '../geometry/mesh-repair';
+import { closeBoundaryLoops, closeExtractedBoundaryLoops, type RepairWorkCounters } from '../geometry/mesh-repair';
 import type { TriangleMesh } from '../geometry/stl-parser';
 import type { Vec3 } from '../geometry/vec3';
 import { DEFAULT_PARAMS, type LatticeParams } from '../types/project';
@@ -22,8 +22,9 @@ import {
   signIsReliableForSkipping,
   type MeshTileContext,
 } from './mesh-tiles';
-import type { LatticeTileResponse, TileWorkerMessage } from './tile-types';
+import type { LatticeTileResponse, LatticeTileResult, TileWorkerMessage } from './tile-types';
 import { runMeshTiledGeneration, TILE_SIZE, type TileWorkerLike } from './tiled-generation';
+import { failureCause } from '../utils/failure-cause';
 
 /** A sample STL as generation receives it: after intake orientation and repair. */
 function loadStl(name: string): TriangleMesh {
@@ -60,7 +61,7 @@ interface Case {
  * disabled under thin-section filtering, so no opening step): sample, cut
  * escape holes into the field, seal the grid boundary, extract.
  */
-function singleWorkerRaw(c: Case): MarchingCubesResult {
+function singleWorkerRaw(c: Case, vertexIds = false): MarchingCubesResult {
   const bvh = new MeshBVH(c.mesh.positions, c.mesh.normals, c.mesh.triCount);
   const sdf = buildImportedMeshSdf(bvh, c.params, c.seed, c.keepOutTris, c.keepInTris);
   const bounds = generationBounds(c.mesh, c.params);
@@ -68,7 +69,11 @@ function singleWorkerRaw(c: Case): MarchingCubesResult {
   const field = sampleSdfField(sdf, bounds, cells);
   cutEscapeHolesInField(field, bounds, cells, c.params);
   sealFieldBoundary(field, cells, 0);
-  return marchingCubesFromField(field, bounds, cells, 0);
+  return marchingCubesFromField(field, bounds, cells, 0, undefined, { vertexIds });
+}
+
+function newCounters(): RepairWorkCounters {
+  return { corners: 0, weldProbes: 0, edgeVisits: 0, loopSteps: 0 };
 }
 
 /**
@@ -82,6 +87,9 @@ class MeshTileWorker implements TileWorkerLike {
   onmessageerror: ((event: unknown) => void) | null = null;
   private context: MeshTileContext | null = null;
   private terminated = false;
+  /** Rewrites a response before it is sent, to model dropped or corrupt ids. */
+  private readonly edit?: (response: LatticeTileResult) => void;
+  constructor(edit?: (response: LatticeTileResult) => void) { this.edit = edit; }
 
   postMessage(message: TileWorkerMessage, transfer: Transferable[] = []): void {
     const msg = structuredClone(message, { transfer });
@@ -98,8 +106,10 @@ class MeshTileWorker implements TileWorkerLike {
       normals: result.normals,
       triCount: result.triCount,
       rowTriangleStarts: result.rowTriangleStarts,
+      ...(result.vertexIds ? { vertexIds: result.vertexIds.ids.slice() } : {}),
       timing: { totalMs: 1, triCount: result.triCount },
     };
+    this.edit?.(response);
     setTimeout(() => {
       if (!this.terminated) this.onmessage?.({ data: structuredClone(response) });
     }, (7 - msg.tileId % 8) % 4);
@@ -108,7 +118,12 @@ class MeshTileWorker implements TileWorkerLike {
   terminate(): void { this.terminated = true; }
 }
 
-async function tiledRaw(c: Case, workerCount: number, shareMemory: boolean) {
+async function tiledRaw(
+  c: Case,
+  workerCount: number,
+  shareMemory: boolean,
+  edit?: (response: LatticeTileResult) => void,
+) {
   const bvh = new MeshBVH(c.mesh.positions, c.mesh.normals, c.mesh.triCount);
   return runMeshTiledGeneration(
     {
@@ -123,7 +138,7 @@ async function tiledRaw(c: Case, workerCount: number, shareMemory: boolean) {
     },
     () => undefined,
     () => false,
-    { workerCount, shareMemory, createWorker: () => new MeshTileWorker() },
+    { workerCount, shareMemory, createWorker: () => new MeshTileWorker(edit) },
   );
 }
 
@@ -178,16 +193,81 @@ describe('tiled imported-mesh generation', () => {
       keepInTris: [...regions.keepInTris],
       resolution: 72,
     };
-    const single = singleWorkerRaw(c);
+    // The single-worker path as lattice-worker.ts runs it, with grid ids.
+    const single = singleWorkerRaw(c, true);
     expect(single.triCount).toBeGreaterThan(10_000);
-    const singleClean = closeBoundaryLoops(single).result;
+    expect(single.vertexIds?.ids.length).toBe(single.triCount * 3);
+    // Reference: the position-hash weld on the single-worker soup.
+    const hashCounters = newCounters();
+    const singleClean = closeBoundaryLoops(single, hashCounters).result;
+    expect(hashCounters.gridIdCorners).toBeUndefined();
+
+    // Ids are consumed by the cleanup, which must not hand them on.
+    const singleCounters = newCounters();
+    const singleIdClean = closeExtractedBoundaryLoops(single, singleCounters).result;
+    expect(singleCounters.gridIdCorners).toBe(single.triCount * 3);
+    expect(singleIdClean.vertexIds).toBeUndefined();
+    expect(bytesEqual(singleIdClean, singleClean), 'single worker, id weld').toBe(true);
+
     for (const [workerCount, shareMemory] of [[1, false], [2, true], [8, false], [8, true]] as const) {
       const { result, stats } = await tiledRaw(c, workerCount, shareMemory);
       expect(stats.sparseSkipping).toBe(true);
       expect(stats.tilesSkipped).toBeGreaterThan(0);
       expect(stats.tilesProcessed + stats.tilesSkipped).toBe(stats.tilesTotal);
       expect(bytesEqual(result, single), `raw soup, ${workerCount} workers`).toBe(true);
-      expect(bytesEqual(closeBoundaryLoops(result).result, singleClean), `cleaned, ${workerCount} workers`).toBe(true);
+      // Merged tile ids are the whole-grid ids, reference for reference.
+      expect(result.vertexIds?.gridCells).toEqual([c.resolution, c.resolution, c.resolution]);
+      const ids = result.vertexIds!.ids;
+      const singleIds = single.vertexIds!.ids;
+      expect(ids.length === singleIds.length && ids.every((id, i) => id === singleIds[i])).toBe(true);
+      const counters = newCounters();
+      const cleaned = closeExtractedBoundaryLoops(result, counters).result;
+      expect(counters.gridIdCorners, `id weld taken, ${workerCount} workers`).toBe(result.triCount * 3);
+      expect(cleaned.vertexIds).toBeUndefined();
+      expect(bytesEqual(cleaned, singleClean), `cleaned, ${workerCount} workers`).toBe(true);
+      expect(bytesEqual(closeBoundaryLoops(result).result, singleClean), `hash weld, ${workerCount} workers`).toBe(true);
+    }
+  });
+
+  it('merges no ids, and still matches, when any tile returns none', async () => {
+    const c: Case = {
+      mesh: sphere,
+      params: { ...DEFAULT_PARAMS },
+      seed: 0x5eed,
+      keepOutTris: [],
+      keepInTris: [],
+      resolution: 72,
+    };
+    const singleClean = closeBoundaryLoops(singleWorkerRaw(c)).result;
+    const { result } = await tiledRaw(c, 2, true, (response) => {
+      if (response.tileId === 3) delete response.vertexIds;
+    });
+    expect(result.vertexIds).toBeUndefined();
+    const counters = newCounters();
+    const cleaned = closeExtractedBoundaryLoops(result, counters).result;
+    expect(counters.gridIdCorners).toBeUndefined();
+    expect(bytesEqual(cleaned, singleClean)).toBe(true);
+  });
+
+  it('rejects tile ids that do not match the tile positions', async () => {
+    const c: Case = {
+      mesh: sphere,
+      params: { ...DEFAULT_PARAMS },
+      seed: 1,
+      keepOutTris: [],
+      keepInTris: [],
+      resolution: 40,
+    };
+    for (const corrupt of [
+      (response: LatticeTileResult) => { response.vertexIds = response.vertexIds!.subarray(1); },
+      (response: LatticeTileResult) => { response.vertexIds = new Int32Array(response.vertexIds!) as unknown as Uint32Array; },
+    ]) {
+      const error = await tiledRaw(c, 2, false, (response) => {
+        if (response.tileId === 1) corrupt(response);
+      }).catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toMatch(/malformed response/);
+      expect(failureCause(error)).toBe('worker');
     }
   });
 
@@ -211,6 +291,10 @@ describe('tiled imported-mesh generation', () => {
     expect(single.triCount).toBeGreaterThan(1000);
     const { result } = await tiledRaw(c, 3, true);
     expect(bytesEqual(result, single)).toBe(true);
+    const counters = newCounters();
+    const cleaned = closeExtractedBoundaryLoops(result, counters).result;
+    expect(counters.gridIdCorners).toBe(result.triCount * 3);
+    expect(bytesEqual(cleaned, closeBoundaryLoops(single).result)).toBe(true);
   });
 });
 

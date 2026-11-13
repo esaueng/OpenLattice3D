@@ -74,8 +74,9 @@ jobs (load average up to 18 during runs, so absolute numbers are noisy; ratios
 come from interleaved runs).
 
 `npm run bench:backends`, median of 5 warm runs (before: the original code on
-the same machine minutes earlier; after:
-`results/backend-benchmark-linux-x64.json`):
+the same machine minutes earlier; after: the version of
+`results/backend-benchmark-linux-x64.json` committed with that rewrite, since
+superseded by the grid-id wiring below):
 
 | Fixture | Backend | Total before | Total after | Cleanup before | Cleanup after | Cleanup share after |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
@@ -207,25 +208,82 @@ per reference: 14 MB at 1.19 M triangles), so extraction plus cleanup is
 17–24% faster end to end. Extraction without ids is unchanged (measured
 against the pre-change code in a plain-only run, within noise).
 
-`npm run bench:backends` is unchanged by this commit: `cpu-single` mirrors
-`lattice-worker.ts`, which does not request ids yet.
+That commit only added the API; the callers were wired afterwards (below).
 
-### Wiring (not done here; those files belong to other work)
+### Wiring into generation
 
-- **Whole-volume path** (`lattice-worker.ts`): pass
-  `{ vertexIds: true }` as the sixth argument of `marchingCubesFromField`,
-  then `closeBoundaryLoops(rawResult, undefined, { vertexIds: rawResult.vertexIds })`.
-  Do not keep `vertexIds` on anything posted to the main thread.
-- **Imported-mesh windows** (`mesh-tiles.ts` `computeMeshTile`,
-  `lattice-tile-worker.ts`): pass `{ vertexIds: true }` as the seventh
-  argument of `marchingCubesFromFieldWindow`, and return
-  `result.vertexIds?.ids` with the tile response (transfer its buffer).
-  `mergeMeshTilesInGridOrder` copies `ids.subarray(start * 3, end * 3)` to
-  `written * 3` alongside positions; if any tile has no ids, merge none.
-  Then `closeBoundaryLoops(merged, undefined, { vertexIds: { ids, gridCells: [resolution, resolution, resolution] } })`.
-- **Procedural tiles** (`tiled-generation.ts`): no change. Each tile samples
-  its own bounds with `marchingCubesRectangular` and they are merged by tile
-  id, not grid row, so they keep the hash weld.
+Which production paths weld through grid ids:
+
+| Path | Ids | Why |
+| --- | --- | --- |
+| cpu-single, whole volume (`lattice-worker.ts`, any field: sample shape, imported mesh, surface hex, after thin-feature opening) | yes | One whole-grid `marchingCubesFromField` call, so triangle order is the emission order the ids need. |
+| cpu-tiled, imported mesh (`mesh-tiles.ts`, `lattice-tile-worker.ts`) | yes | Windows are sampled at whole-grid coordinates and `mergeMeshTilesInGridOrder` interleaves tile rows back into whole-grid emission order. |
+| cpu-tiled, procedural sample shapes (`shape-tiles.ts`) | no, hash weld | Each tile samples and extracts its own bounds (`marchingCubesFromField` over tile bounds, so positions come from tile, not grid, coordinates) and `mergeTileResults` concatenates whole tiles by tile id, which revisits z slabs. Interleaving rows would reorder triangles and change the output, so these keep the position hash. |
+
+- **Whole volume:** `marchingCubesFromField(..., onProgress, { vertexIds: true })`,
+  then `closeExtractedBoundaryLoops(raw)` (`mesh-repair.ts`), which passes
+  `raw.vertexIds` to `closeBoundaryLoops` and returns the mesh without them.
+- **Imported-mesh tiles:** `computeMeshTile` requests ids from
+  `marchingCubesFromFieldWindow`; the tile worker returns `vertexIds`
+  (trimmed to the emitted references, buffer transferred) in
+  `LatticeTileResult`. The pool rejects a response whose `vertexIds` is not a
+  `Uint32Array` of `positions.length / 3` entries as a malformed worker
+  response. `mergeMeshTilesInGridOrder` copies each row's ids alongside its
+  positions and returns `vertexIds: { ids, gridCells: [G, G, G] }`; if any
+  processed tile has none, it returns none and cleanup hashes.
+- **Never posted:** both `lattice-worker.ts` paths clean up through
+  `closeExtractedBoundaryLoops` and build the `WorkerResponse` field by field,
+  so ids stop at the generation worker. `src/backend/cpu-backends.ts` mirrors
+  this wiring for `npm run bench:backends` (cpu-single requests ids; the
+  procedural cpu-tiled backend does not).
+- **Budget:** tile ids are not counted in the tiled triangle budget's
+  retained bytes (they are at most a third of the position bytes and the
+  thresholds are unchanged). Approximate memory (from array sizes, not
+  measured): +12 B per triangle for the retained tile ids and +12 B for the
+  merged copy, while the id weld needs no open-addressing table (about 32 MB
+  at 1.19 M triangles) — roughly neutral overall.
+
+Tests: `mesh-tiles.test.ts` (1, 2 and 8 workers, shared and transferred BVH,
+with and without paint masks: merged ids equal the single-worker ids, cleanup
+takes the id path — `RepairWorkCounters.gridIdCorners` equals every
+reference — and the cleaned mesh is byte-identical to the hash weld; a tile
+without ids disables them for the merge; malformed ids are rejected),
+`large-grid.test.ts` (imported mesh at 300³, above the single-field cap, for
+1, 2 and 8 workers), `tiled-generation.test.ts` (response validation;
+procedural merges carry no ids and stay byte-identical across 1, 2, 4 and 8
+workers) and `sample-shape-characterization.test.ts` (every sample shape:
+whole-grid id cleanup equals the hash weld; procedural tiled goldens
+unchanged and still hashed).
+
+### Measurements after wiring (approximate)
+
+Same Linux machine, Node v22.23.4, shared with other jobs. Numbers are
+approximate: field sampling alone swings by ±50 ms between runs.
+
+`npm run bench:backends`, median of 5 warm runs, run back to back (before:
+the same tree with `cpu-backends.ts` reverted to the hash path, load
+average ≈ 1.5; after: `results/backend-benchmark-linux-x64.json`, load
+average ≈ 1.3):
+
+| Fixture | Backend | Total before | Total after | Extract before | Extract after | Cleanup before | Cleanup after |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| sphere-gyroid-bench | cpu-single | 650 ms | 636 ms | 160 ms | 195 ms | 217 ms | 133 ms |
+| sphere-schwarzP-bench | cpu-single | 582 ms | 554 ms | 154 ms | 187 ms | 175 ms | 111 ms |
+| sphere-gyroid-bench | cpu-tiled (hash, unchanged) | 750 ms | 739 ms | — | — | 243 ms | 248 ms |
+| sphere-schwarzP-bench | cpu-tiled (hash, unchanged) | 614 ms | 671 ms | — | — | 169 ms | 183 ms |
+
+cpu-single cleanup is 1.6× faster (−84 and −64 ms); emitting ids costs
+33–35 ms in extraction, so the end-to-end gain is 2–5%, inside run-to-run
+noise of the totals. cpu-tiled differences are noise (no code change on that
+path).
+
+Scratch interleaved run (median of 7, both ways on the same sealed field,
+load average ≈ 2), extraction + cleanup: sphere-gyroid-bench 175 + 254 ms →
+196 + 151 ms (429 → 347 ms, −19%), sphere-schwarzP-bench 140 + 194 ms →
+148 + 115 ms (333 → 263 ms, −21%). Imported `sphere-25mm.stl` at 160³ on
+the mesh tile path (one inline worker, 1.20 M triangles, median of 3):
+cleanup 255 → 177 ms; tile sampling plus merge (≈ 13 s, dominated by BVH
+distance queries) is unchanged within noise.
 
 ## MC33 / ambiguity resolution: assessment
 
