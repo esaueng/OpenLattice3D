@@ -818,10 +818,31 @@ summary:focus-visible,
 }
 
 .viewer-overlay-dock.is-compact > .viewer-skin-hint {
+  flex-wrap: nowrap;
   max-width: 100%;
-  padding: var(--sp-15) var(--sp-2);
+  padding: var(--sp-1) var(--sp-15);
   font-size: var(--fs-xs);
   pointer-events: auto;
+}
+
+.viewer-skin-hint-text-short {
+  display: none;
+}
+
+/* Phones: one short row so the hint doesn't cover the part. The full sentence
+   stays available to screen readers. */
+.viewer-overlay-dock.is-compact .viewer-skin-hint-text {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.viewer-overlay-dock.is-compact .viewer-skin-hint-text-short {
+  display: inline;
+  white-space: nowrap;
 }
 
 /* ── Floating view toolbar: one pill at the bottom centre ── */

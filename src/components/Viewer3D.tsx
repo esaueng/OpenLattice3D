@@ -1377,7 +1377,8 @@ export function Viewer3D() {
       )}
       {showSkinHint && (
         <div className="viewer-skin-hint" role="note">
-          <span>The skin hides the lattice. Use Cross-Section or X-Ray to see inside.</span>
+          <span className="viewer-skin-hint-text">The skin hides the lattice. Use Cross-Section or X-Ray to see inside.</span>
+          <span className="viewer-skin-hint-text-short" aria-hidden="true">Skin hides the lattice</span>
           <div className="viewer-skin-hint-actions">
             <button type="button" className="btn btn-small" onClick={() => setViewMode('cross_section')}>Cross-Section</button>
             <button type="button" className="btn btn-small" onClick={() => setViewMode('xray')}>X-Ray</button>
