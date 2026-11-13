@@ -1,6 +1,6 @@
 // Shape checks for messages coming back from the validation worker. Anything
 // that does not match is rejected rather than rendered as a verdict.
-import type { ValidationResult } from '../types/project';
+import { isValidationWarningCode, type ValidationResult } from '../types/project';
 
 export type ValidationProgressResponse = {
   type: 'progress';
@@ -78,6 +78,24 @@ function isDisconnected(value: unknown): boolean {
     && isOptionalCount(value.sliverCount);
 }
 
+function isWarningList(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((warning) => typeof warning === 'string');
+}
+
+/**
+ * Coded warnings are optional (older results have none), but when present
+ * every entry needs a known code and they must restate `warnings` in order,
+ * so classifying by code and showing the text can never disagree.
+ */
+function isWarningDetails(value: unknown, warnings: string[]): boolean {
+  if (value === undefined) return true;
+  return Array.isArray(value)
+    && value.length === warnings.length
+    && value.every((detail, index) => isRecord(detail)
+      && isValidationWarningCode(detail.code)
+      && detail.message === warnings[index]);
+}
+
 export function isValidationResult(value: unknown): value is ValidationResult {
   return isRecord(value)
     && typeof value.passed === 'boolean'
@@ -85,8 +103,8 @@ export function isValidationResult(value: unknown): value is ValidationResult {
     && isMinThickness(value.minThickness)
     && isManifold(value.manifold)
     && isDisconnected(value.disconnected)
-    && Array.isArray(value.warnings)
-    && value.warnings.every((warning) => typeof warning === 'string');
+    && isWarningList(value.warnings)
+    && isWarningDetails(value.warningDetails, value.warnings);
 }
 
 /**

@@ -11,6 +11,13 @@ const validation: ValidationResult = {
   warnings: ['note'],
 };
 
+const TRAPPED = '1 enclosed void network and no escape holes: trapped powder/resin likely';
+const coded: ValidationResult = {
+  ...validation,
+  warnings: [TRAPPED],
+  warningDetails: [{ code: 'trapped-voids', message: TRAPPED }],
+};
+
 type Mutable = Record<string, unknown>;
 function withField(path: string, value: unknown): unknown {
   const copy = structuredClone(validation) as unknown as Mutable;
@@ -48,6 +55,24 @@ describe('parseValidationResponse', () => {
     expect(parseValidationResponse({ type: 'result', validation: legacy })).toEqual({ type: 'result', validation: legacy });
     const minimal = withField('minThickness.thinPoints', undefined);
     expect(parseValidationResponse({ type: 'result', validation: minimal })).not.toBeNull();
+  });
+
+  it('accepts coded warnings that restate the plain warnings in order', () => {
+    expect(parseValidationResponse({ type: 'result', validation: coded })).toEqual({ type: 'result', validation: coded });
+    const empty = { ...validation, warnings: [], warningDetails: [] };
+    expect(parseValidationResponse({ type: 'result', validation: empty })).toEqual({ type: 'result', validation: empty });
+  });
+
+  it.each([
+    ['non-array warning details', { ...coded, warningDetails: 'trapped-voids' }],
+    ['an unknown warning code', { ...coded, warningDetails: [{ code: 'bogus', message: TRAPPED }] }],
+    ['a missing warning code', { ...coded, warningDetails: [{ message: TRAPPED }] }],
+    ['a detail whose message differs from warnings', { ...coded, warningDetails: [{ code: 'trapped-voids', message: 'other' }] }],
+    ['fewer details than warnings', { ...coded, warnings: [TRAPPED, 'extra'] }],
+    ['more details than warnings', { ...coded, warnings: [] }],
+  ])('rejects a result with %s', (_name, value) => {
+    expect(parseValidationResponse({ type: 'result', validation: value })).toBeNull();
+    expect(isValidationResult(value)).toBe(false);
   });
 
   it.each([

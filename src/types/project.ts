@@ -79,6 +79,40 @@ export interface LatticeParams {
   toleranceMm: number;         // outer deviation tolerance
 }
 
+/**
+ * Stable identifiers for validation warnings. The UI classifies warnings by
+ * code; the message text is for people and may be reworded freely.
+ */
+export const VALIDATION_WARNING_CODES = [
+  /** Outer deviation was attempted but no sample could be measured. */
+  'deviation-unmeasured',
+  /** Neither a reference mesh nor an analytic shape to measure deviation against. */
+  'no-deviation-reference',
+  /** No usable wall-thickness ray. */
+  'thickness-unmeasured',
+  /** More than one solid body (restates a failed connectivity check). */
+  'multiple-bodies',
+  /** Enclosed voids without escape holes: trapped powder or resin. */
+  'trapped-voids',
+  /** Zero-volume closed surfaces; negligible but exported. */
+  'zero-volume-slivers',
+  /** FDM process with an open lattice exterior. */
+  'fdm-open-lattice',
+  /** The thin-section filter was skipped because the grid is too coarse. */
+  'thin-filter-skipped',
+] as const;
+
+export type ValidationWarningCode = typeof VALIDATION_WARNING_CODES[number];
+
+export interface ValidationWarning {
+  code: ValidationWarningCode;
+  message: string;
+}
+
+export function isValidationWarningCode(value: unknown): value is ValidationWarningCode {
+  return typeof value === 'string' && (VALIDATION_WARNING_CODES as readonly string[]).includes(value);
+}
+
 export interface ValidationResult {
   passed: boolean;
   outerDeviation: {
@@ -107,7 +141,14 @@ export interface ValidationResult {
     /** Closed surfaces enclosing no measurable volume. */
     sliverCount?: number;
   };
+  /** Human-readable warnings; always present, including on older and imported results. */
   warnings: string[];
+  /**
+   * The same warnings with stable codes, in the same order as `warnings`.
+   * Absent on results produced before codes existed; consumers then fall back
+   * to classifying the message text.
+   */
+  warningDetails?: ValidationWarning[];
 }
 
 export interface ProjectData {

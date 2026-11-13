@@ -2,7 +2,7 @@
 // the next step for each failing check. Pure so the advice is unit-tested; the
 // Results panel only renders it and wires the actions to the store.
 import type { WorkflowStep } from '../store/useStore';
-import type { LatticeParams, ValidationResult } from '../types/project';
+import type { LatticeParams, ValidationResult, ValidationWarningCode } from '../types/project';
 import type { ModelExtents } from './model-summary';
 import { MAX_RESOLUTION_LEVEL, minimumResolutionForFeature, resolvedFeature } from './preflight';
 
@@ -25,6 +25,8 @@ export type ResultNoteKind =
 
 export interface ResultNote {
   kind: ResultNoteKind;
+  /** The validator's code, or the code inferred from the text for older results; absent when unknown. */
+  code?: ValidationWarningCode;
   message: string;
   /** Actionable notes turn a pass into "passed with warnings"; the rest are informational. */
   actionable: boolean;
@@ -37,20 +39,54 @@ export const ESCAPE_HOLES_ACTION: GuidanceAction = {
   controlId: 'escape-holes',
 };
 
-// The validation workers report warnings as text; these patterns follow the
-// producers in geometry/validation.ts and workers/validation-core.ts.
-function classifyWarning(message: string): Omit<ResultNote, 'message' | 'action'> {
-  if (/trapped/i.test(message)) return { kind: 'trapped-voids', actionable: true };
-  if (/^Cannot remove features/i.test(message)) return { kind: 'thin-filter-skipped', actionable: true };
-  if (/^FDM with open lattice/i.test(message)) return { kind: 'fdm-open-lattice', actionable: true };
-  if (/sliver/i.test(message) && /negligible/i.test(message)) return { kind: 'sliver', actionable: false };
+type WarningClass = Pick<ResultNote, 'kind' | 'actionable'>;
+
+// Classification is keyed by the validators' stable codes, not their wording.
+const WARNING_CLASSES: Record<ValidationWarningCode, WarningClass> = {
+  'trapped-voids': { kind: 'trapped-voids', actionable: true },
+  'thin-filter-skipped': { kind: 'thin-filter-skipped', actionable: true },
+  'fdm-open-lattice': { kind: 'fdm-open-lattice', actionable: true },
+  'zero-volume-slivers': { kind: 'sliver', actionable: false },
   // These restate a check that already failed, or a check that has nothing to compare against.
-  if (/separate solid bodies detected$/.test(message)
-    || /could not be measured$/.test(message)
-    || /^No reference mesh/.test(message)) {
-    return { kind: 'repeats-check', actionable: false };
+  'multiple-bodies': { kind: 'repeats-check', actionable: false },
+  'deviation-unmeasured': { kind: 'repeats-check', actionable: false },
+  'thickness-unmeasured': { kind: 'repeats-check', actionable: false },
+  'no-deviation-reference': { kind: 'repeats-check', actionable: false },
+};
+
+const UNKNOWN_WARNING: WarningClass = { kind: 'other', actionable: true };
+
+/**
+ * Fallback for results without `warningDetails` (produced before warning codes
+ * existed): infer the code from the text the validators emitted at the time.
+ */
+export function inferWarningCode(message: string): ValidationWarningCode | undefined {
+  if (/trapped/i.test(message)) return 'trapped-voids';
+  if (/^Cannot remove features/i.test(message)) return 'thin-filter-skipped';
+  if (/^FDM with open lattice/i.test(message)) return 'fdm-open-lattice';
+  if (/sliver/i.test(message) && /negligible/i.test(message)) return 'zero-volume-slivers';
+  if (/separate solid bodies detected$/.test(message)) return 'multiple-bodies';
+  if (/^Outer deviation could not be measured/.test(message)) return 'deviation-unmeasured';
+  if (/^Minimum thickness could not be measured/.test(message)) return 'thickness-unmeasured';
+  if (/^No reference mesh/.test(message)) return 'no-deviation-reference';
+  return undefined;
+}
+
+/**
+ * Every warning with its code: the validator's own when the result carries
+ * `warningDetails`, otherwise inferred from the text. A detail list that does
+ * not line up with `warnings` is ignored rather than trusted.
+ */
+export function codedWarnings(validation: ValidationResult): { code?: ValidationWarningCode; message: string }[] {
+  const details = validation.warningDetails;
+  if (details && details.length === validation.warnings.length) {
+    return details.map(({ code, message }) => ({ code, message }));
   }
-  return { kind: 'other', actionable: true };
+  return validation.warnings.map((message) => ({ code: inferWarningCode(message), message }));
+}
+
+function classifyWarning(code: ValidationWarningCode | undefined): WarningClass {
+  return code ? WARNING_CLASSES[code] : UNKNOWN_WARNING;
 }
 
 /**
@@ -87,20 +123,20 @@ export interface GuidanceContext {
 }
 
 export function resultNotes(validation: ValidationResult, context?: GuidanceContext): ResultNote[] {
-  return validation.warnings.map((message) => {
-    const { kind, actionable } = classifyWarning(message);
+  return codedWarnings(validation).map(({ code, message }) => {
+    const { kind, actionable } = classifyWarning(code);
     let action: GuidanceAction | undefined;
     if (kind === 'trapped-voids') action = ESCAPE_HOLES_ACTION;
     if (kind === 'thin-filter-skipped' && context) {
       action = raiseResolutionAction(suggestedResolution(context.runParams, context.extents), context.currentParams);
     }
-    return { kind, message, actionable, action };
+    return { kind, ...(code ? { code } : {}), message, actionable, action };
   });
 }
 
 /** Warnings that should keep a passing result from reading as an unqualified pass. */
 export function actionableWarningCount(validation: ValidationResult): number {
-  return validation.warnings.filter((message) => classifyWarning(message).actionable).length;
+  return codedWarnings(validation).filter(({ code }) => classifyWarning(code).actionable).length;
 }
 
 export type CheckId = 'outerDeviation' | 'minThickness' | 'manifold' | 'connectivity';

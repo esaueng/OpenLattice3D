@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { generateCubeMesh } from '../geometry/mesh-analysis';
 import { DEFAULT_IMPORT_LIMITS, estimateDecodedBase64Bytes } from '../geometry/mesh-limits';
-import { DEFAULT_PARAMS } from '../types/project';
+import { DEFAULT_PARAMS, type ValidationResult } from '../types/project';
 import { createProjectFile, meshFingerprint, parseProjectFile } from './project-file';
 
 function cubeProject() {
@@ -132,6 +132,57 @@ describe('OpenLattice3D project files', () => {
     if (restored.kind !== 'project') return;
     expect(restored.viewerBackground).toBeUndefined();
     expect(restored.warnings).toContain('Ignored invalid viewer background color');
+  });
+
+  it('loads version 3 projects whose validation snapshot has no warning codes', () => {
+    const legacyValidation: ValidationResult = {
+      passed: true,
+      outerDeviation: { passed: true, maxDeviation: 0.05, tolerance: 0.2 },
+      minThickness: { passed: true, minMeasured: 1, required: 0.8, absoluteMin: 0.9, sampled: 10 },
+      manifold: { passed: true, details: 'Mesh is manifold and watertight' },
+      disconnected: { passed: true, fragmentCount: 1 },
+      warnings: ['1 enclosed void network and no escape holes: trapped powder/resin likely'],
+    };
+    const exported = createProjectFile({
+      params: DEFAULT_PARAMS,
+      generationSeed: 123,
+      source: { kind: 'sample', fileName: 'sphere', shape: 'sphere', sphereRadius: 25 },
+      keepOutTris: new Set(),
+      keepInTris: new Set(),
+      validation: legacyValidation,
+      clipPlane: { axis: 'z', position: 0.5, flipped: false },
+      viewerBackground: '#000000',
+    });
+    expect(exported.version).toBe(3);
+    expect(exported.validationAtExport).not.toHaveProperty('warningDetails');
+    // Round-trip through JSON, as a saved file would be.
+    const restored = parseProjectFile(JSON.parse(JSON.stringify(exported)));
+    expect(restored).toMatchObject({ kind: 'project', sampleShape: 'sphere', generationSeed: 123, warnings: [] });
+  });
+
+  it('writes coded warnings into the validation snapshot and still loads the file', () => {
+    const message = '1 enclosed void network and no escape holes: trapped powder/resin likely';
+    const exported = createProjectFile({
+      params: DEFAULT_PARAMS,
+      generationSeed: 123,
+      source: { kind: 'sample', fileName: 'sphere', shape: 'sphere', sphereRadius: 25 },
+      keepOutTris: new Set(),
+      keepInTris: new Set(),
+      validation: {
+        passed: true,
+        outerDeviation: { passed: true, maxDeviation: 0.05, tolerance: 0.2, sampled: 2000 },
+        minThickness: { passed: true, minMeasured: 1, required: 0.8, absoluteMin: 0.9, sampled: 10 },
+        manifold: { passed: true, details: 'Mesh is manifold and watertight' },
+        disconnected: { passed: true, fragmentCount: 1, voidCount: 1, sliverCount: 0 },
+        warnings: [message],
+        warningDetails: [{ code: 'trapped-voids', message }],
+      },
+      clipPlane: { axis: 'z', position: 0.5, flipped: false },
+      viewerBackground: '#000000',
+    });
+    const saved = JSON.parse(JSON.stringify(exported));
+    expect(saved.validationAtExport.warningDetails).toEqual([{ code: 'trapped-voids', message }]);
+    expect(parseProjectFile(saved)).toMatchObject({ kind: 'project', sampleShape: 'sphere', warnings: [] });
   });
 });
 

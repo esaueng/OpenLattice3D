@@ -54,6 +54,13 @@ describe('summarizeValidation', () => {
     expect(summarizeValidation(v, true, false).tone).toBe('pass');
   });
 
+  it('classifies a coded warning by its code', () => {
+    const trapped = { ...makeValidation(), warnings: ['Sealed pockets'], warningDetails: [{ code: 'trapped-voids' as const, message: 'Sealed pockets' }] };
+    expect(summarizeValidation(trapped, true, false)).toMatchObject({ tone: 'warn', warningCount: 1 });
+    const sliver = { ...makeValidation(), warnings: ['trapped?'], warningDetails: [{ code: 'zero-volume-slivers' as const, message: 'trapped?' }] };
+    expect(summarizeValidation(sliver, true, false)).toMatchObject({ tone: 'pass', warningCount: 0 });
+  });
+
   it('lets failures outrank warnings', () => {
     const v = { ...makeValidation({ connected: false }), warnings: ['1 enclosed void network and no escape holes: trapped powder/resin likely'] };
     expect(summarizeValidation(v, true, false)).toMatchObject({ tone: 'fail', warningCount: 0 });

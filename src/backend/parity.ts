@@ -6,7 +6,7 @@ import { computeSignedVolume, countNormalWindingAgreement } from '../geometry/me
 import { buildEdgeTopology, countEdgeDefects, findConnectedComponents } from '../geometry/mesh-topology';
 import { sampleShapeObjectSdf } from '../geometry/sample-shapes';
 import { checkAnalyticOuterDeviation, type OuterDeviationMeasurement } from '../geometry/shape-deviation';
-import { checkMinThickness, NO_DEVIATION_REFERENCE_WARNING, runValidation } from '../geometry/validation';
+import { checkMinThickness, runValidation, warningFields } from '../geometry/validation';
 import type { Vec3 } from '../geometry/vec3';
 import type { ValidationResult } from '../types/project';
 import { buildFixtureSdf } from './fixtures';
@@ -82,7 +82,7 @@ export function validateFixtureResult(
     ...base,
     passed: outerDeviation.passed && base.minThickness.passed && base.manifold.passed && base.disconnected.passed,
     outerDeviation: { ...outerDeviation, tolerance: fixture.params.toleranceMm },
-    warnings: base.warnings.filter((warning) => warning !== NO_DEVIATION_REFERENCE_WARNING),
+    ...warningFields((base.warningDetails ?? []).filter((warning) => warning.code !== 'no-deviation-reference')),
   };
 }
 

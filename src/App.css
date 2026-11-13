@@ -513,6 +513,12 @@ summary:focus-visible,
   color: var(--color-accent);
 }
 
+/* A pass with warnings stays amber even on the current step, so it never reads as a clean tick. */
+.step-nav-mark.warned,
+.step-nav-step.active .step-nav-mark.warned {
+  color: var(--color-warning);
+}
+
 .step-nav-warning {
   display: inline-grid;
   place-items: center;
@@ -2782,9 +2788,43 @@ summary:focus-visible,
     overflow: visible;
   }
 
+  /* Stacked, the page (#root) scrolls. `hidden` on these ancestors made each a
+     scroll container of its own, which pinned the sticky top bar, step strip
+     and step footer to a box that never scrolls; `clip` keeps the clipping
+     without capturing them. */
+  .app-shell,
+  .side-panel {
+    overflow: clip;
+  }
+
+  /* Contain absolutely positioned descendants (the visually-hidden labels).
+     Without a positioned ancestor they resolve against the initial containing
+     block, outside the scrolling #root, and give the document its own scroll
+     that chains past the end of the page into a blank strip. */
+  .app-shell {
+    position: relative;
+  }
+
+  /* The step footer, with each step's primary action (Export 3MF on Results),
+     stays on screen at the bottom of the viewport instead of below a long
+     panel. It stays in flow, so the end of the panel is never covered, and it
+     clears the home indicator when the page extends under it. */
   .workflow-nav {
     position: sticky;
     bottom: 0;
+    z-index: 5;
+    padding-right: max(var(--sp-4), env(safe-area-inset-right, 0px));
+    padding-bottom: calc(var(--sp-3) + env(safe-area-inset-bottom, 0px));
+    padding-left: max(var(--sp-4), env(safe-area-inset-left, 0px));
+    box-shadow: 0 -8px 16px -8px rgba(0, 0, 0, 0.45);
+  }
+
+  /* Keep focused or scrolled-to controls clear of the sticky bars. The footer
+     is one touch-height control plus its padding; the top is the top bar
+     (approximate: rounded to whole pixels by the browser). */
+  #root {
+    scroll-padding-top: var(--topbar-h);
+    scroll-padding-bottom: calc(var(--control-h-touch) + 2 * var(--sp-3) + 1px + env(safe-area-inset-bottom, 0px));
   }
 }
 
@@ -2806,6 +2846,11 @@ summary:focus-visible,
 
   .step-nav-strip .step-nav {
     margin: 0;
+  }
+
+  /* The sticky strip sits under the top bar: 44px steps plus its padding and rule. */
+  #root {
+    scroll-padding-top: calc(var(--topbar-h) + 44px + 2 * var(--sp-1) + 3px);
   }
 
   /* Phone and tablet: number over a short label, so every step is named on
