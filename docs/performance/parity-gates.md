@@ -70,9 +70,12 @@ Timing caveats:
 - CPU backends fuse classification, scan, and emission into one pass and have
   no GPU readback; those phases report as documented nulls. A WebGPU backend
   must report every phase.
-- `cleanupMs` (boundary-loop closing) dominates both CPU backends at
-  resolution 160; a GPU backend that only accelerates extraction cannot win
-  the end-to-end threshold without addressing cleanup.
+- `cleanupMs` (boundary-loop closing) used to dominate both CPU backends at
+  resolution 160 (85–92% of end-to-end time). After the typed-array rewrite
+  it is 28–41% (206–506 ms against 3284–5801 ms before, same Linux machine);
+  see `boundary-loop-cleanup.md`. Cleanup is still the same cost on every
+  backend, so a GPU backend must accelerate field sampling and extraction
+  enough to clear the threshold with it included.
 
 The reviewed minimum speedup for GPU promotion is **1.5x end-to-end median
 vs `cpu-tiled`** (`GPU_PROMOTION_MIN_SPEEDUP` in `src/backend/gate.ts`).
@@ -85,9 +88,11 @@ disabled until all three gates pass with committed evidence. There is no
 `webgpu-mc` implementation today: parity and fallback evidence do not exist,
 and the benchmark reports no GPU backend.
 
-Latest committed benchmark: `results/backend-benchmark-darwin-arm64.json`
-(Apple M5 Pro, 15 cores, Node v22.23.1; September 8, 2026). At resolution
-160, cpu-single speedup relative to inline cpu-tiled ranges from
-0.82x to 1.13x across the two fixtures. The report includes median and
-p95 timings; these inline CPU measurements do not establish GPU or browser
-multi-worker speedup. Boundary-loop cleanup remains the dominant phase.
+Latest committed benchmark: `results/backend-benchmark-linux-x64.json`
+(Intel Xeon @ 2.10GHz, 4 cores, Node v22.23.4; November 13, 2026, on a shared
+machine). At resolution 160, cpu-single speedup relative to inline cpu-tiled
+is 1.08x to 1.09x across the two fixtures, with end-to-end medians of
+688–1353 ms. The earlier `results/backend-benchmark-darwin-arm64.json`
+(Apple M5 Pro, September 8, 2026) predates the cleanup rewrite, when
+boundary-loop cleanup was 85–92% of each run. These inline CPU measurements do
+not establish GPU or browser multi-worker speedup.
