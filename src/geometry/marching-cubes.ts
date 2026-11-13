@@ -383,7 +383,62 @@ export function marchingCubesFromField(
   isoValue: number = 0,
   onProgress?: (fraction: number) => void
 ): MarchingCubesResult {
+  return extractFieldWindow(field, bounds, cells, [0, 0, 0], cells, isoValue, onProgress, null);
+}
+
+/** Triangles extracted from one window of a larger grid. */
+export interface FieldWindowResult extends MarchingCubesResult {
+  /**
+   * First triangle of each cube row (y, z) of the window, row-major with x
+   * fastest, plus a final entry equal to triCount. Rows of neighbouring
+   * windows can be interleaved into the exact whole-grid emission order.
+   */
+  rowTriangleStarts: Uint32Array;
+}
+
+/**
+ * Marching cubes over a window of a larger sampling grid.
+ *
+ * `field` holds the (cells + 1)^3 samples of the window whose first sample is
+ * grid index `origin`. Vertex coordinates are computed from the whole grid's
+ * bounds and cell counts exactly as `marchingCubesFromField` computes them for
+ * the whole grid, so the triangles of every window are bit-identical to the
+ * whole-grid triangles of the same cubes.
+ */
+export function marchingCubesFromFieldWindow(
+  field: Float32Array,
+  gridBounds: { min: Vec3; max: Vec3 },
+  gridCells: Vec3,
+  origin: Vec3,
+  cells: Vec3,
+  isoValue: number = 0,
+): FieldWindowResult {
+  for (let axis = 0; axis < 3; axis++) {
+    if (
+      !Number.isInteger(origin[axis]) || origin[axis] < 0
+      || !Number.isInteger(cells[axis]) || cells[axis] < 1
+      || origin[axis] + cells[axis] > gridCells[axis]
+    ) {
+      throw new Error('Marching-cubes window lies outside its grid');
+    }
+  }
+  const rowTriangleStarts = new Uint32Array(cells[1] * cells[2] + 1);
+  const result = extractFieldWindow(field, gridBounds, gridCells, origin, cells, isoValue, undefined, rowTriangleStarts);
+  return { ...result, rowTriangleStarts };
+}
+
+function extractFieldWindow(
+  field: Float32Array,
+  bounds: { min: Vec3; max: Vec3 },
+  gridCells: Vec3,
+  origin: Vec3,
+  cells: Vec3,
+  isoValue: number,
+  onProgress: ((fraction: number) => void) | undefined,
+  rowTriangleStarts: Uint32Array | null,
+): MarchingCubesResult {
   const nx = cells[0], ny = cells[1], nz = cells[2];
+  const ox = origin[0], oy = origin[1], oz = origin[2];
   const expectedLength = generationSampleCount(cells);
   if (field.length !== expectedLength) {
     throw new Error(`Scalar field length ${field.length} does not match expected length ${expectedLength}`);
@@ -391,9 +446,9 @@ export function marchingCubesFromField(
   const minX = bounds.min[0];
   const minY = bounds.min[1];
   const minZ = bounds.min[2];
-  const dx = (bounds.max[0] - bounds.min[0]) / nx;
-  const dy = (bounds.max[1] - bounds.min[1]) / ny;
-  const dz = (bounds.max[2] - bounds.min[2]) / nz;
+  const dx = (bounds.max[0] - bounds.min[0]) / gridCells[0];
+  const dy = (bounds.max[1] - bounds.min[1]) / gridCells[1];
+  const dz = (bounds.max[2] - bounds.min[2]) / gridCells[2];
   const strideY = nx + 1;
   const strideZ = strideY * (ny + 1);
   const vals = new Float32Array(8);
@@ -417,13 +472,16 @@ export function marchingCubesFromField(
   const allPositions = new Float32Array(maxTriCount * 9);
   let writeOffset = 0;
 
+  // Grid coordinates are (origin + local) * spacing from the grid minimum;
+  // with a zero origin this is the whole-grid computation, bit for bit.
   for (let z = 0; z < nz; z++) {
     if (onProgress) onProgress(0.36 + (z / nz) * 0.64);
-    const z0 = minZ + z * dz;
-    const z1 = minZ + (z + 1) * dz;
+    const z0 = minZ + (oz + z) * dz;
+    const z1 = minZ + (oz + z + 1) * dz;
     for (let y = 0; y < ny; y++) {
-      const y0 = minY + y * dy;
-      const y1 = minY + (y + 1) * dy;
+      if (rowTriangleStarts) rowTriangleStarts[z * ny + y] = writeOffset / 9;
+      const y0 = minY + (oy + y) * dy;
+      const y1 = minY + (oy + y + 1) * dy;
       const base = fieldIndex(0, y, z, strideY, strideZ);
       for (let x = 0; x < nx; x++) {
         const cubeIndex = loadCubeValues(field, base + x, strideY, strideZ, isoValue, vals);
@@ -435,8 +493,8 @@ export function marchingCubesFromField(
           vals,
           edgeVerts,
           isoValue,
-          minX + x * dx,
-          minX + (x + 1) * dx,
+          minX + (ox + x) * dx,
+          minX + (ox + x + 1) * dx,
           y0,
           y1,
           z0,
@@ -448,6 +506,7 @@ export function marchingCubesFromField(
   }
 
   const triCount = writeOffset / 9;
+  if (rowTriangleStarts) rowTriangleStarts[ny * nz] = triCount;
   const positions = allPositions.subarray(0, writeOffset);
   const normals = new Float32Array(triCount * 3);
 
