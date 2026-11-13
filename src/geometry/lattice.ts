@@ -733,21 +733,67 @@ function tpmsValueFromTrig(
   }
 }
 
+// ═══════════════════════════════════════════════════════════
+//  Graded density
+// ═══════════════════════════════════════════════════════════
+
+/** Graded density fades from the skin toward the core over this many cells. */
+export const GRADIENT_FALLOFF_CELLS = 3;
+
+/**
+ * Half of the nominal lattice thickness that the field's zero level set
+ * encodes, in mm. Sheet types (TPMS and spinodal) return `|f|/|grad f| -
+ * wallThickness/2`; strut types (BCC, octet, diamond), the perforated-skin
+ * prisms (hexagon, triangle: the wall between holes) and Voronoi foam (half
+ * the bisector gap) return `distance - strutDiameter/2`.
+ */
+export function gradientBaseHalfThickness(params: LatticeParams): number {
+  return (isSheetType(params.latticeType) ? params.wallThickness : params.strutDiameter) * 0.5;
+}
+
+/** Applies graded density to a raw lattice value, given the object distance. */
+export type LatticeGrader = (lat: number, objectDistance: number) => number;
+
+/**
+ * Graded density: thicken the lattice near the skin. Subtracting an offset
+ * from the lattice field moves its zero level set outward, so local wall or
+ * strut thickness becomes `(1 + strength * exp(-depth / (3 * cellSize)))`
+ * times the nominal value: strength 1 doubles it at the skin, fading toward
+ * the nominal thickness a few cells into the core. `depth` is measured from
+ * the object surface, or from the inside of the shell when the lattice sits
+ * under one (`measureFromShellInterior`).
+ *
+ * Approximation: the offset varies in space, so the result is no longer an
+ * exact distance. Its gradient is at most
+ * `strength * baseHalfThickness / (3 * cellSize)` (about 0.02 for the
+ * defaults), so the field's Lipschitz bound grows by at most that much; the
+ * lattice fields are already first-order distance estimates.
+ *
+ * Returns null when grading is off, so callers leave the field untouched and
+ * ungraded output stays bit-identical.
+ */
+export function buildLatticeGrader(params: LatticeParams, measureFromShellInterior: boolean): LatticeGrader | null {
+  if (!params.gradientEnabled) return null;
+  const strength = Math.min(1, Math.max(0, params.gradientStrength));
+  const amplitude = strength * gradientBaseHalfThickness(params);
+  const falloff = params.cellSize * GRADIENT_FALLOFF_CELLS;
+  if (!(amplitude > 0) || !(falloff > 0)) return null;
+  const skinOffset = measureFromShellInterior ? params.shellThickness : 0;
+  return (lat, objectDistance) => {
+    const depth = Math.max(0, -(objectDistance + skinOffset));
+    return lat - amplitude * Math.exp(-depth / falloff);
+  };
+}
+
 function combinedLatticeSdfValue(
   dObj: number,
   lat: number,
   params: LatticeParams,
   blendK: number,
-  useShellOffsetForDefaultGradient: boolean
+  grader: LatticeGrader | null,
 ): number {
-  const { shellThickness, noShell, surfaceOnly, surfaceDepth, cellSize, gradientEnabled, gradientStrength, variant } = params;
-  let adjustedLat = lat;
-  if (gradientEnabled) {
-    const gd = (noShell || surfaceOnly || (variant !== 'shell_core' && !useShellOffsetForDefaultGradient))
-      ? Math.max(0, -dObj)
-      : Math.max(0, -(dObj + shellThickness));
-    adjustedLat *= 1.0 - gradientStrength * Math.exp(-gd / (cellSize * 3));
-  }
+  const { shellThickness, noShell, surfaceOnly, surfaceDepth, variant } = params;
+  const adjustedLat = grader ? grader(lat, dObj) : lat;
 
   if (surfaceOnly) return Math.max(adjustedLat, Math.max(dObj, -(dObj + surfaceDepth)));
   if (noShell) return Math.max(adjustedLat, dObj);
@@ -767,7 +813,7 @@ function attachTpmsGridSampler(
   objectSdf: (x: number, y: number, z: number) => number,
   params: LatticeParams,
   blendK: number,
-  useShellOffsetForDefaultGradient: boolean,
+  grader: LatticeGrader | null,
   applyConstraints: ConstraintApplier | null = null,
 ): SdfFunction {
   if (!supportsOptimizedTpms(params.latticeType)) return target;
@@ -848,7 +894,7 @@ function attachTpmsGridSampler(
             lat,
             params,
             blendK,
-            useShellOffsetForDefaultGradient
+            grader,
           );
           out[rowOffset + x] = applyConstraints
             ? applyConstraints(value, px, py, pz, objectDistance)
@@ -1013,9 +1059,11 @@ export function buildSurfaceHexLattice(
 
 export function buildCombinedSDF(opts: LatticeSdfOptions): SdfFunction {
   const { bvh, params } = opts;
-  const { shellThickness, noShell, surfaceOnly, surfaceDepth, cellSize, wallThickness, strutDiameter, variant, latticeType, gradientEnabled, gradientStrength } = params;
+  const { shellThickness, noShell, surfaceOnly, surfaceDepth, cellSize, wallThickness, strutDiameter, variant, latticeType } = params;
   const blendK = Math.min(wallThickness, strutDiameter) * 0.3;
   const latticeFn = buildLatticeEvaluator(params, opts.generationSeed);
+  // Imported meshes grade from the inside of the shell only for shell + core.
+  const grader = buildLatticeGrader(params, !noShell && !surfaceOnly && variant === 'shell_core');
   const sdf = (x: number, y: number, z: number) => bvh.signedDistance([x, y, z]);
   const applyConstraints = buildConstraintApplier(
     bvh,
@@ -1038,28 +1086,24 @@ export function buildCombinedSDF(opts: LatticeSdfOptions): SdfFunction {
     const result: SdfFunction = (x, y, z) => {
       const dObj = sdf(x, y, z);
       const bandSdf = Math.max(dObj, -(dObj + surfaceDepth));
-      let lat = sampleLattice(x, y, z, dObj);
-      if (gradientEnabled) {
-        lat *= 1.0 - gradientStrength * Math.exp(-Math.max(0, -dObj) / (cellSize * 3));
-      }
+      const rawLat = sampleLattice(x, y, z, dObj);
+      const lat = grader ? grader(rawLat, dObj) : rawLat;
       const value = Math.max(lat, bandSdf);
       return applyConstraints ? applyConstraints(value, x, y, z, dObj) : value;
     };
-    return attachTpmsGridSampler(result, sdf, params, blendK, false, applyConstraints);
+    return attachTpmsGridSampler(result, sdf, params, blendK, grader, applyConstraints);
   }
 
   // ── No-shell mode ──
   if (noShell) {
     const result: SdfFunction = (x, y, z) => {
       const dObj = sdf(x, y, z);
-      let lat = sampleLattice(x, y, z, dObj);
-      if (gradientEnabled) {
-        lat *= 1.0 - gradientStrength * Math.exp(-Math.max(0, -dObj) / (cellSize * 3));
-      }
+      const rawLat = sampleLattice(x, y, z, dObj);
+      const lat = grader ? grader(rawLat, dObj) : rawLat;
       const value = Math.max(lat, dObj);
       return applyConstraints ? applyConstraints(value, x, y, z, dObj) : value;
     };
-    return attachTpmsGridSampler(result, sdf, params, blendK, false, applyConstraints);
+    return attachTpmsGridSampler(result, sdf, params, blendK, grader, applyConstraints);
   }
 
   if (variant === 'shell_core') {
@@ -1067,30 +1111,26 @@ export function buildCombinedSDF(opts: LatticeSdfOptions): SdfFunction {
       const dObj = sdf(x, y, z);
       const shellSdf = Math.max(dObj, -(dObj + shellThickness));
       const coreSdf = -(dObj + shellThickness);
-      let lat = sampleLattice(x, y, z, dObj);
-      if (gradientEnabled) {
-        lat *= 1.0 - gradientStrength * Math.exp(-Math.max(0, -(dObj + shellThickness)) / (cellSize * 3));
-      }
+      const rawLat = sampleLattice(x, y, z, dObj);
+      const lat = grader ? grader(rawLat, dObj) : rawLat;
       const value = smoothMin(shellSdf, Math.max(-coreSdf, lat), blendK);
       return applyConstraints ? applyConstraints(value, x, y, z, dObj) : value;
     };
     return withEscapeHoles(
-      attachTpmsGridSampler(result, sdf, params, blendK, false, applyConstraints),
+      attachTpmsGridSampler(result, sdf, params, blendK, grader, applyConstraints),
       params,
       bvh.getBounds(),
     );
   } else {
     const result: SdfFunction = (x, y, z) => {
       const dObj = sdf(x, y, z);
-      let lat = sampleLattice(x, y, z, dObj);
-      if (gradientEnabled) {
-        lat *= 1.0 - gradientStrength * Math.exp(-Math.max(0, -dObj) / (cellSize * 3));
-      }
+      const rawLat = sampleLattice(x, y, z, dObj);
+      const lat = grader ? grader(rawLat, dObj) : rawLat;
       const shellSdf = Math.max(dObj, -(dObj + shellThickness));
       const value = smoothMin(shellSdf, Math.max(lat, dObj), blendK);
       return applyConstraints ? applyConstraints(value, x, y, z, dObj) : value;
     };
-    return attachTpmsGridSampler(result, sdf, params, blendK, false, applyConstraints);
+    return attachTpmsGridSampler(result, sdf, params, blendK, grader, applyConstraints);
   }
 }
 
@@ -1105,9 +1145,11 @@ export function buildAnalyticLattice(
   bounds: BoundingBox | null = null,
   generationSeed = DEFAULT_GENERATION_SEED,
 ): SdfFunction {
-  const { shellThickness, noShell, surfaceOnly, surfaceDepth, cellSize, wallThickness, strutDiameter, variant, latticeType, gradientEnabled, gradientStrength } = params;
+  const { shellThickness, noShell, surfaceOnly, surfaceDepth, cellSize, wallThickness, strutDiameter, variant, latticeType } = params;
   const blendK = Math.min(wallThickness, strutDiameter) * 0.3;
   const latticeFn = buildLatticeEvaluator(params, generationSeed);
+  // Analytic shapes grade from the inside of the shell whenever there is one.
+  const grader = buildLatticeGrader(params, !noShell && !surfaceOnly);
 
   const result: SdfFunction = (x, y, z) => {
     const dObj = objectSdf(x, y, z);
@@ -1117,10 +1159,7 @@ export function buildAnalyticLattice(
       const [u, v, w] = conformalCoords(objectSdf, x, y, z, dObj, cellSize);
       lat = latticeFn(u, v, w);
     }
-    if (gradientEnabled) {
-      const gd = (noShell || surfaceOnly) ? Math.max(0, -dObj) : Math.max(0, -(dObj + shellThickness));
-      lat *= 1.0 - gradientStrength * Math.exp(-gd / (cellSize * 3));
-    }
+    if (grader) lat = grader(lat, dObj);
 
     if (surfaceOnly) return Math.max(lat, Math.max(dObj, -(dObj + surfaceDepth)));
     if (noShell) return Math.max(lat, dObj);
@@ -1135,7 +1174,7 @@ export function buildAnalyticLattice(
   };
 
   return withEscapeHoles(
-    attachTpmsGridSampler(result, objectSdf, params, blendK, true),
+    attachTpmsGridSampler(result, objectSdf, params, blendK, grader),
     params,
     bounds,
   );

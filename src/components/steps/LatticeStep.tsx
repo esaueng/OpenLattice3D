@@ -59,6 +59,14 @@ export function LatticeStep({ inputs }: { inputs: WorkflowInputs }) {
   const extents = modelExtents(store.meshInfo, store.sampleShape, store.sphereRadius);
   const cellsAcross = extents ? cellsAcrossShortestSide(extents.size, store.params.cellSize) : 0;
   const sheet = isSheetType(store.params.latticeType);
+  // Hexagon/triangle in conformal mode generate a perforated surface band that
+  // ignores the lattice field, so grading has nothing to thicken.
+  const perforatedBand = store.params.variant === 'implicit_conformal'
+    && (store.params.latticeType === 'hexagon' || store.params.latticeType === 'triangle');
+  // One decimal keeps 0.07 from showing as 7.000000000000001.
+  const gradientPercent = Math.round(store.params.gradientStrength * 1000) / 10;
+  const nominalThickness = sheet ? store.params.wallThickness : store.params.strutDiameter;
+  const gradientSkinThickness = (nominalThickness * (1 + store.params.gradientStrength)).toFixed(2);
   const radio = useRadioGroup({
     values: LATTICE_ORDER,
     selected: store.params.latticeType,
@@ -162,6 +170,46 @@ export function LatticeStep({ inputs }: { inputs: WorkflowInputs }) {
         {inputs.hasModel && extents && (
           <p className="panel-copy">
             <span className="mono">{cellsAcross.toFixed(1)}</span> cells across the shortest side at {store.params.cellSize} mm.
+          </p>
+        )}
+      </PanelSection>
+
+      <PanelSection title="Density">
+        <label className="check-label">
+          <input
+            id="gradient-enabled"
+            type="checkbox"
+            aria-describedby={perforatedBand ? 'gradient-hint gradient-perforated-hint' : 'gradient-hint'}
+            checked={store.params.gradientEnabled}
+            onChange={(e) => store.updateParams({ gradientEnabled: e.target.checked })}
+          />
+          Graded density
+        </label>
+        <p className="field-hint" id="gradient-hint">
+          Thicker walls near the outer skin, fading toward the core over ~3 cells.
+        </p>
+        {store.params.gradientEnabled && (
+          <>
+            <div className="row">
+              <label htmlFor="gradient-strength">Strength (%)</label>
+              <NumericInput
+                captureUndoCheckpoint={store.captureUndoCheckpoint}
+                id="gradient-strength"
+                title="How much thicker the lattice gets at the skin. 100% doubles it."
+                describedBy="gradient-strength-hint"
+                value={gradientPercent}
+                min={0} max={100} step={5}
+                onCommit={(percent) => store.updateParams({ gradientStrength: percent / 100 })}
+              />
+            </div>
+            <p className="field-hint" id="gradient-strength-hint">
+              {`${gradientSkinThickness} mm ${sheet ? 'walls' : 'struts'} at the skin, fading toward ${nominalThickness} mm with depth. 100% doubles the thickness.`}
+            </p>
+          </>
+        )}
+        {perforatedBand && (
+          <p className="field-hint" id="gradient-perforated-hint">
+            Perforated skins are a single surface band, so grading does not change them.
           </p>
         )}
       </PanelSection>
