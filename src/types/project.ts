@@ -137,7 +137,7 @@ export const DEFAULT_PARAMS: LatticeParams = {
   gradientStrength: 0.5,
   keepInDepth: 3.0,
   thinSectionFilter: 0.0,
-  exportResolution: 3,
+  exportResolution: 4,
   escapeHoles: false,
   escapeHoleDiameter: 5.0,
   escapeHoleCount: 2,

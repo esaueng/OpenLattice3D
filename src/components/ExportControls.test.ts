@@ -7,7 +7,9 @@ import { selectGenerationInputs } from '../store/useResultStaleness';
 import { useStore } from '../store/useStore';
 import { download3MF, downloadOBJ, downloadSTL } from '../utils/export';
 import { trackUsage } from '../analytics';
-import { ExportControls } from './ExportControls';
+import { useResultExport } from '../hooks/useResultExport';
+import type { ValidationResult } from '../types/project';
+import { ExportControls, ExportPrimaryButton } from './ExportControls';
 
 vi.mock('../analytics', () => ({ trackUsage: vi.fn() }));
 
@@ -122,5 +124,36 @@ describe('export analytics wiring', () => {
     renderToStaticMarkup(createElement(ExportControls));
     captured.buttons.at(-1)!.onClick!();
     expect(trackUsage).toHaveBeenCalledWith('export_completed');
+  });
+});
+
+describe('results footer export', () => {
+  function Footer() {
+    return createElement(ExportPrimaryButton, { exporter: useResultExport() });
+  }
+
+  it('exports 3MF from the footer with the result settings', async () => {
+    const html = renderToStaticMarkup(createElement(Footer));
+    expect(html).toContain('Export 3MF');
+    expect(html).toContain('btn-primary');
+    captured.buttons.at(-1)!.onClick!();
+    await vi.runAllTimersAsync();
+    expect(download3MF).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(download3MF).mock.calls[0][1]).toMatch(/-lattice\.3mf$/);
+  });
+
+  it('carries the same "anyway" caution as the Export section when checks failed', () => {
+    const failing: ValidationResult = {
+      passed: false,
+      outerDeviation: { passed: true, maxDeviation: 0.01, tolerance: 0.2, sampled: 100 },
+      minThickness: { passed: true, minMeasured: 1, required: 0.8, absoluteMin: 1, sampled: 100 },
+      manifold: { passed: true, details: 'ok' },
+      disconnected: { passed: false, fragmentCount: 468 },
+      warnings: [],
+    };
+    useStore.setState({ validation: failing });
+    const html = renderToStaticMarkup(createElement(Footer));
+    expect(html).toContain('Export 3MF anyway');
+    expect(html).toContain('btn-caution');
   });
 });

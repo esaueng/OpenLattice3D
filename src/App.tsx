@@ -11,7 +11,7 @@ import { LatticeStep } from './components/steps/LatticeStep';
 import { ShellStep } from './components/steps/ShellStep';
 import { GenerateStep } from './components/steps/GenerateStep';
 import { ResultsStep } from './components/steps/ResultsStep';
-import { PlayIcon, SquareIcon } from './components/icons';
+import { PlayIcon, SquareIcon, XIcon } from './components/icons';
 import { adjacentStep, canNavigateToStep, reachableStep, visibleSteps, type WorkflowInputs } from './components/workflow';
 import { useWorkflowInputs } from './hooks/useWorkflow';
 import type { LatticeGenerationControls } from './hooks/useLatticeGeneration';
@@ -22,6 +22,8 @@ import { escapeControlCharacters } from './utils/text-safety';
 import { useLatticeGeneration } from './hooks/useLatticeGeneration';
 import { useWorkspaceHotkeys } from './hooks/useWorkspaceHotkeys';
 import { summarizeValidation } from './utils/validation-summary';
+import { describeGenerationProgress } from './utils/generation-progress';
+import { compareChecksSummary, solverStatus as describeSolverStatus } from './utils/status-bar';
 import { useResultStaleness } from './store/useResultStaleness';
 import { trackUsage } from './analytics';
 import './App.css';
@@ -84,6 +86,7 @@ function HydratedApp() {
     resultMesh,
     generating,
     progress,
+    progressMessage,
     params,
     meshFileName,
     demoModeActive,
@@ -99,6 +102,7 @@ function HydratedApp() {
     pinnedRun,
     workflowStep,
     setWorkflowStep,
+    sessionRestored,
   } = useStore();
   const generationControls = useLatticeGeneration();
   const countedOpen = useRef(false);
@@ -178,15 +182,18 @@ function HydratedApp() {
       ? `${resultMesh.triCount.toLocaleString()} tris${staleness.stale ? ' · settings changed' : ''}`
       : 'Mesh pending';
   const progressLabel = `${Math.round(progress * 100)}%`;
-  const comparing = demoModeActive && demoQueue.total > 0;
-  const solverStatus = generating
-    ? `Generating ${progressLabel}`
-    : comparing
-      ? `Comparing ${demoQueue.done} of ${demoQueue.total}`
-      : hasModel ? 'Ready' : 'Idle';
-  const statusTone = generating || comparing ? 'busy' : hasModel ? 'ready' : 'idle';
+  const progressView = describeGenerationProgress(progress, progressMessage);
+  const { text: solverStatus, tone: statusTone } = describeSolverStatus({ generating, progressView, demoModeActive, demoQueue, hasModel });
   const showFaceLegend = keepOutTris.size > 0 || keepInTris.size > 0 || (selectionMode !== 'none' && selectionMode !== 'place_hole');
-  const checks = summarizeValidation(validation, Boolean(resultMesh), generating, staleness.stale, validationProgress);
+  const checks = demoModeActive && !generating
+    ? compareChecksSummary()
+    : summarizeValidation(validation, Boolean(resultMesh), generating, staleness.stale, validationProgress);
+  // Parameters survive a reload but meshes never do; say so once instead of silently showing the bare model.
+  const showRestoreNotice = sessionRestored && hasModel && !resultMesh && !generating && !demoModeActive;
+  const dismissRestoreNotice = useCallback(() => useStore.setState({ sessionRestored: false }), []);
+  useEffect(() => {
+    if (sessionRestored && (resultMesh || generating)) dismissRestoreNotice();
+  }, [dismissRestoreNotice, generating, resultMesh, sessionRestored]);
   const canGenerate = hasModel && !demoModeActive;
   const studySummary = hasModel
     ? `${latticeLabel(params.latticeType)} · ${params.cellSize} mm cells${resultMesh ? ` · ${resultStats}` : ''}`
@@ -267,7 +274,7 @@ function HydratedApp() {
       </div>
 
       <main className="workspace" id="main-content" tabIndex={-1}>
-        <section className="viewer-shell" aria-label="3D lattice viewer">
+        <section className={`viewer-shell${generating ? ' is-generating' : ''}`} aria-label="3D lattice viewer" aria-busy={generating || undefined}>
           {!demoModeActive && hasModel && (
             <div className="viewer-hud">
               <div className="viewer-readout">
@@ -277,6 +284,22 @@ function HydratedApp() {
             </div>
           )}
           <Viewer3D />
+          {generating && (
+            <div className="viewer-busy" aria-hidden="true">
+              <span className="viewer-busy-pill">
+                <span className="viewer-busy-spinner" />
+                {progressView.text}
+              </span>
+            </div>
+          )}
+          {showRestoreNotice && (
+            <div className="viewer-restore-notice" role="status">
+              <span>Settings restored from your last visit. Generated lattices aren't saved between sessions — generate to see one.</span>
+              <button type="button" className="btn btn-tiny" onClick={dismissRestoreNotice} aria-label="Dismiss notice">
+                <XIcon size={12} />
+              </button>
+            </div>
+          )}
           {!hasModel && !demoModeActive && <StartOverlay />}
           {showFaceLegend && !demoModeActive && (
             <div className="viewer-legend" role="group" aria-label="Face marking legend">
