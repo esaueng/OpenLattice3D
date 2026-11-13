@@ -2,6 +2,7 @@
 //
 // Kept free of `self`/`Worker` globals so the scheduling, failure and response
 // handling can be unit-tested in Node with fake workers.
+import { workerFailure } from '../utils/failure-cause';
 import type { SurfaceHexSample } from '../geometry/lattice';
 import { normalize } from '../geometry/vec3';
 import type { SampleShape } from '../types/project';
@@ -86,7 +87,7 @@ export function parseSurfaceSampleResponse(value: unknown, streamId: number): Su
     || positions.length !== normals.length
     || positions.length % 3 !== 0
   ) {
-    throw new Error('Surface sampling worker returned a malformed response');
+    throw workerFailure('Surface sampling worker returned a malformed response');
   }
   const samples: SurfaceHexSample[] = [];
   for (let j = 0; j < positions.length; j += 3) {
@@ -120,8 +121,8 @@ export function runSurfaceSampleWorkerJob(
         reject(error);
       }
     };
-    worker.onerror = () => reject(new Error('Surface sampling worker failed'));
-    worker.onmessageerror = () => reject(new Error('Surface sampling worker returned an unreadable response'));
+    worker.onerror = () => reject(workerFailure('Surface sampling worker failed'));
+    worker.onmessageerror = () => reject(workerFailure('Surface sampling worker returned an unreadable response'));
     worker.postMessage(payload);
   }).finally(() => {
     if (onAbort) signal.removeEventListener('abort', onAbort);

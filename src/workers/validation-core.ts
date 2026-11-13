@@ -1,5 +1,6 @@
 // Validation pipeline run by validation-worker.ts, kept free of worker globals
 // so it can be unit-tested in Node.
+import type { FailureCause } from '../utils/failure-cause';
 import { MeshBVH } from '../geometry/bvh';
 import {
   buildCombinedSDF,
@@ -53,6 +54,8 @@ export interface ValidationWorkerResponse {
   type: 'progress' | 'result' | 'error';
   message?: string;
   validation?: ValidationResult;
+  /** A fixed failure cause classified here; never the error text itself. */
+  diagnostic?: FailureCause;
 }
 
 export function unpackSurfaceSamples(

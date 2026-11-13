@@ -63,6 +63,42 @@ describe('main generation worker lifecycle', () => {
     }
   });
 
+  it('reports a fixed cause: worker for its own failures, else only a valid cause the worker sent', () => {
+    const cases: [(worker: FakeWorker) => void, unknown][] = [
+      [(worker) => worker.crash('private.stl'), 'worker'],
+      [(worker) => worker.messageError(), 'worker'],
+      [(worker) => worker.emit({ type: 'bogus' }), 'worker'],
+      [(worker) => worker.emit({ type: 'error', message: 'allocation', diagnostic: 'out_of_memory' }), 'out_of_memory'],
+      [(worker) => worker.emit({ type: 'error', message: 'too thin', diagnostic: 'private.stl' }), undefined],
+      [(worker) => worker.emit({ type: 'error', message: 'too thin' }), undefined],
+    ];
+    for (const [fail, expected] of cases) {
+      const worker = new FakeWorker();
+      const causes: unknown[] = [];
+      const controller = new GenerationWorkerController();
+      controller.start(worker, { onProgress: () => undefined, onResult: () => undefined, onFailure: (_message, cause) => causes.push(cause) });
+      fail(worker);
+      expect(causes).toEqual([expected]);
+    }
+    const posting = new FakeWorker();
+    posting.postError = new Error('DataCloneError');
+    const causes: unknown[] = [];
+    const controller = new GenerationWorkerController();
+    controller.start(posting, { onProgress: () => undefined, onResult: () => undefined, onFailure: (_message, cause) => causes.push(cause) });
+    controller.post({});
+    expect(causes).toEqual(['worker']);
+  });
+
+  it('accepts a fixed progress cause and rejects any other value as malformed', () => {
+    const worker = new FakeWorker();
+    const seen: unknown[] = [];
+    const controller = new GenerationWorkerController();
+    controller.start(worker, { onProgress: (response) => seen.push(response.diagnostic), onResult: () => undefined, onFailure: (message) => seen.push(message) });
+    worker.emit({ type: 'progress', progress: 0.1, message: 'fallback', diagnostic: 'worker' });
+    worker.emit({ type: 'progress', progress: 0.2, message: 'x', diagnostic: 'private' });
+    expect(seen).toEqual(['worker', 'Generation worker returned a malformed response']);
+  });
+
   it('rejects malformed responses and leaves the UI recoverable', () => {
     const worker = new FakeWorker();
     const ui = { generating: true, error: '' };

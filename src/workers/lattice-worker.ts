@@ -51,6 +51,7 @@ import {
 } from '../geometry/deterministic-random';
 import { createProgressReporter } from './progress-reporter';
 import { sampleSurfaceStreams, type SampleWorkerLike } from './surface-sample-pool';
+import { failureCause, type FailureCause } from '../utils/failure-cause';
 
 type SdfFunction = ((x: number, y: number, z: number) => number) & Partial<GridSdfSampler>;
 type WorkerPostMessage = (message: unknown, transfer: Transferable[]) => void;
@@ -164,6 +165,8 @@ export interface WorkerResponse {
   thinFilterSkipped?: string;
   backend?: TileBackend;
   transient?: boolean;
+  /** A fixed failure cause classified here; error text stays in `message` for the local log. */
+  diagnostic?: FailureCause;
 }
 
 let cancelled = false;
@@ -649,7 +652,8 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
           postMessage({
             type: 'progress',
             progress: 0.12,
-            message: `cpu-tiled unavailable (${message}); falling back to cpu-single`
+            message: `cpu-tiled unavailable (${message}); falling back to cpu-single`,
+            diagnostic: failureCause(err),
           } as WorkerResponse);
         }
       }
@@ -763,7 +767,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
       if (message === 'Cancelled') {
         postMessage({ type: 'progress', progress: 0, message: 'Cancelled' } as WorkerResponse);
       } else {
-        postMessage({ type: 'error', message } as WorkerResponse);
+        postMessage({ type: 'error', message, diagnostic: failureCause(err) } as WorkerResponse);
       }
     }
   }

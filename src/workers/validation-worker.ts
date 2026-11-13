@@ -5,6 +5,7 @@ import {
   type ValidationWorkerMessage,
   type ValidationWorkerResponse,
 } from './validation-core';
+import { failureCause } from '../utils/failure-cause';
 
 export type { ValidationWorkerMessage, ValidationWorkerResponse } from './validation-core';
 
@@ -26,6 +27,6 @@ self.onmessage = (event: MessageEvent<ValidationWorkerMessage>) => {
     postMessage({ type: 'result', validation } as ValidationWorkerResponse);
   } catch (err: unknown) {
     const message = err instanceof Error && err.message ? err.message : 'Unknown validation error';
-    postMessage({ type: 'error', message } as ValidationWorkerResponse);
+    postMessage({ type: 'error', message, diagnostic: failureCause(err) } as ValidationWorkerResponse);
   }
 };

@@ -2,6 +2,7 @@ import type { ModelIntake, IntakeRequest } from '../workers/model-intake';
 import { DEFAULT_IMPORT_LIMITS, MESH_FILE_FORMATS, type MeshFileFormat } from '../geometry/mesh-limits';
 import type { GenerationWorkerLike } from './generation-worker-controller';
 import { DEFAULT_PARAMS, sanitizeLatticeParams } from '../types/project';
+import { DiagnosedError, parseFailureCause, workerFailure, type FailureCause } from '../utils/failure-cause';
 
 type Session = {
   epoch: number;
@@ -71,20 +72,20 @@ export class ModelIntakeController {
     return new Promise((resolve, reject) => {
       let worker: GenerationWorkerLike;
       try { worker = this.createWorker(); }
-      catch (error) { reject(new Error(`Could not start import worker: ${error instanceof Error ? error.message : String(error)}`)); return; }
+      catch (error) { reject(workerFailure(`Could not start import worker: ${error instanceof Error ? error.message : String(error)}`)); return; }
       const session: Session = { epoch, kind: request.kind, worker, resolve, reject };
       this.active = session;
       worker.onmessage = ({ data }) => {
         if (this.active !== session) return;
         if (record(data) && data.type === 'result' && isModelIntake(data.result, session.kind)) this.finish(session, data.result);
-        else if (record(data) && data.type === 'error' && typeof data.message === 'string' && data.message.trim()) this.fail(session, data.message);
-        else this.fail(session, 'Import worker returned a malformed response');
+        else if (record(data) && data.type === 'error' && typeof data.message === 'string' && data.message.trim()) this.fail(session, data.message, parseFailureCause(data.diagnostic));
+        else this.fail(session, 'Import worker returned a malformed response', 'worker');
       };
-      worker.onerror = event => { event.preventDefault?.(); this.fail(session, `Import worker crashed${event.message ? `: ${event.message}` : ''}`); };
-      worker.onmessageerror = () => this.fail(session, 'Import worker returned an unreadable response');
+      worker.onerror = event => { event.preventDefault?.(); this.fail(session, `Import worker crashed${event.message ? `: ${event.message}` : ''}`, 'worker'); };
+      worker.onmessageerror = () => this.fail(session, 'Import worker returned an unreadable response', 'worker');
       // File is structured-cloned. Existing store buffers are never sent or detached.
       try { worker.postMessage(request); }
-      catch (error) { this.fail(session, `Could not start import worker: ${error instanceof Error ? error.message : String(error)}`); }
+      catch (error) { this.fail(session, `Could not start import worker: ${error instanceof Error ? error.message : String(error)}`, 'worker'); }
     });
   }
 
@@ -98,9 +99,10 @@ export class ModelIntakeController {
     this.release(session);
     session.resolve(result);
   }
-  private fail(session: Session, message: string): void {
+  private fail(session: Session, message: string, cause?: FailureCause): void {
     if (this.active !== session) return;
     this.release(session);
-    session.reject(new Error(message));
+    // The cause travels with the error so the import site can report a fixed code.
+    session.reject(cause ? new DiagnosedError(message, cause) : new Error(message));
   }
 }

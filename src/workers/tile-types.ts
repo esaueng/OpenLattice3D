@@ -1,5 +1,6 @@
 import type { LatticeParams, SampleShape } from '../types/project';
 import type { Vec3 } from '../geometry/vec3';
+import type { FailureCause } from '../utils/failure-cause';
 export type TileBackend = 'cpu-single' | 'cpu-tiled';
 
 export interface LatticeTileJob {
@@ -37,6 +38,8 @@ export interface LatticeTileError {
   type: 'error';
   tileId: number;
   message: string;
+  /** Set when the tile failed to allocate memory; classified in the tile worker. */
+  diagnostic?: FailureCause;
 }
 
 export type LatticeTileResponse = LatticeTileResult | LatticeTileError;

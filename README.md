@@ -290,7 +290,7 @@ single-worker paths; see [the backend decision](./docs/performance/backend-decis
 
 ## Privacy & data
 
-Optional usage analytics start off. Opt in or withdraw in the top bar's **⋯ project menu → Privacy & data**; browser privacy signals suppress sends. Only fixed operation counts and coarse durations can be collected, with no model contents, filenames, URLs or visitor IDs. Collection also requires a deliberately configured and enabled backend. See [the data boundary and rollout](docs/glimpse.md).
+Optional usage analytics start off. Opt in or withdraw in the top bar's **⋯ project menu → Privacy & data**; browser privacy signals suppress sends. Only fixed values can be collected: operation counts, fixed failure codes, and coarse ranges for durations, saved project size and lattice cell count, with no model contents, filenames, error messages, exact sizes, URLs or visitor IDs. The current notice is consent version 2; an earlier (version 1) choice keeps covering only the original counts until you allow the updated analytics. You can download this page's diagnostic counts as a JSON report to inspect and share yourself. Collection also requires a deliberately configured and enabled backend. See [the data boundary and rollout](docs/glimpse.md).
 
 ## Testing
 

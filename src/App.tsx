@@ -28,6 +28,7 @@ import { useResultStaleness } from './store/useResultStaleness';
 import { trackUsage } from './analytics';
 import { CONFIRM_TIMEOUT_MS, confirmActionLabel, confirmHint } from './components/confirm';
 import { keepResultsOffer, runFinishAction } from './components/results-ready';
+import { ViewportErrorBoundary } from './components/ViewportErrorBoundary';
 import './App.css';
 
 function App() {
@@ -309,7 +310,9 @@ function HydratedApp() {
               </div>
             </div>
           )}
-          <Viewer3D />
+          <ViewportErrorBoundary>
+            <Viewer3D />
+          </ViewportErrorBoundary>
           {generating && (
             <div className="viewer-busy" aria-hidden="true">
               <span className="viewer-busy-pill">

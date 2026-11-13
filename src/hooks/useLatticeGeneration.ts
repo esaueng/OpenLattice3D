@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { trackUsage } from '../analytics';
+import {
+  trackDiagnostic,
+  trackFailure,
+  trackFailureCause,
+  trackFeature,
+  trackLatticeCells,
+  trackUsage,
+} from '../analytics';
+import { latticeCellCount, modelExtents } from '../utils/model-summary';
+import { workerFailure } from '../utils/failure-cause';
 import { useStore } from '../store/useStore';
 import type { WorkerMessage } from '../workers/lattice-worker';
 import type { ValidationWorkerMessage } from '../workers/validation-worker';
@@ -126,9 +135,15 @@ export function useLatticeGeneration(): LatticeGenerationControls {
       store.setProgress(0, 'Generation failed');
       store.setGenerationError(message);
       trackUsage('generation_failed');
+      trackDiagnostic('error_worker');
       return;
     }
     const generationStartedAt = performance.now();
+    // Counted from the run's own inputs: unit cells across the model's bounding box.
+    const cellEstimate = latticeCellCount(
+      modelExtents(store.meshInfo, store.sampleShape, store.sphereRadius)?.size ?? null,
+      store.params.cellSize,
+    );
     const generationSeed = store.generationSeed;
     const resolution = Math.round(24 + store.params.exportResolution * 24);
     const maxSpan = store.meshInfo
@@ -180,10 +195,15 @@ export function useLatticeGeneration(): LatticeGenerationControls {
         validationWorkerRef.current.terminate();
       }
 
-      const validationWorker = new Worker(
-        new URL('../workers/validation-worker.ts', import.meta.url),
-        { type: 'module' }
-      );
+      let validationWorker: Worker;
+      try {
+        validationWorker = new Worker(
+          new URL('../workers/validation-worker.ts', import.meta.url),
+          { type: 'module' }
+        );
+      } catch (error) {
+        throw workerFailure(error instanceof Error ? error.message : 'Could not create validation worker');
+      }
       validationWorkerRef.current = validationWorker;
 
       const validationMsg: ValidationWorkerMessage = {
@@ -243,17 +263,21 @@ export function useLatticeGeneration(): LatticeGenerationControls {
           finishValidationWorker();
           current.setValidation(validationResp.validation);
           current.addLog('Validation complete');
+          trackFeature('measure');
         } else {
           failValidation(`Validation error: ${validationResp.message}`);
+          trackFailureCause(validationResp.diagnostic);
         }
       };
       validationWorker.onerror = () => {
         if (!isCurrentValidation()) return;
         failValidation('Validation worker failed');
+        trackDiagnostic('error_worker');
       };
       validationWorker.onmessageerror = () => {
         if (!isCurrentValidation()) return;
         failValidation('Validation worker returned an unreadable response');
+        trackDiagnostic('error_worker');
       };
 
       useStore.getState().setValidationProgress(0);
@@ -265,6 +289,8 @@ export function useLatticeGeneration(): LatticeGenerationControls {
         const current = useStore.getState();
         current.setProgress(resp.progress, resp.message);
         if (resp.message && !resp.transient) current.addLog(resp.message);
+        // A tile worker failed and generation fell back to one thread.
+        trackFailureCause(resp.diagnostic);
       },
       onResult: (resp) => {
         const current = useStore.getState();
@@ -296,13 +322,16 @@ export function useLatticeGeneration(): LatticeGenerationControls {
           stopRun();
           const message = error instanceof Error ? error.message : 'Unknown error';
           current.addLog(`Could not start validation: ${message}`, 'error');
+          trackFailure(null, error);
         }
         const elapsedMs = performance.now() - generationStartedAt;
         trackUsage('generation_completed');
         trackUsage('operation_latency', elapsedMs);
+        trackFeature('create');
+        if (cellEstimate !== null) trackLatticeCells(cellEstimate);
         void notifyGenerationComplete(resp.triCount, elapsedMs);
       },
-      onFailure: (message) => {
+      onFailure: (message, cause) => {
         releaseModelSubscription();
         const current = useStore.getState();
         current.addLog(message, 'error');
@@ -311,6 +340,7 @@ export function useLatticeGeneration(): LatticeGenerationControls {
         current.setProgress(0, 'Generation failed');
         current.setGenerationError(message);
         trackUsage('generation_failed');
+        trackFailureCause(cause);
       },
     });
 
