@@ -1,5 +1,5 @@
 // 3D Viewer component using react-three-fiber
-import { useRef, useMemo, useCallback, useEffect, useState, type KeyboardEvent } from 'react';
+import { useRef, useMemo, useCallback, useEffect, useLayoutEffect, useState, type KeyboardEvent } from 'react';
 import { Canvas, useThree, useFrame, type RootState, type ThreeEvent } from '@react-three/fiber';
 import { Billboard, GizmoHelper, Line, OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
@@ -31,6 +31,7 @@ import {
 import { BuildPlateGrid } from './viewer/BuildPlateGrid';
 import { buildPlateGridSpec, formatGridSpacing } from './viewer/build-plate-grid';
 import { resultHasClosedSkin } from './viewer/viewer-hints';
+import { UNADJUSTED_FRAMING, compactViewerFraming, type ViewerFraming } from './viewer/compact-framing';
 
 const VIEWPORT_PADDING = 1.2;
 const WORLD_UP = new THREE.Vector3(0, 0, 1);
@@ -78,7 +79,7 @@ type ViewCubeFaceLabel = 'Front' | 'Back' | 'Right' | 'Left' | 'Top' | 'Bottom';
 type GizmoViewTarget = '+x' | '+y' | '+z' | 'front' | 'right' | 'top' | 'iso';
 type ViewCubeFaceDirection = ViewCubeCornerDirection;
 
-function distanceToFitBoundingSphere(camera: THREE.Camera, radius: number): number {
+function distanceToFitBoundingSphere(camera: THREE.Camera, radius: number, framing: ViewerFraming = UNADJUSTED_FRAMING): number {
   if (!(camera instanceof THREE.PerspectiveCamera)) return radius * 4;
 
   const vFov = THREE.MathUtils.degToRad(camera.fov);
@@ -86,7 +87,70 @@ function distanceToFitBoundingSphere(camera: THREE.Camera, radius: number): numb
   const verticalDistance = radius / Math.sin(vFov / 2);
   const horizontalDistance = radius / Math.sin(hFov / 2);
 
-  return Math.max(verticalDistance, horizontalDistance) * VIEWPORT_PADDING;
+  return Math.max(verticalDistance, horizontalDistance) * VIEWPORT_PADDING * framing.distanceScale;
+}
+
+function isCompactViewer(size: { width: number; height: number }): boolean {
+  return size.width < VIEWER_GIZMO_COMPACT_MAX_WIDTH || size.height < VIEWER_GIZMO_COMPACT_MAX_HEIGHT;
+}
+
+// Farthest the gizmo reaches from its anchor in any orientation, in gizmo
+// units: the axis caps and the origin button sit LABEL_DISTANCE·√3/2 from the
+// content centre, plus the cap's own radius.
+const VIEWER_GIZMO_REACH = (VIEWER_GIZMO_LABEL_DISTANCE / 2) * Math.sqrt(3) + VIEWER_AXIS_HEAD_RADIUS;
+
+/**
+ * How a fitted model sits in this viewport. Wide viewers keep the plain
+ * centred fit; compact ones nudge it down-left (and, on very small viewers,
+ * back) so it stays clear of the corner view cube.
+ */
+function viewerFraming(size: { width: number; height: number }, camera: THREE.Camera): ViewerFraming {
+  if (!(camera instanceof THREE.PerspectiveCamera) || !isCompactViewer(size)) return UNADJUSTED_FRAMING;
+  return compactViewerFraming(size, {
+    fovDeg: camera.fov,
+    padding: VIEWPORT_PADDING,
+    gizmo: {
+      marginX: VIEWER_GIZMO_COMPACT_MARGIN[0],
+      marginY: VIEWER_GIZMO_COMPACT_MARGIN[1],
+      radiusPx: VIEWER_GIZMO_REACH * VIEWER_GIZMO_COMPACT_SCALE,
+    },
+    gapPx: 8,
+    edgePx: 8,
+  });
+}
+
+function useViewerFraming(): ViewerFraming {
+  const camera = useThree((state) => state.camera);
+  const width = useThree((state) => state.size.width);
+  const height = useThree((state) => state.size.height);
+  return useMemo(() => viewerFraming({ width, height }, camera), [camera, width, height]);
+}
+
+/**
+ * Shift the projection so a model at the orbit target appears at the framed
+ * centre. Orbit, zoom and picking all stay centred on the target; only where
+ * it lands on screen moves. Wide viewers clear the offset.
+ */
+function ViewerFramingOffset({ framing }: { framing: ViewerFraming }) {
+  const camera = useThree((state) => state.camera);
+  const width = useThree((state) => state.size.width);
+  const height = useThree((state) => state.size.height);
+
+  useLayoutEffect(() => {
+    if (!(camera instanceof THREE.PerspectiveCamera)) return;
+    if (framing.offsetX === 0 && framing.offsetY === 0) {
+      if (camera.view?.enabled) camera.clearViewOffset();
+      return;
+    }
+    // The sub-view moves opposite to where the content should appear.
+    camera.setViewOffset(width, height, -framing.offsetX, -framing.offsetY, width, height);
+  }, [camera, width, height, framing.offsetX, framing.offsetY]);
+
+  useEffect(() => () => {
+    if (camera instanceof THREE.PerspectiveCamera && camera.view?.enabled) camera.clearViewOffset();
+  }, [camera]);
+
+  return null;
 }
 
 function defaultViewerBounds(): THREE.Box3 {
@@ -243,8 +307,13 @@ function applyViewerCameraState(cameraState: ViewerCameraState, camera: THREE.Ca
   return finishOrbitControlsAfterCameraReset(resetSession, target);
 }
 
-function GizmoCameraReset({ view, signal }: { view: GizmoViewRequest | null; signal: number }) {
+function GizmoCameraReset({ view, signal, framing }: { view: GizmoViewRequest | null; signal: number; framing: ViewerFraming }) {
   const { camera, controls } = useThree();
+  // Read at reset time only: a resize must not replay the last view request.
+  const framingRef = useRef(framing);
+  useEffect(() => {
+    framingRef.current = framing;
+  }, [framing]);
   const store = useStore(useShallow((s) => ({
     originalMesh: s.originalMesh,
     sphereMode: s.sphereMode,
@@ -271,7 +340,7 @@ function GizmoCameraReset({ view, signal }: { view: GizmoViewRequest | null; sig
     const center = bounds.getCenter(new THREE.Vector3());
     const sphere = bounds.getBoundingSphere(new THREE.Sphere());
     const radius = Math.max(sphere.radius, 1);
-    const distance = distanceToFitBoundingSphere(camera, radius);
+    const distance = distanceToFitBoundingSphere(camera, radius, framingRef.current);
     const cameraView = cameraViewForRequest(view);
 
     camera.up.copy(cameraView.up);
@@ -934,7 +1003,7 @@ function ResponsiveViewGizmo({
   onCompactChange: (compact: boolean) => void;
 }) {
   const size = useThree((state) => state.size);
-  const compact = size.width < VIEWER_GIZMO_COMPACT_MAX_WIDTH || size.height < VIEWER_GIZMO_COMPACT_MAX_HEIGHT;
+  const compact = isCompactViewer(size);
   useEffect(() => onCompactChange(compact), [compact, onCompactChange]);
   return (
     <GizmoHelper
@@ -1012,7 +1081,7 @@ function ViewportResizeSync() {
   return null;
 }
 
-function AutoFit() {
+function AutoFit({ framing }: { framing: ViewerFraming }) {
   const { camera, controls, size: canvasSize } = useThree();
   const store = useStore(useShallow((s) => ({
     originalMesh: s.originalMesh,
@@ -1042,7 +1111,7 @@ function AutoFit() {
     const center = bounds.getCenter(new THREE.Vector3());
     const sphere = bounds.getBoundingSphere(new THREE.Sphere());
     const radius = Math.max(sphere.radius, 1);
-    const distance = distanceToFitBoundingSphere(camera, radius);
+    const distance = distanceToFitBoundingSphere(camera, radius, framing);
 
     camera.up.copy(ISO_VIEW_UP);
     camera.position.copy(center).add(ISO_VIEW_DIRECTION.clone().multiplyScalar(distance));
@@ -1061,9 +1130,22 @@ function AutoFit() {
     controls,
     canvasSize.width,
     canvasSize.height,
+    framing,
   ]);
 
   return null;
+}
+
+/** Fitting and view-cube resets, framed for the viewport (see viewerFraming). */
+function FramedCamera({ view, signal }: { view: GizmoViewRequest | null; signal: number }) {
+  const framing = useViewerFraming();
+  return (
+    <>
+      <ViewerFramingOffset framing={framing} />
+      <AutoFit framing={framing} />
+      <GizmoCameraReset view={view} signal={signal} framing={framing} />
+    </>
+  );
 }
 
 function ViewerCameraSession() {
@@ -1321,8 +1403,7 @@ export function Viewer3D() {
         <ViewerLighting />
 
         <ViewportResizeSync />
-        <AutoFit />
-        <GizmoCameraReset view={gizmoViewRequest.view} signal={gizmoViewRequest.signal} />
+        <FramedCamera view={gizmoViewRequest.view} signal={gizmoViewRequest.signal} />
 
         {viewMode === 'original' && originalMesh && (
           <OriginalMeshView

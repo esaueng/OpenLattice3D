@@ -651,6 +651,40 @@ summary:focus-visible,
   flex: none;
 }
 
+/* "Results ready" after a top-bar run from an editing step. The region stays
+   mounted (an empty live region) so its content is announced when it appears. */
+.viewer-results-ready-region {
+  position: absolute;
+  top: calc(var(--sp-3) + 40px);
+  left: var(--sp-3);
+  z-index: var(--z-viewer-overlay);
+}
+
+.viewer-results-ready {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-1) var(--sp-1) var(--sp-25);
+  color: var(--color-text);
+  background: rgba(17, 24, 33, 0.92);
+  border: 1px solid color-mix(in srgb, var(--color-success) 55%, transparent);
+  border-radius: var(--radius-md);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+
+.viewer-results-ready-dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  background: var(--color-success);
+  border-radius: 50%;
+}
+
+.viewer-results-ready .btn {
+  flex: none;
+}
+
 .viewer-canvas-surface {
   width: 100%;
   height: 100%;

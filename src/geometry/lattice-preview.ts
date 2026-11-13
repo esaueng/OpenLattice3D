@@ -20,6 +20,22 @@ const AXIS_PLANE = (z: number): SlicePlane => ({ origin: [0, 0, z], u: [1, 0, 0]
 // A vertical plane along the (1,1,0) diagonal: it contains the body diagonals
 // of a cubic cell, so diagonal struts read as struts rather than dots.
 const DIAGONAL_PLANE: SlicePlane = { origin: [0, 0, 0], u: [INV_SQRT2, INV_SQRT2, 0], v: [0, 0, 1] };
+// Diamond: a (111) plane. Along [111] the diamond nodes form buckled layers:
+// a sublayer of nodes at x+y+z = 0 (cell units) bonded by three struts each to
+// a sublayer at x+y+z = -1/4, the fourth strut of every node running along
+// [111] to the next layer. A plane a third of the way between the sublayers
+// (x+y+z = -1/12) cuts the upper nodes near their centre and the three
+// in-layer struts on their way down, so the slice shows three-way nodes joined
+// into a honeycomb by tapering struts: the tetrahedral node network, which the
+// axis and (110) planes only show as separate dots or zigzag bands. (The
+// midway plane would give an even honeycomb that reads like a hexagon sheet.)
+const DIAMOND_111_OFFSET = -1 / 36;
+const INV_SQRT6 = 1 / Math.sqrt(6);
+const DIAMOND_PLANE: SlicePlane = {
+  origin: [DIAMOND_111_OFFSET, DIAMOND_111_OFFSET, DIAMOND_111_OFFSET],
+  u: [INV_SQRT2, -INV_SQRT2, 0],
+  v: [INV_SQRT6, INV_SQRT6, -2 * INV_SQRT6],
+};
 
 // Planes chosen so each type's slice shows its characteristic pattern.
 const PREVIEW_PLANES: Record<LatticeType, SlicePlane> = {
@@ -30,7 +46,7 @@ const PREVIEW_PLANES: Record<LatticeType, SlicePlane> = {
   iwp: AXIS_PLANE(0.06),
   bcc: DIAGONAL_PLANE,
   octet: AXIS_PLANE(0),
-  diamond: DIAGONAL_PLANE,
+  diamond: DIAMOND_PLANE,
   hexagon: AXIS_PLANE(0),
   triangle: AXIS_PLANE(0),
   voronoi: AXIS_PLANE(0.5),
