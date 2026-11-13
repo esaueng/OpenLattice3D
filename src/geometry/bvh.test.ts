@@ -49,11 +49,10 @@ describe('MeshBVH', () => {
   });
 
   it('approximates the analytic sphere SDF', () => {
-    // The procedural sphere is wound inward (with outward stored normals). The
-    // sign now follows winding only, so orient it as STL intake would.
-    const generated = generateSphereMesh(25, 48);
-    expect(computeSignedVolume(generated)).toBeLessThan(0);
-    const sphere = flipMeshOrientation(generated);
+    // The procedural sphere is wound outward, as STL intake would orient it;
+    // the sign follows winding only, so it needs no flip.
+    const sphere = generateSphereMesh(25, 48);
+    expect(computeSignedVolume(sphere)).toBeGreaterThan(0);
     const bvh = new MeshBVH(sphere.positions, sphere.normals, sphere.triCount);
 
     // Sample several directions; tessellation error at 48 segments is small.
@@ -64,6 +63,14 @@ describe('MeshBVH', () => {
       expect(bvh.signedDistance([dx * 30, dy * 30, dz * 30])).toBeCloseTo(5, 1);
       expect(bvh.signedDistance([dx * 20, dy * 20, dz * 20])).toBeCloseTo(-5, 1);
     }
+  });
+
+  it('inverts the sphere SDF sign when its winding is flipped', () => {
+    const inverted = flipMeshOrientation(generateSphereMesh(25, 48));
+    expect(computeSignedVolume(inverted)).toBeLessThan(0);
+    const bvh = new MeshBVH(inverted.positions, inverted.normals, inverted.triCount);
+    expect(bvh.signedDistance([30, 0, 0])).toBeCloseTo(-5, 1);
+    expect(bvh.signedDistance([20, 0, 0])).toBeCloseTo(5, 1);
   });
 });
 

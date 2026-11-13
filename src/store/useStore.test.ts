@@ -48,6 +48,19 @@ describe('persistence hydration', () => {
     expect(hydrated.viewerBackground).toBe('#000000');
   });
 
+  it('persists the build-plate grid preference, defaulting it on for older snapshots', () => {
+    const base = { version: 3, savedAt: Date.now(), params: { ...DEFAULT_PARAMS } };
+    type Snapshot = Parameters<typeof hydrateFromSnapshot>[0];
+    expect(hydrateFromSnapshot(base as unknown as Snapshot).showBuildPlateGrid).toBe(true);
+    expect(hydrateFromSnapshot({ ...base, showBuildPlateGrid: false } as unknown as Snapshot).showBuildPlateGrid).toBe(false);
+    expect(hydrateFromSnapshot({ ...base, showBuildPlateGrid: 'no' } as unknown as Snapshot).showBuildPlateGrid).toBe(true);
+
+    const previous = useStore.getState().showBuildPlateGrid;
+    useStore.getState().setShowBuildPlateGrid(false);
+    expect(buildPersistedAppState(useStore.getState()).showBuildPlateGrid).toBe(false);
+    useStore.getState().setShowBuildPlateGrid(previous);
+  });
+
   it('never restores a result-only view mode, which would show an empty canvas', () => {
     const hydrated = hydrateFromSnapshot({
       version: 3,

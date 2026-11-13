@@ -43,6 +43,8 @@ export function ViewerControls() {
     setViewerBackground: s.setViewerBackground,
     requestCameraView: s.requestCameraView,
     resetViewport: s.resetViewport,
+    showBuildPlateGrid: s.showBuildPlateGrid,
+    setShowBuildPlateGrid: s.setShowBuildPlateGrid,
   })));
   const {
     resultMesh,
@@ -198,6 +200,8 @@ export function ViewerControls() {
           <CameraViewsMenu
             onSelect={(view) => store.requestCameraView(view)}
             onReset={() => store.resetViewport()}
+            showGrid={store.showBuildPlateGrid}
+            onToggleGrid={() => store.setShowBuildPlateGrid(!store.showBuildPlateGrid)}
           />
         </>
       )}
@@ -214,18 +218,31 @@ export function ViewerControls() {
   );
 }
 
+const MENU_ITEM_SELECTOR = '[role="menuitem"], [role="menuitemcheckbox"]';
+
 /**
  * The view cube is drawn in the canvas and cannot take focus, so this menu is the
- * keyboard path to every camera preset. It follows the ARIA menu pattern.
+ * keyboard path to every camera preset. It follows the ARIA menu pattern, and
+ * also holds the build-plate grid toggle.
  */
-function CameraViewsMenu({ onSelect, onReset }: { onSelect: (view: CameraPreset) => void; onReset: () => void }) {
+function CameraViewsMenu({
+  onSelect,
+  onReset,
+  showGrid,
+  onToggleGrid,
+}: {
+  onSelect: (view: CameraPreset) => void;
+  onReset: () => void;
+  showGrid: boolean;
+  onToggleGrid: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!open) return;
-    menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+    menuRef.current?.querySelector<HTMLElement>(MENU_ITEM_SELECTOR)?.focus();
     const closeOnOutside = (event: PointerEvent) => {
       const target = event.target as Node;
       if (!menuRef.current?.contains(target) && !triggerRef.current?.contains(target)) setOpen(false);
@@ -240,7 +257,7 @@ function CameraViewsMenu({ onSelect, onReset }: { onSelect: (view: CameraPreset)
   };
 
   const handleMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    const items = Array.from(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []);
+    const items = Array.from(menuRef.current?.querySelectorAll<HTMLElement>(MENU_ITEM_SELECTOR) ?? []);
     const index = items.indexOf(document.activeElement as HTMLElement);
     const focusAt = (next: number) => items[(next + items.length) % items.length]?.focus();
     if (event.key === 'ArrowDown') { event.preventDefault(); focusAt(index + 1); }
@@ -275,6 +292,16 @@ function CameraViewsMenu({ onSelect, onReset }: { onSelect: (view: CameraPreset)
             </button>
           ))}
           <div className="viewer-menu-separator" role="separator" />
+          <button
+            type="button"
+            role="menuitemcheckbox"
+            aria-checked={showGrid}
+            tabIndex={-1}
+            title="Show a millimetre grid under the part for scale."
+            onClick={onToggleGrid}
+          >
+            Build-plate grid <span className="viewer-menu-check" aria-hidden="true">{showGrid ? '✓' : ''}</span>
+          </button>
           <button type="button" role="menuitem" tabIndex={-1} onClick={() => { onReset(); close(true); }}>
             Reset view <kbd>H</kbd>
           </button>

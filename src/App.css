@@ -657,6 +657,101 @@ summary:focus-visible,
   vertical-align: -1px;
 }
 
+/* ── Viewer scale label and Solid-view skin hint ── */
+
+.viewer-scale-label {
+  position: absolute;
+  top: var(--sp-3);
+  right: var(--sp-3);
+  z-index: var(--z-viewer-overlay);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-15);
+  padding: var(--sp-1) var(--sp-25);
+  color: var(--color-text);
+  background: color-mix(in srgb, var(--color-surface) 82%, transparent);
+  border: var(--border-thin);
+  border-radius: var(--radius-pill);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  pointer-events: none;
+}
+
+.viewer-scale-swatch {
+  width: 12px;
+  height: 12px;
+  border: 1px solid rgba(159, 179, 200, 0.75);
+  background:
+    linear-gradient(rgba(159, 179, 200, 0.35), rgba(159, 179, 200, 0.35)) center / 1px 100% no-repeat,
+    linear-gradient(rgba(159, 179, 200, 0.35), rgba(159, 179, 200, 0.35)) center / 100% 1px no-repeat;
+}
+
+.viewer-scale-minor {
+  color: var(--color-text-muted);
+}
+
+.viewer-skin-hint {
+  position: absolute;
+  top: calc(var(--sp-3) + 40px);
+  left: var(--sp-3);
+  z-index: var(--z-viewer-overlay);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  max-width: min(460px, calc(100% - 2 * var(--sp-3)));
+  padding: var(--sp-2) var(--sp-25);
+  color: var(--color-text);
+  background: color-mix(in srgb, var(--color-surface) 90%, transparent);
+  border: var(--border-thin);
+  border-left: 3px solid var(--color-accent);
+  border-radius: var(--radius-overlay);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-tight);
+  backdrop-filter: blur(8px);
+}
+
+.viewer-skin-hint-actions {
+  display: flex;
+  gap: var(--sp-1);
+}
+
+.viewer-skin-hint-dismiss {
+  min-width: 28px;
+  font-size: var(--fs-md);
+}
+
+.viewer-overlay-dock {
+  display: contents;
+}
+
+/* Compact viewers (phones): the view cube takes the top-right corner, so the
+   scale label and hint stack at the bottom-left, above the toolbar. */
+.viewer-overlay-dock.is-compact {
+  position: absolute;
+  right: var(--sp-3);
+  bottom: calc(var(--sp-4) + 52px);
+  left: var(--sp-3);
+  z-index: var(--z-viewer-overlay);
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: flex-start;
+  gap: var(--sp-15);
+  pointer-events: none;
+}
+
+.viewer-overlay-dock.is-compact > .viewer-scale-label,
+.viewer-overlay-dock.is-compact > .viewer-skin-hint {
+  position: static;
+}
+
+.viewer-overlay-dock.is-compact > .viewer-skin-hint {
+  max-width: 100%;
+  padding: var(--sp-15) var(--sp-2);
+  font-size: var(--fs-xs);
+  pointer-events: auto;
+}
+
 /* ── Floating view toolbar: one pill at the bottom centre ── */
 
 .viewer-controls-overlay {
@@ -763,7 +858,8 @@ summary:focus-visible,
   transform: translateX(-50%);
 }
 
-.viewer-menu [role='menuitem'] {
+.viewer-menu [role='menuitem'],
+.viewer-menu [role='menuitemcheckbox'] {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -778,9 +874,17 @@ summary:focus-visible,
 }
 
 .viewer-menu [role='menuitem']:hover,
-.viewer-menu [role='menuitem']:focus {
+.viewer-menu [role='menuitem']:focus,
+.viewer-menu [role='menuitemcheckbox']:hover,
+.viewer-menu [role='menuitemcheckbox']:focus {
   background: var(--color-surface-2);
   outline-offset: -2px;
+}
+
+.viewer-menu-check {
+  min-width: 1em;
+  color: var(--color-accent);
+  text-align: center;
 }
 
 .viewer-menu-separator {
