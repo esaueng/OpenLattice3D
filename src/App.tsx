@@ -27,6 +27,7 @@ import { compareChecksSummary, solverStatus as describeSolverStatus } from './ut
 import { useResultStaleness } from './store/useResultStaleness';
 import { trackUsage } from './analytics';
 import { CONFIRM_TIMEOUT_MS, confirmActionLabel, confirmHint } from './components/confirm';
+import { keepResultsOffer, runFinishAction } from './components/results-ready';
 import './App.css';
 
 function App() {
@@ -129,13 +130,37 @@ function HydratedApp() {
     if (!stepVisible || !canNavigateToStep(workflowStep, workflowInputs)) setWorkflowStep(reachable);
   }, [reachable, setWorkflowStep, stepVisible, workflowInputs, workflowStep]);
 
-  // A run started from the Generate step lands on its result.
+  // A run that finishes on the Generate step lands on its result. One started
+  // from the top bar while editing another step leaves the user there and
+  // offers the result instead (see results-ready.ts).
   const wasGenerating = useRef(generating);
+  const runStart = useRef<{ step: WorkflowStep; result: typeof resultMesh } | null>(null);
+  const [resultsOffered, setResultsOffered] = useState(false);
   useEffect(() => {
+    const started = !wasGenerating.current && generating;
     const finished = wasGenerating.current && !generating;
     wasGenerating.current = generating;
-    if (finished && resultMesh && useStore.getState().workflowStep === 'generate') setWorkflowStep('results');
+    if (started) {
+      runStart.current = { step: useStore.getState().workflowStep, result: resultMesh };
+      return;
+    }
+    if (!finished) return;
+    const start = runStart.current;
+    runStart.current = null;
+    const action = runFinishAction({
+      // A run already under way at mount is treated like one watched from Generate.
+      startedOnStep: start?.step ?? 'generate',
+      currentStep: useStore.getState().workflowStep,
+      hasResult: Boolean(resultMesh),
+      newResult: Boolean(resultMesh) && resultMesh !== start?.result,
+    });
+    if (action === 'show-results') setWorkflowStep('results');
+    else if (action === 'offer-results') setResultsOffered(true);
   }, [generating, resultMesh, setWorkflowStep]);
+  // Visiting Results, starting another run or losing the result retires the offer for good.
+  const resultsOfferCurrent = keepResultsOffer({ currentStep: workflowStep, generating, hasResult: Boolean(resultMesh) });
+  if (resultsOffered && !resultsOfferCurrent) setResultsOffered(false);
+  const showResultsOffer = resultsOffered && resultsOfferCurrent;
 
   // B and N walk the workflow, like the panel footer's Back and Continue.
   useEffect(() => {
@@ -301,6 +326,27 @@ function HydratedApp() {
               </button>
             </div>
           )}
+          {/* Always mounted so screen readers announce the offer when it appears. */}
+          <div className="viewer-results-ready-region" role="status">
+            {showResultsOffer && (
+              <div className="viewer-results-ready">
+                <span className="viewer-results-ready-dot" aria-hidden="true" />
+                <span>Results ready</span>
+                <button type="button" className="btn btn-small btn-primary" onClick={() => setWorkflowStep('results')}>
+                  View results
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-tiny"
+                  onClick={() => setResultsOffered(false)}
+                  aria-label="Dismiss results notice"
+                  title="Dismiss"
+                >
+                  <XIcon size={12} />
+                </button>
+              </div>
+            )}
+          </div>
           {!hasModel && !demoModeActive && <StartOverlay />}
           {showFaceLegend && !demoModeActive && (
             <div className="viewer-legend" role="group" aria-label="Face marking legend">
