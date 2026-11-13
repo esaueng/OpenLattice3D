@@ -126,3 +126,14 @@ describe('preflight', () => {
     expect(lowered.warnings.some((w) => w.level === 'block')).toBe(false);
   });
 });
+
+describe('stretched cells in fit checks', () => {
+  it('uses the longest stretched cell edge against the shortest side', () => {
+    const cube = modelExtents(null, 'cube', 25);
+    const plain = buildPreflight({ ...DEFAULT_PARAMS, cellSize: 8 }, cube, null);
+    expect(plain.warnings.filter((w) => /cell/i.test(w.message))).toEqual([]);
+    const stretched = buildPreflight({ ...DEFAULT_PARAMS, cellSize: 8, cellScale: [1, 1, 4] }, cube, null);
+    const fit = stretched.warnings.find((w) => /Stretched cell size 32 mm/.test(w.message));
+    expect(fit?.level).toBe('block');
+  });
+});

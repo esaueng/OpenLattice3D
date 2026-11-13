@@ -8,7 +8,7 @@ import {
 } from '../../types/project';
 import { isIdentityLatticeOrientation } from '../../geometry/lattice-transform';
 import { isSheetType } from '../../geometry/lattice';
-import { cellsAcrossShortestSide, modelExtents } from '../../utils/model-summary';
+import { cellsAcrossShortestSide, effectiveCellSizes, modelExtents } from '../../utils/model-summary';
 import { useModelImport } from '../../hooks/useModelImport';
 import { NumericInput } from '../NumericInput';
 import { Collapsible, PanelSection, StepPanel } from '../PanelChrome';
@@ -72,7 +72,8 @@ export function LatticeStep({ inputs }: { inputs: WorkflowInputs }) {
   const store = useStore();
   const intake = useModelImport();
   const extents = modelExtents(store.meshInfo, store.sampleShape, store.sphereRadius);
-  const cellsAcross = extents ? cellsAcrossShortestSide(extents.size, store.params.cellSize) : 0;
+  const fitCellSize = effectiveCellSizes(store.params.cellSize, store.params.cellScale).largest;
+  const cellsAcross = extents ? cellsAcrossShortestSide(extents.size, fitCellSize) : 0;
   const sheet = isSheetType(store.params.latticeType);
   // Hexagon/triangle in conformal mode generate a perforated surface band that
   // ignores the lattice field, so grading has nothing to thicken.
@@ -190,7 +191,7 @@ export function LatticeStep({ inputs }: { inputs: WorkflowInputs }) {
         </p>
         {inputs.hasModel && extents && (
           <p className="panel-copy">
-            <span className="mono">{cellsAcross.toFixed(1)}</span> cells across the shortest side at {store.params.cellSize} mm.
+            <span className="mono">{cellsAcross.toFixed(1)}</span> cells across the shortest side at {Number(fitCellSize.toFixed(2))} mm{fitCellSize !== store.params.cellSize ? ' (longest stretched cell edge)' : ''}.
           </p>
         )}
       </PanelSection>

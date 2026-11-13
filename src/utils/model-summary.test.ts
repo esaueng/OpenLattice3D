@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { analyzeMesh, generateCubeMesh } from '../geometry/mesh-analysis';
 import {
   cellsAcrossShortestSide,
+  effectiveCellSizes,
   defaultBrushRadius,
   describeMeshCondition,
   formatDimensions,
@@ -90,5 +91,17 @@ describe('model summary', () => {
     expect(condition.level).toBe('warn');
     expect(condition.message).toContain('3 non-manifold edges');
     expect(condition.message).not.toContain('open');
+  });
+});
+
+describe('effectiveCellSizes', () => {
+  it('returns the plain cell size without stretch', () => {
+    expect(effectiveCellSizes(8)).toEqual({ largest: 8, volumeEquivalent: 8 });
+    expect(effectiveCellSizes(8, [1, 1, 1])).toEqual({ largest: 8, volumeEquivalent: 8 });
+  });
+  it('uses the longest edge for fit and the volume-equivalent size for counts', () => {
+    const sizes = effectiveCellSizes(10, [0.5, 1, 2]);
+    expect(sizes.largest).toBe(20);
+    expect(sizes.volumeEquivalent).toBeCloseTo(10, 9);
   });
 });

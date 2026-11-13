@@ -59,6 +59,25 @@ export function formatVolume(volumeMm3: number | null): string {
   return `${value} ${unit}`;
 }
 
+/**
+ * Cell sizes once per-axis stretch is applied. `largest` is the longest
+ * stretched cell edge: the worst case for "does a cell fit" checks, since a
+ * rotated lattice can put any axis across the part's shortest side.
+ * `volumeEquivalent` keeps one cell's volume, for cell-count estimates. With no
+ * stretch both equal `cellSize`.
+ */
+export function effectiveCellSizes(
+  cellSize: number,
+  cellScale: readonly [number, number, number] = [1, 1, 1],
+): { largest: number; volumeEquivalent: number } {
+  const [sx, sy, sz] = cellScale;
+  if (sx === 1 && sy === 1 && sz === 1) return { largest: cellSize, volumeEquivalent: cellSize };
+  return {
+    largest: cellSize * Math.max(sx, sy, sz),
+    volumeEquivalent: cellSize * Math.cbrt(sx * sy * sz),
+  };
+}
+
 /** How many lattice cells fit across the shortest side of the model. */
 export function cellsAcrossShortestSide(size: [number, number, number], cellSize: number): number {
   const shortest = Math.min(...size);

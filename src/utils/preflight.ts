@@ -14,7 +14,7 @@ import {
 } from '../geometry/generation-limits';
 import { MAX_MESH_TRIANGLES } from '../geometry/mesh-limits';
 import { estimateGenerationTimings, formatDuration } from '../workers/generation-estimate';
-import type { ModelExtents } from './model-summary';
+import { effectiveCellSizes, type ModelExtents } from './model-summary';
 
 export interface PreflightWarning {
   /** 'block' means the run is very unlikely to produce a usable lattice. */
@@ -131,15 +131,17 @@ export function buildPreflight(
   }
   if (extents) {
     const shortest = Math.min(...extents.size);
-    if (params.cellSize >= shortest) {
+    const cell = effectiveCellSizes(params.cellSize, params.cellScale).largest;
+    const cellLabel = cell === params.cellSize ? `Cell size ${params.cellSize} mm` : `Stretched cell size ${Number(cell.toFixed(2))} mm`;
+    if (cell >= shortest) {
       warnings.push({
         level: 'block',
-        message: `Cell size ${params.cellSize} mm is not smaller than the part's shortest side (${shortest.toFixed(1)} mm); no lattice cell fits.`,
+        message: `${cellLabel} is not smaller than the part's shortest side (${shortest.toFixed(1)} mm); no lattice cell fits.`,
       });
-    } else if (shortest / params.cellSize < 2) {
+    } else if (shortest / cell < 2) {
       warnings.push({
         level: 'warn',
-        message: `Only ${(shortest / params.cellSize).toFixed(1)} cells fit across the shortest side; expect mostly shell.`,
+        message: `Only ${(shortest / cell).toFixed(1)} cells fit across the shortest side; expect mostly shell.`,
       });
     }
     if (!params.noShell && !params.surfaceOnly && params.shellThickness * 2 >= shortest) {
