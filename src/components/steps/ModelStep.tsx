@@ -24,10 +24,10 @@ export function ModelStep({ inputs }: { inputs: WorkflowInputs }) {
             type="button"
             className={`btn ${hasModel ? '' : 'btn-primary'}`}
             aria-describedby="model-import-hint"
-            onClick={intake.pickStl}
+            onClick={intake.pickModel}
           >
             <UploadIcon size={15} />
-            Import STL
+            Import model
           </button>
           <button
             type="button"
@@ -40,7 +40,8 @@ export function ModelStep({ inputs }: { inputs: WorkflowInputs }) {
           </button>
         </div>
         <p className="field-hint" id="model-import-hint">
-          STL in millimetres, or a saved project (.json). You can also drop a file onto the page;
+          STL, 3MF or OBJ (3MF units are converted to millimetres; STL and OBJ are read as
+          millimetres), or a saved project (.json). You can also drop a file onto the page;
           it is read on this device, never uploaded.
         </p>
 

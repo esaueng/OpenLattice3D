@@ -57,7 +57,7 @@ describe('parseSTL binary', () => {
 describe('parseSTL import limits', () => {
   // Small budgets keep the boundary cases fast; the defaults have their own
   // oversized-declaration and byte-cap coverage below.
-  const tinyLimits: ImportLimits = { maxStlBytes: 1024, maxTriangles: 2, maxEmbeddedStlBytes: 1024, maxProjectBytes: 1024 };
+  const tinyLimits: ImportLimits = { ...DEFAULT_IMPORT_LIMITS, maxStlBytes: 1024, maxTriangles: 2, maxEmbeddedStlBytes: 1024, maxProjectBytes: 1024 };
 
   it('accepts a binary file at the byte budget and rejects one byte over', () => {
     const buffer = makeBinarySTL([UNIT_TRI]);

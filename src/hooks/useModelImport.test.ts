@@ -11,6 +11,9 @@ import { readModelFile, type IntakeRequest } from '../workers/model-intake';
 import { modelIntake } from './model-intake-client';
 import { usePendingReplacement } from './pending-model-replacement';
 import type { GenerationWorkerLike, WorkerErrorLike } from './generation-worker-controller';
+import { MESH_FILE_ACCEPT } from '../utils/dropped-files';
+import { create3MF } from '../geometry/three-mf';
+import { buildObj } from '../utils/obj';
 
 // Exercise actual file reads/parsers in Node while retaining worker lifecycle
 // and deliberately delivering late messages after termination.
@@ -38,8 +41,9 @@ function controls(): Controls {
   return captured!;
 }
 
-function change(intake: Controls, accept: '.stl' | '.json'): Change {
-  return intake.fileInputs.props.children.find((input: { props: { accept: string } }) => input.props.accept === accept).props.onChange;
+function change(intake: Controls, accept: 'mesh' | '.json'): Change {
+  const wanted = accept === 'mesh' ? MESH_FILE_ACCEPT : accept;
+  return intake.fileInputs.props.children.find((input: { props: { accept: string } }) => input.props.accept === wanted).props.onChange;
 }
 
 function event(file: Pick<File, 'name' | 'size'> & Partial<Pick<File, 'text' | 'arrayBuffer'>>): React.ChangeEvent<HTMLInputElement> {
@@ -102,7 +106,7 @@ describe('shared model intake ownership', () => {
     const first = controls();
     const second = controls();
     const oldRead = deferred<ArrayBuffer>();
-    const older = change(first, '.stl')(event({ name: 'older.stl', size: 684, arrayBuffer: () => oldRead.promise }));
+    const older = change(first, 'mesh')(event({ name: 'older.stl', size: 684, arrayBuffer: () => oldRead.promise }));
     second.loadSample('torus');
     const mesh = generateCubeMesh(10);
     oldRead.resolve(exportBinarySTL(mesh.positions, mesh.normals, mesh.triCount));
@@ -119,7 +123,7 @@ describe('shared model intake ownership', () => {
     const older = change(first, '.json')(event({ name: 'older-project.json', size: 100, text: () => oldRead.promise }));
     const mesh = generateCubeMesh(10);
     const stl = exportBinarySTL(mesh.positions, mesh.normals, mesh.triCount);
-    await change(second, '.stl')(event({ name: 'newer.stl', size: stl.byteLength, arrayBuffer: async () => stl }));
+    await change(second, 'mesh')(event({ name: 'newer.stl', size: stl.byteLength, arrayBuffer: async () => stl }));
     const notice = useStore.getState().importNotice;
     oldRead.resolve(JSON.stringify(createProjectFile({
       params: { ...DEFAULT_PARAMS, cellSize: 7 }, generationSeed: 0,
@@ -168,9 +172,9 @@ describe('shared model intake ownership', () => {
     const first = controls();
     const second = controls();
     const oldRead = deferred<ArrayBuffer>();
-    const older = change(first, '.stl')(event({ name: 'older.stl', size: 100, arrayBuffer: () => oldRead.promise }));
+    const older = change(first, 'mesh')(event({ name: 'older.stl', size: 100, arrayBuffer: () => oldRead.promise }));
     second.loadSample('cube');
-    await change(second, '.stl')(event({ name: 'newer.stl', size: 1, arrayBuffer: async () => new ArrayBuffer(1) }));
+    await change(second, 'mesh')(event({ name: 'newer.stl', size: 1, arrayBuffer: async () => new ArrayBuffer(1) }));
     const notice = useStore.getState().importNotice;
     expect(notice?.message).toContain('newer.stl');
     expect(notice?.detail).toBe('The previous model is still loaded.');
@@ -215,12 +219,12 @@ describe('confirm before replacing work', () => {
 
   it('keeps an imported STL with painted faces when the user cancels a new STL', async () => {
     const intake = controls();
-    await change(intake, '.stl')(event(stlFile('first.stl')));
+    await change(intake, 'mesh')(event(stlFile('first.stl')));
     useStore.getState().markFaces([0, 1, 2], 'keep_out');
-    await change(intake, '.stl')(event(stlFile('second.stl', 20)));
+    await change(intake, 'mesh')(event(stlFile('second.stl', 20)));
     expect(useStore.getState().meshFileName).toBe('first.stl');
     expect(useStore.getState().keepOutTris.size).toBe(3);
-    expect(usePendingReplacement.getState().pending).toMatchObject({ kind: 'stl', fileName: 'second.stl' });
+    expect(usePendingReplacement.getState().pending).toMatchObject({ kind: 'mesh', fileName: 'second.stl' });
 
     intake.cancelReplacement();
     expect(usePendingReplacement.getState().pending).toBeNull();
@@ -232,7 +236,7 @@ describe('confirm before replacing work', () => {
 
   it('commits a held STL import with its notice once confirmed', async () => {
     const intake = controls();
-    await change(intake, '.stl')(event(stlFile('first.stl')));
+    await change(intake, 'mesh')(event(stlFile('first.stl')));
     useStore.getState().markFaces([0], 'keep_in');
     await intake.importFile(stlFile('second.stl', 20) as unknown as File);
     intake.confirmReplacement();
@@ -256,8 +260,60 @@ describe('confirm before replacing work', () => {
   it('explains an unsupported dropped file and keeps the model', async () => {
     const intake = controls();
     intake.loadSample('cube');
-    await intake.importFile({ name: 'part.obj', size: 10 } as File);
+    await intake.importFile({ name: 'part.step', size: 10 } as File);
     expect(useStore.getState().sampleShape).toBe('cube');
-    expect(useStore.getState().importNotice).toMatchObject({ level: 'error', detail: 'The previous model is still loaded.' });
+    expect(useStore.getState().importNotice).toMatchObject({ level: 'error', message: expect.stringContaining('.stl, .3mf or .obj'), detail: 'The previous model is still loaded.' });
+  });
+});
+
+describe('3MF and OBJ intake routing', () => {
+  const bytesFile = (name: string, bytes: Uint8Array) => {
+    const buffer = bytes.slice().buffer;
+    return { name, size: bytes.byteLength, arrayBuffer: async () => buffer } as unknown as File;
+  };
+
+  it('imports a dropped 3MF and OBJ through the shared worker intake', async () => {
+    const intake = controls();
+    await intake.importFile(bytesFile('plate.3mf', create3MF(generateCubeMesh(12))));
+    expect(useStore.getState().meshFileName).toBe('plate.3mf');
+    expect(useStore.getState().meshInfo).toMatchObject({ triangleCount: 12, volumeMm3: 1728 });
+    expect(useStore.getState().importNotice).toMatchObject({ level: 'info', scalePrompt: false });
+    expect(useStore.getState().logs.some((entry) => entry.message.includes('3MF declares unit "millimeter"'))).toBe(true);
+
+    useStore.getState().resetProject();
+    const obj = buildObj(generateCubeMesh(8), { meshFileName: 'x', params: DEFAULT_PARAMS });
+    await change(intake, 'mesh')(event(bytesFile('part.obj', obj)));
+    expect(useStore.getState().meshFileName).toBe('part.obj');
+    expect(useStore.getState().meshInfo).toMatchObject({ triangleCount: 12, volumeMm3: 512 });
+  });
+
+  it('holds a 3MF that would replace work until confirmed', async () => {
+    const intake = controls();
+    await intake.importFile(bytesFile('first.obj', buildObj(generateCubeMesh(8), { meshFileName: 'x', params: DEFAULT_PARAMS })));
+    useStore.getState().markFaces([0], 'keep_out');
+    await intake.importFile(bytesFile('second.3mf', create3MF(generateCubeMesh(12))));
+    expect(useStore.getState().meshFileName).toBe('first.obj');
+    expect(usePendingReplacement.getState().pending).toMatchObject({ kind: 'mesh', fileName: 'second.3mf', result: { format: '3mf' } });
+    intake.confirmReplacement();
+    expect(useStore.getState().meshFileName).toBe('second.3mf');
+  });
+
+  it('reports a malformed 3MF and keeps the previous model', async () => {
+    const intake = controls();
+    intake.loadSample('cube');
+    const truncated = create3MF(generateCubeMesh(12)).slice(0, 100);
+    await intake.importFile(bytesFile('broken.3mf', truncated));
+    expect(useStore.getState().sampleShape).toBe('cube');
+    expect(useStore.getState().importNotice).toMatchObject({
+      level: 'error', message: expect.stringContaining('Could not import broken.3mf: 3MF package is not a readable ZIP'), detail: 'The previous model is still loaded.',
+    });
+  });
+
+  it('checks the 3MF byte budget on the main thread before starting the worker', async () => {
+    const intake = controls();
+    const read = vi.fn();
+    await intake.importFile({ name: 'huge.3mf', size: 129 * 1024 * 1024, arrayBuffer: read } as unknown as File);
+    expect(read).not.toHaveBeenCalled();
+    expect(useStore.getState().importNotice).toMatchObject({ level: 'error', message: expect.stringContaining('3MF file huge.3mf is 129 MiB, exceeding the 128 MiB import limit') });
   });
 });

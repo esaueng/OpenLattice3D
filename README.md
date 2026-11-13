@@ -6,7 +6,7 @@ A browser-based tool for generating 3D-printable lattice structures inside arbit
 
 ## Main Features
 
-- Import binary or ASCII STL meshes, or start from a printable procedural sample shape.
+- Import binary or ASCII STL, 3MF (declared units converted to millimetres, components and build transforms applied), or OBJ meshes, or start from a printable procedural sample shape.
 - Generate twelve TPMS, strut, and stochastic lattice families with adjustable cell size, shell, feature, drainage-hole, and resolution parameters.
 - Keep work local: generation and validation run in browser Web Workers, and projects can be saved and restored as JSON.
 - Check printable-mesh properties including surface deviation, minimum thickness, manifoldness, watertightness, and connected components.

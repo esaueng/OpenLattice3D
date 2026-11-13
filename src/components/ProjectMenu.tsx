@@ -70,7 +70,7 @@ export function ProjectMenu() {
             </button>
           </div>
           <div className="project-menu-actions">
-            <button type="button" className="menu-row" onClick={run(intake.pickStl)}><UploadIcon size={15} />Import STL…</button>
+            <button type="button" className="menu-row" onClick={run(intake.pickModel)}><UploadIcon size={15} />Import model…</button>
             <button type="button" className="menu-row" onClick={run(intake.pickProject)}><FolderOpenIcon size={15} />Open project…</button>
             {/* The first click arms; only the confirming click resets and closes. */}
             <ConfirmButton

@@ -24,7 +24,7 @@ export function ModelIntakeLayer() {
         <div className="file-drop-overlay" aria-hidden="true">
           <div className="file-drop-card">
             <UploadIcon size={22} />
-            <strong>Drop an STL to import it</strong>
+            <strong>Drop an STL, 3MF or OBJ to import it</strong>
             <span>Millimetres. The file is read on this device and never uploaded.</span>
           </div>
         </div>
