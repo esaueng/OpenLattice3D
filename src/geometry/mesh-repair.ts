@@ -14,10 +14,11 @@
 //
 // The pinholes are few (tens of four-vertex loops on a million-triangle part)
 // but finding them means welding and edge-counting the whole mesh, so the cost
-// is all in the per-triangle passes, which run on flat typed arrays. See
+// is all in the per-triangle passes, which run on flat typed arrays. Marching
+// cubes can hand over grid vertex ids that make the weld a direct lookup. See
 // docs/performance/boundary-loop-cleanup.md for measurements.
 import { assertGenerationOutputBudget } from './generation-limits';
-import type { MarchingCubesResult } from './marching-cubes';
+import type { GridVertexIds, MarchingCubesResult } from './marching-cubes';
 
 export interface RepairReport {
   /** Loops found and filled. */
@@ -41,6 +42,17 @@ export interface RepairWorkCounters {
   edgeVisits: number;
   /** Vertices visited while walking boundary loops. */
   loopSteps: number;
+  /** Corners welded from supplied grid vertex ids instead of by position hashing. */
+  gridIdCorners?: number;
+}
+
+export interface CloseBoundaryLoopsOptions {
+  /**
+   * Grid vertex ids from marching cubes for exactly `result`'s triangles, in
+   * the whole-grid emission order (z slabs never revisited). They replace the
+   * position hash; the output is byte-identical either way.
+   */
+  vertexIds?: GridVertexIds;
 }
 
 const EMPTY = -1;
@@ -147,6 +159,65 @@ function weldVertices(positions: Float32Array, triCount: number, work: RepairWor
 }
 
 /**
+ * Weld by marching-cubes grid vertex ids. They name the same equivalence
+ * classes as the exact-float-bits weld (see GridVertexIds), and dense ids are
+ * still assigned in first-occurrence order, so everything downstream is
+ * unchanged.
+ *
+ * Triangles arrive in z-slab order and a cube only touches samples of its own
+ * two z slices, so a two-slice ring of slots replaces the hash table: no
+ * hashing, no probing, and memory proportional to one grid slice.
+ *
+ * Returns null — and the caller falls back to hashing — when the ids revisit a
+ * slice already evicted, or name one vertex at two different positions (ids
+ * stale or not from this mesh). Distinct ids at equal positions cannot be
+ * detected without the hash this avoids; marching cubes rules them out.
+ */
+function weldByGridIds(
+  positions: Float32Array,
+  triCount: number,
+  vertexIds: GridVertexIds,
+): WeldedVertices | null {
+  const corners = triCount * 3;
+  const keys = vertexIds.ids;
+  const [cellsX, cellsY] = vertexIds.gridCells;
+  if (keys.length !== corners || !Number.isSafeInteger(cellsX) || !Number.isSafeInteger(cellsY)
+    || cellsX < 1 || cellsY < 1) return null;
+  const sliceSamples = (cellsX + 1) * (cellsY + 1);
+  const sliceKeys = sliceSamples * 4;
+  const slotIds = new Int32Array(sliceKeys * 2);
+  const slotSlice = new Int32Array(sliceKeys * 2).fill(EMPTY);
+  const ids = new Int32Array(corners);
+  const firstCorner = new Int32Array(corners);
+  let vertexCount = 0;
+  let maxSlice = 0;
+
+  for (let i = 0; i < corners; i++) {
+    const key = keys[i];
+    const slice = ((key >>> 2) / sliceSamples) | 0;
+    if (slice < maxSlice - 1) return null;
+    if (slice > maxSlice) maxSlice = slice;
+    const slot = (slice & 1) * sliceKeys + (key - slice * sliceKeys);
+    if (slotSlice[slot] === slice) {
+      const id = slotIds[slot];
+      const o = i * 3, f = firstCorner[id] * 3;
+      // Float comparison: signed zeros weld, as in the bit weld; NaN refuses.
+      if (positions[o] !== positions[f] || positions[o + 1] !== positions[f + 1] || positions[o + 2] !== positions[f + 2]) {
+        return null;
+      }
+      ids[i] = id;
+    } else {
+      const id = vertexCount++;
+      slotSlice[slot] = slice;
+      slotIds[slot] = id;
+      firstCorner[id] = i;
+      ids[i] = id;
+    }
+  }
+  return { ids, firstCorner, vertexCount };
+}
+
+/**
  * Flag each corner whose outgoing triangle edge is an undirected edge used by
  * exactly one non-degenerate triangle. Corner k of a triangle owns the edge
  * from its vertex k to vertex (k + 1) % 3.
@@ -224,17 +295,26 @@ function findUnmatchedEdges(
  *
  * Linear in the triangle count: vertices are welded through a typed-array
  * hash table, edges are counted by bucketing under their lower vertex, and
- * each boundary vertex is walked at most once. Pass `counters` to accumulate
- * the work done.
+ * each boundary vertex is walked at most once. With `options.vertexIds` from
+ * marching cubes the weld is a direct lookup instead of a hash (identical
+ * output). Pass `counters` to accumulate the work done.
  */
 export function closeBoundaryLoops(
   result: MarchingCubesResult,
   counters?: RepairWorkCounters,
+  options: CloseBoundaryLoopsOptions = {},
 ): { result: MarchingCubesResult; report: RepairReport } {
   const { positions, normals, triCount } = result;
   const work: RepairWorkCounters = counters ?? { corners: 0, weldProbes: 0, edgeVisits: 0, loopSteps: 0 };
   work.corners += triCount * 3;
-  const { ids, firstCorner, vertexCount } = weldVertices(positions, triCount, work);
+  let welded = options.vertexIds ? weldByGridIds(positions, triCount, options.vertexIds) : null;
+  if (welded) {
+    work.weldProbes += triCount * 3;
+    work.gridIdCorners = (work.gridIdCorners ?? 0) + triCount * 3;
+  } else {
+    welded = weldVertices(positions, triCount, work);
+  }
+  const { ids, firstCorner, vertexCount } = welded;
   const unmatched = findUnmatchedEdges(ids, triCount, vertexCount, work);
 
   // Directed unmatched edges, in the orientation their owning triangle used.
@@ -242,7 +322,8 @@ export function closeBoundaryLoops(
   // tried from vertices in the order they first started an edge.
   const next = new Int32Array(vertexCount).fill(EMPTY);
   const starts: number[] = [];
-  for (let k = 0; k < triCount * 3; k++) {
+  const corners = triCount * 3;
+  for (let k = 0; k < corners; k++) {
     if (unmatched[k] === 0) continue;
     const u = ids[k];
     const v = k % 3 === 2 ? ids[k - 2] : ids[k + 1];
