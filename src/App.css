@@ -513,6 +513,12 @@ summary:focus-visible,
   color: var(--color-accent);
 }
 
+/* A pass with warnings stays amber even on the current step, so it never reads as a clean tick. */
+.step-nav-mark.warned,
+.step-nav-step.active .step-nav-mark.warned {
+  color: var(--color-warning);
+}
+
 .step-nav-warning {
   display: inline-grid;
   place-items: center;
@@ -571,6 +577,112 @@ summary:focus-visible,
 
 .viewer-shell canvas {
   display: block;
+}
+
+/* Generating: dim the previous result and name the phase; orbiting still works. */
+.viewer-shell.is-generating canvas {
+  filter: brightness(0.55) saturate(0.7);
+  transition: filter 200ms ease;
+}
+
+.viewer-busy {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-viewer-overlay);
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
+.viewer-busy-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  max-width: calc(100% - 32px);
+  padding: var(--sp-2) var(--sp-3);
+  color: var(--color-text);
+  background: rgba(17, 24, 33, 0.88);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.viewer-busy-spinner {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--color-accent-dim);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: viewer-busy-spin 900ms linear infinite;
+}
+
+@keyframes viewer-busy-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .viewer-busy-spinner { animation: none; }
+}
+
+.viewer-restore-notice {
+  position: absolute;
+  top: calc(var(--sp-3) + 40px);
+  left: var(--sp-3);
+  right: var(--sp-3);
+  z-index: var(--z-viewer-overlay);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  max-width: 560px;
+  padding: var(--sp-15) var(--sp-15) var(--sp-15) var(--sp-3);
+  color: var(--color-text-muted);
+  background: rgba(17, 24, 33, 0.9);
+  border: var(--border-thin);
+  border-radius: var(--radius-md);
+  font-size: var(--fs-sm);
+}
+
+.viewer-restore-notice .btn {
+  flex: none;
+}
+
+/* "Results ready" after a top-bar run from an editing step. The region stays
+   mounted (an empty live region) so its content is announced when it appears. */
+.viewer-results-ready-region {
+  position: absolute;
+  top: calc(var(--sp-3) + 40px);
+  left: var(--sp-3);
+  z-index: var(--z-viewer-overlay);
+}
+
+.viewer-results-ready {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-1) var(--sp-1) var(--sp-25);
+  color: var(--color-text);
+  background: rgba(17, 24, 33, 0.92);
+  border: 1px solid color-mix(in srgb, var(--color-success) 55%, transparent);
+  border-radius: var(--radius-md);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+
+.viewer-results-ready-dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  background: var(--color-success);
+  border-radius: 50%;
+}
+
+.viewer-results-ready .btn {
+  flex: none;
 }
 
 .viewer-canvas-surface {
@@ -667,6 +779,122 @@ summary:focus-visible,
 .legend-dot {
   margin-right: var(--sp-2);
   vertical-align: -1px;
+}
+
+/* ── Viewer scale label and Solid-view skin hint ── */
+
+.viewer-scale-label {
+  position: absolute;
+  top: var(--sp-3);
+  right: var(--sp-3);
+  z-index: var(--z-viewer-overlay);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-15);
+  padding: var(--sp-1) var(--sp-25);
+  color: var(--color-text);
+  background: color-mix(in srgb, var(--color-surface) 82%, transparent);
+  border: var(--border-thin);
+  border-radius: var(--radius-pill);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  pointer-events: none;
+}
+
+.viewer-scale-swatch {
+  width: 12px;
+  height: 12px;
+  border: 1px solid rgba(159, 179, 200, 0.75);
+  background:
+    linear-gradient(rgba(159, 179, 200, 0.35), rgba(159, 179, 200, 0.35)) center / 1px 100% no-repeat,
+    linear-gradient(rgba(159, 179, 200, 0.35), rgba(159, 179, 200, 0.35)) center / 100% 1px no-repeat;
+}
+
+.viewer-scale-minor {
+  color: var(--color-text-muted);
+}
+
+.viewer-skin-hint {
+  position: absolute;
+  top: calc(var(--sp-3) + 40px);
+  left: var(--sp-3);
+  z-index: var(--z-viewer-overlay);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  max-width: min(460px, calc(100% - 2 * var(--sp-3)));
+  padding: var(--sp-2) var(--sp-25);
+  color: var(--color-text);
+  background: color-mix(in srgb, var(--color-surface) 90%, transparent);
+  border: var(--border-thin);
+  border-left: 3px solid var(--color-accent);
+  border-radius: var(--radius-overlay);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-tight);
+  backdrop-filter: blur(8px);
+}
+
+.viewer-skin-hint-actions {
+  display: flex;
+  gap: var(--sp-1);
+}
+
+.viewer-skin-hint-dismiss {
+  min-width: 28px;
+  font-size: var(--fs-md);
+}
+
+.viewer-overlay-dock {
+  display: contents;
+}
+
+/* Compact viewers (phones): the view cube takes the top-right corner, so the
+   scale label and hint stack at the bottom-left, above the toolbar. */
+.viewer-overlay-dock.is-compact {
+  position: absolute;
+  right: var(--sp-3);
+  bottom: calc(var(--sp-4) + 52px);
+  left: var(--sp-3);
+  z-index: var(--z-viewer-overlay);
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: flex-start;
+  gap: var(--sp-15);
+  pointer-events: none;
+}
+
+.viewer-overlay-dock.is-compact > .viewer-scale-label,
+.viewer-overlay-dock.is-compact > .viewer-skin-hint {
+  position: static;
+}
+
+.viewer-overlay-dock.is-compact > .viewer-skin-hint {
+  flex-wrap: nowrap;
+  max-width: 100%;
+  padding: var(--sp-1) var(--sp-15);
+  font-size: var(--fs-xs);
+  pointer-events: auto;
+}
+
+.viewer-skin-hint-text-short {
+  display: none;
+}
+
+/* Phones: one short row so the hint doesn't cover the part. The full sentence
+   stays available to screen readers. */
+.viewer-overlay-dock.is-compact .viewer-skin-hint-text {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.viewer-overlay-dock.is-compact .viewer-skin-hint-text-short {
+  display: inline;
+  white-space: nowrap;
 }
 
 /* ── Floating view toolbar: one pill at the bottom centre ── */
@@ -775,7 +1003,8 @@ summary:focus-visible,
   transform: translateX(-50%);
 }
 
-.viewer-menu [role='menuitem'] {
+.viewer-menu [role='menuitem'],
+.viewer-menu [role='menuitemcheckbox'] {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -790,9 +1019,17 @@ summary:focus-visible,
 }
 
 .viewer-menu [role='menuitem']:hover,
-.viewer-menu [role='menuitem']:focus {
+.viewer-menu [role='menuitem']:focus,
+.viewer-menu [role='menuitemcheckbox']:hover,
+.viewer-menu [role='menuitemcheckbox']:focus {
   background: var(--color-surface-2);
   outline-offset: -2px;
+}
+
+.viewer-menu-check {
+  min-width: 1em;
+  color: var(--color-accent);
+  text-align: center;
 }
 
 .viewer-menu-separator {
@@ -891,7 +1128,9 @@ summary:focus-visible,
   inset: 0;
   z-index: var(--z-viewer-overlay);
   display: grid;
-  place-items: center;
+  /* "safe": a card taller than the viewer starts at the top and scrolls, instead
+     of overflowing both edges where its first actions cannot be reached. */
+  place-items: safe center;
   padding: var(--sp-5);
   overflow-y: auto;
   background:
@@ -1367,26 +1606,36 @@ summary:focus-visible,
 }
 
 .lattice-family-label {
-  color: var(--color-text-subtle);
+  color: var(--color-text-muted);
   font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+}
+
+.lattice-family-note {
+  margin: 0 0 var(--sp-1);
+  color: var(--color-text-subtle);
+  font-size: var(--fs-mini);
+  line-height: var(--lh-tight);
 }
 
 .lattice-family-options {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--sp-1);
 }
 
+/* One row per type: a cross-section thumbnail, the name, and what it is for. */
 .lattice-option {
-  min-height: var(--control-h-md);
-  padding: 0 var(--sp-2);
-  overflow: hidden;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--sp-25);
+  min-height: 52px;
+  padding: var(--sp-15) var(--sp-2) var(--sp-15) var(--sp-15);
   color: var(--color-text);
   background: var(--color-bg);
   border: 1px solid var(--color-control-border);
   border-radius: var(--radius-md);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  text-align: left;
 }
 
 .lattice-option:hover {
@@ -1394,11 +1643,64 @@ summary:focus-visible,
 }
 
 .lattice-option.active {
-  color: var(--color-accent);
   background: var(--color-accent-dim);
   border-color: var(--color-accent);
   box-shadow: inset 0 0 0 1px var(--color-accent-border);
+}
+
+.lattice-thumb {
+  width: 40px;
+  height: 40px;
+  color: var(--color-text-muted);
+  background: var(--color-surface);
+  border-radius: var(--radius-sm);
+}
+
+.lattice-option.active .lattice-thumb {
+  color: var(--color-accent);
+}
+
+.lattice-option-text {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.lattice-option-name {
+  font-size: var(--fs-sm);
   font-weight: var(--fw-medium);
+}
+
+.lattice-option.active .lattice-option-name {
+  color: var(--color-accent);
+}
+
+.lattice-option-desc {
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-tight);
+}
+
+/* Visible help under a field, tied to it with aria-describedby. */
+.field-hint {
+  margin: calc(var(--sp-1) * -1) 0 0;
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-tight);
+}
+
+.field-hint:empty {
+  display: none;
+}
+
+.direction-select {
+  display: grid;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+}
+
+.direction-select .row-control {
+  flex: 0 0 60%;
 }
 
 .compare-toggle {
@@ -1590,7 +1892,8 @@ summary:focus-visible,
   min-height: var(--control-h-md);
 }
 
-.row label {
+.row label,
+.row .row-text {
   flex: 1 1 auto;
   min-width: 0;
   color: var(--color-text-muted);
@@ -1736,6 +2039,25 @@ summary:focus-visible,
   gap: var(--sp-15);
 }
 
+.warning.has-fix,
+.warning.result-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-15) var(--sp-2);
+}
+
+.warning.result-note.is-info {
+  color: var(--color-text-muted);
+  background: transparent;
+  border-color: var(--color-border);
+}
+
+.guidance-action {
+  flex: none;
+}
+
 .preflight-summary {
   margin: 0;
   padding: var(--sp-25) var(--sp-3);
@@ -1855,6 +2177,12 @@ summary:focus-visible,
   transition: width 200ms ease;
 }
 
+.generate-progress-track .progress-text {
+  color: var(--color-text);
+  font-family: var(--font-ui);
+  font-size: var(--fs-sm);
+}
+
 /* ─────────────────────────── Results ─────────────────────────── */
 
 .result-verdict {
@@ -1876,6 +2204,7 @@ summary:focus-visible,
 .result-verdict.is-fail .result-verdict-icon { color: var(--color-error); }
 .result-verdict.is-warn .result-verdict-icon { color: var(--color-warning); }
 .result-verdict.is-running .result-verdict-icon { color: var(--color-text-muted); }
+.result-verdict.is-attention .result-verdict-icon { color: var(--color-warning); }
 
 .result-verdict h2 {
   color: var(--color-text);
@@ -1989,6 +2318,22 @@ summary:focus-visible,
   color: var(--color-text-subtle);
 }
 
+.check-fix {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-15) var(--sp-2);
+  margin-top: var(--sp-15);
+  color: var(--color-text);
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+}
+
+.check-fix-label {
+  color: var(--color-text-muted);
+  font-weight: var(--fw-medium);
+}
+
 .export-section .export-simplify label {
   flex: none;
 }
@@ -2025,6 +2370,25 @@ summary:focus-visible,
 
 .export-controls-actions .btn:only-child {
   grid-column: 1 / -1;
+}
+
+/* "Export STL anyway" in a third of a phone-width panel wraps instead of touching the edges. */
+.export-controls-actions .btn {
+  padding: var(--sp-1) var(--sp-15);
+  line-height: 1.2;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
+.workflow-nav .export-primary {
+  justify-content: center;
+}
+
+.export-primary-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ─────────────────────────── Project menu ─────────────────────────── */
@@ -2272,6 +2636,7 @@ summary:focus-visible,
 .validation-chip.is-fail { color: var(--color-error-ink); border-color: rgba(239, 68, 68, 0.5); }
 .validation-chip.is-stale { color: var(--color-warning-ink); border-color: rgba(245, 158, 11, 0.45); }
 .validation-chip.is-running { color: var(--color-accent); border-color: var(--color-accent-border); }
+.validation-chip.is-warn { color: var(--color-warning); border-color: rgba(245, 158, 11, 0.6); border-style: dashed; }
 
 .status-links {
   flex: none;
@@ -2486,6 +2851,11 @@ summary:focus-visible,
   color: var(--color-text-muted);
 }
 
+.demo-window-density {
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+}
+
 /* ─────────────────────────── Boot shell ─────────────────────────── */
 
 .boot-panel-placeholder {
@@ -2571,7 +2941,7 @@ summary:focus-visible,
   .app-shell {
     height: auto;
     min-height: 100%;
-    grid-template-rows: var(--topbar-h) auto auto auto var(--statusbar-h);
+    grid-template-rows: var(--topbar-h) auto auto auto minmax(var(--statusbar-h), auto);
   }
 
   .topbar {
@@ -2595,9 +2965,43 @@ summary:focus-visible,
     overflow: visible;
   }
 
+  /* Stacked, the page (#root) scrolls. `hidden` on these ancestors made each a
+     scroll container of its own, which pinned the sticky top bar, step strip
+     and step footer to a box that never scrolls; `clip` keeps the clipping
+     without capturing them. */
+  .app-shell,
+  .side-panel {
+    overflow: clip;
+  }
+
+  /* Contain absolutely positioned descendants (the visually-hidden labels).
+     Without a positioned ancestor they resolve against the initial containing
+     block, outside the scrolling #root, and give the document its own scroll
+     that chains past the end of the page into a blank strip. */
+  .app-shell {
+    position: relative;
+  }
+
+  /* The step footer, with each step's primary action (Export 3MF on Results),
+     stays on screen at the bottom of the viewport instead of below a long
+     panel. It stays in flow, so the end of the panel is never covered, and it
+     clears the home indicator when the page extends under it. */
   .workflow-nav {
     position: sticky;
     bottom: 0;
+    z-index: 5;
+    padding-right: max(var(--sp-4), env(safe-area-inset-right, 0px));
+    padding-bottom: calc(var(--sp-3) + env(safe-area-inset-bottom, 0px));
+    padding-left: max(var(--sp-4), env(safe-area-inset-left, 0px));
+    box-shadow: 0 -8px 16px -8px rgba(0, 0, 0, 0.45);
+  }
+
+  /* Keep focused or scrolled-to controls clear of the sticky bars. The footer
+     is one touch-height control plus its padding; the top is the top bar
+     (approximate: rounded to whole pixels by the browser). */
+  #root {
+    scroll-padding-top: var(--topbar-h);
+    scroll-padding-bottom: calc(var(--control-h-touch) + 2 * var(--sp-3) + 1px + env(safe-area-inset-bottom, 0px));
   }
 }
 
@@ -2620,6 +3024,58 @@ summary:focus-visible,
   .step-nav-strip .step-nav {
     margin: 0;
   }
+
+  /* The sticky strip sits under the top bar: 44px steps plus its padding and rule. */
+  #root {
+    scroll-padding-top: calc(var(--topbar-h) + 44px + 2 * var(--sp-1) + 3px);
+  }
+
+  /* Phone and tablet: number over a short label, so every step is named on
+     screen and the strip fits without sideways scrolling. */
+  .step-nav-strip .step-nav-list {
+    width: 100%;
+  }
+
+  .step-nav-strip .step-nav-item {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .step-nav-strip .step-nav-step,
+  .step-nav-strip .step-nav-step:not(.active) {
+    flex: 1 1 auto;
+    flex-direction: column;
+    justify-content: center;
+    gap: 1px;
+    min-width: 0;
+    min-height: 44px;
+    padding: var(--sp-1) 2px;
+  }
+
+  .step-nav-strip .step-nav-step:not(.active) .step-nav-label {
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: hidden;
+    clip: auto;
+  }
+
+  .step-nav-strip .step-nav-label {
+    max-width: 100%;
+    overflow: hidden;
+    font-size: var(--fs-mini);
+    text-overflow: ellipsis;
+  }
+
+  .step-nav-strip .step-nav-step.active .step-nav-label {
+    color: var(--color-accent);
+  }
+
+  .step-nav-strip .step-nav-warning {
+    position: absolute;
+    top: 3px;
+    right: 3px;
+  }
 }
 
 @media (max-width: 720px) {
@@ -2635,29 +3091,68 @@ summary:focus-visible,
     display: none;
   }
 
+  /* Phone: the card must fit the short stacked viewer, so it drops the brand
+     (the top bar has it) and packs the three ways in and the samples tightly. */
+  .start-overlay {
+    padding: var(--sp-3);
+  }
+
+  .start-card {
+    gap: var(--sp-2);
+  }
+
+  .start-brand {
+    display: none;
+  }
+
   .start-card h2 {
-    font-size: var(--fs-xl);
+    font-size: var(--fs-lg);
+  }
+
+  .start-lede {
+    margin: 0;
+    font-size: var(--fs-sm);
   }
 
   .start-actions {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--sp-15);
   }
 
   .start-action {
-    min-height: 0;
+    align-content: center;
+    min-height: 56px;
+    padding: var(--sp-2);
   }
 
+  .start-action.primary {
+    align-content: center;
+  }
+
+  .start-action strong {
+    font-size: var(--fs-sm);
+  }
+
+  .start-action small,
   .start-action .icon {
     display: none;
   }
 
-  /* The Model step under the viewer lists the samples too. */
   .start-samples {
-    display: none;
+    gap: var(--sp-1);
+    margin-top: 0;
+    padding-top: var(--sp-2);
   }
 
-  .start-sample-row {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+  .start-sample {
+    min-height: 44px;
+    padding: var(--sp-1) 2px;
+    font-size: var(--fs-mini);
+  }
+
+  .start-sample .sample-glyph {
+    width: 22px;
+    height: 22px;
   }
 
   .viewer-controls-overlay {
@@ -2708,6 +3203,27 @@ summary:focus-visible,
   }
 }
 
+@media (pointer: coarse), (max-width: 720px) {
+  .status-link {
+    min-width: 44px;
+    min-height: 44px;
+    justify-content: center;
+  }
+
+  .view-mode-slot-settings > .view-settings-button {
+    width: 44px;
+  }
+
+  .viewer-toolbar .btn {
+    min-height: 44px;
+  }
+
+  .status-tabs button,
+  .validation-chip {
+    min-height: 36px;
+  }
+}
+
 @media (max-width: 420px) {
   .viewer-toolbar .btn {
     padding: 0 6px;
@@ -2716,5 +3232,111 @@ summary:focus-visible,
 
   .brush-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+/* ── Model intake: replace-model confirmation and the file drop target ── */
+
+.replace-prompt {
+  position: fixed;
+  top: calc(var(--topbar-h) + var(--sp-3));
+  left: 50%;
+  z-index: var(--z-popover);
+  display: grid;
+  gap: var(--sp-2);
+  width: min(460px, calc(100vw - 2 * var(--sp-4)));
+  padding: var(--sp-3) var(--sp-4);
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid rgba(239, 68, 68, 0.55);
+  border-radius: var(--radius-overlay);
+  box-shadow: var(--shadow-float);
+  transform: translateX(-50%);
+}
+
+.replace-prompt strong {
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  overflow-wrap: anywhere;
+}
+
+.replace-prompt p {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-normal);
+}
+
+.replace-prompt-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+}
+
+.replace-prompt-actions .btn {
+  min-height: var(--control-h-lg);
+}
+
+.btn-danger {
+  color: #fee2e2;
+  background: rgba(239, 68, 68, 0.22);
+  border-color: rgba(239, 68, 68, 0.7);
+}
+
+.btn-danger:hover:not(:disabled):not([aria-disabled='true']) {
+  background: rgba(239, 68, 68, 0.34);
+  border-color: var(--color-error);
+}
+
+.file-drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-popover);
+  display: grid;
+  place-items: center;
+  padding: var(--sp-4);
+  background: rgba(7, 11, 16, 0.72);
+  border: 3px dashed var(--color-accent);
+  pointer-events: none;
+}
+
+.file-drop-card {
+  display: grid;
+  justify-items: center;
+  gap: var(--sp-2);
+  max-width: 360px;
+  padding: var(--sp-5);
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-overlay);
+  box-shadow: var(--shadow-float);
+  text-align: center;
+}
+
+.file-drop-card .icon {
+  color: var(--color-accent);
+}
+
+.file-drop-card strong {
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
+}
+
+.file-drop-card span {
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+}
+
+@media (max-width: 720px) {
+  .replace-prompt {
+    top: auto;
+    bottom: var(--sp-3);
+  }
+
+  .replace-prompt-actions .btn {
+    flex: 1 1 auto;
+    min-height: 44px;
   }
 }

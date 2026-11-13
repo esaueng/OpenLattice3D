@@ -8,10 +8,10 @@ import {
   trackUsage,
 } from '../analytics';
 import { latticeCellCount, modelExtents } from '../utils/model-summary';
-import { parseFailureCause, workerFailure } from '../utils/failure-cause';
+import { workerFailure } from '../utils/failure-cause';
 import { useStore } from '../store/useStore';
 import type { WorkerMessage } from '../workers/lattice-worker';
-import type { ValidationWorkerMessage, ValidationWorkerResponse } from '../workers/validation-worker';
+import type { ValidationWorkerMessage } from '../workers/validation-worker';
 import { requestNotificationPermission, sendNotification } from '../utils/notifications';
 import {
   createBackendGeometryBuffers,
@@ -20,25 +20,15 @@ import {
   isSharedFloat32Array,
 } from '../utils/browser-features';
 import { isSheetType } from '../geometry/lattice';
-import type { SampleShape } from '../types/project';
 import {
   GenerationWorkerController,
   type GenerationResultResponse,
   type GenerationWorkerLike,
 } from './generation-worker-controller';
+import { parseValidationResponse } from './validation-response';
+import { sampleShapeMaxSpan } from '../geometry/sample-shapes';
 import { buildGenerationSnapshot } from '../store/generation-snapshot';
 import { selectGenerationInputs } from '../store/useResultStaleness';
-
-function proceduralMaxSpan(shape: SampleShape | null, sphereRadius: number): number {
-  switch (shape) {
-    case 'sphere': return (sphereRadius || 25) * 2;
-    case 'cube': return 30;
-    case 'cylinder': return 40;
-    case 'torus': return 56;
-    case 'capsule': return 54;
-    default: return (sphereRadius || 25) * 2;
-  }
-}
 
 function buildGenerationTransferList(msg: WorkerMessage): Transferable[] {
   const transfers: Transferable[] = [];
@@ -162,7 +152,7 @@ export function useLatticeGeneration(): LatticeGenerationControls {
         store.meshInfo.boundingBox.max[1] - store.meshInfo.boundingBox.min[1],
         store.meshInfo.boundingBox.max[2] - store.meshInfo.boundingBox.min[2],
       )
-      : proceduralMaxSpan(store.sampleShape, store.sphereRadius);
+      : sampleShapeMaxSpan(store.sampleShape, store.sphereRadius);
     const voxelSize = maxSpan / resolution;
     if (isSheetType(store.params.latticeType) && store.params.wallThickness < voxelSize * 2) {
       store.addLog(
@@ -241,51 +231,64 @@ export function useLatticeGeneration(): LatticeGenerationControls {
         validationMsg.meshTriCount = store.originalMesh.triCount;
       }
 
-      validationWorker.onmessage = (event: MessageEvent<ValidationWorkerResponse>) => {
-        if (generationRunRef.current !== runId || validationWorkerRef.current !== validationWorker) return;
+      const isCurrentValidation = () => (
+        generationRunRef.current === runId && validationWorkerRef.current === validationWorker
+      );
+      const finishValidationWorker = () => {
+        releaseModelSubscription();
+        validationWorker.terminate();
+        if (validationWorkerRef.current === validationWorker) validationWorkerRef.current = null;
+      };
+      // Every terminal failure clears the progress indicator; otherwise the
+      // statusbar keeps reading "validating" for a worker that is gone.
+      const failValidation = (message: string) => {
         const current = useStore.getState();
-        const validationResp = event.data;
+        finishValidationWorker();
+        current.setValidationProgress(null);
+        current.addLog(message, 'error');
+      };
+
+      validationWorker.onmessage = (event: MessageEvent<unknown>) => {
+        if (!isCurrentValidation()) return;
+        const validationResp = parseValidationResponse(event.data);
+        if (!validationResp) {
+          failValidation('Validation worker returned a malformed response');
+          trackDiagnostic('error_worker');
+          return;
+        }
+        const current = useStore.getState();
         if (validationResp.type === 'progress') {
           if (validationResp.message) current.addLog(validationResp.message);
           if (typeof validationResp.progress === 'number') current.setValidationProgress(validationResp.progress);
         } else if (validationResp.type === 'result') {
-          releaseModelSubscription();
-          current.setValidation(validationResp.validation || null);
+          finishValidationWorker();
+          current.setValidation(validationResp.validation);
           current.addLog('Validation complete');
           trackFeature('measure');
-          validationWorker.terminate();
-          if (validationWorkerRef.current === validationWorker) validationWorkerRef.current = null;
-        } else if (validationResp.type === 'error') {
-          releaseModelSubscription();
-          current.setValidationProgress(null);
-          current.addLog(`Validation error: ${validationResp.message}`, 'error');
-          trackFailureCause(parseFailureCause(validationResp.diagnostic));
-          validationWorker.terminate();
-          if (validationWorkerRef.current === validationWorker) validationWorkerRef.current = null;
+        } else {
+          failValidation(`Validation error: ${validationResp.message}`);
+          trackFailureCause(validationResp.diagnostic);
         }
       };
       validationWorker.onerror = () => {
-        if (generationRunRef.current !== runId || validationWorkerRef.current !== validationWorker) return;
-        const current = useStore.getState();
-        releaseModelSubscription();
-        current.setValidationProgress(null);
-        current.addLog('Validation worker failed', 'error');
+        if (!isCurrentValidation()) return;
+        failValidation('Validation worker failed');
         trackDiagnostic('error_worker');
-        validationWorker.terminate();
-        if (validationWorkerRef.current === validationWorker) validationWorkerRef.current = null;
       };
       validationWorker.onmessageerror = () => {
-        if (generationRunRef.current !== runId || validationWorkerRef.current !== validationWorker) return;
-        const current = useStore.getState();
-        releaseModelSubscription();
-        current.addLog('Validation worker returned an unreadable response', 'error');
+        if (!isCurrentValidation()) return;
+        failValidation('Validation worker returned an unreadable response');
         trackDiagnostic('error_worker');
-        validationWorker.terminate();
-        validationWorkerRef.current = null;
       };
 
       useStore.getState().setValidationProgress(0);
-      validationWorker.postMessage(validationMsg, buildValidationTransferList(validationMsg));
+      try {
+        validationWorker.postMessage(validationMsg, buildValidationTransferList(validationMsg));
+      } catch (error) {
+        failValidation('Could not send data to the validation worker');
+        trackDiagnostic('error_worker');
+        trackFailure(null, error);
+      }
     };
 
     workerController.start(worker as unknown as GenerationWorkerLike, {

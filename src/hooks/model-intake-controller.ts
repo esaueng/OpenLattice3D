@@ -1,5 +1,5 @@
 import type { ModelIntake, IntakeRequest } from '../workers/model-intake';
-import { DEFAULT_IMPORT_LIMITS } from '../geometry/mesh-limits';
+import { DEFAULT_IMPORT_LIMITS, MESH_FILE_FORMATS, type MeshFileFormat } from '../geometry/mesh-limits';
 import type { GenerationWorkerLike } from './generation-worker-controller';
 import { DEFAULT_PARAMS, sanitizeLatticeParams } from '../types/project';
 import { DiagnosedError, parseFailureCause, workerFailure, type FailureCause } from '../utils/failure-cause';
@@ -29,14 +29,17 @@ function info(v: unknown): boolean {
 }
 /** Validate protocol shape without repeating O(mesh-size) geometry analysis on the UI thread. */
 export function isModelIntake(v: unknown, kind: IntakeRequest['kind']): v is ModelIntake {
-  if (!record(v) || v.kind !== kind) return false;
-  if (v.kind === 'stl') {
-    return mesh(v.mesh) && info(v.info) && record(v.mesh) && record(v.info) && v.mesh.triCount === v.info.triangleCount
+  if (!record(v)) return false;
+  // Content sniffing may parse a mesh file as another mesh format (a ZIP
+  // named .stl is read as 3MF), so any mesh format answers a mesh request.
+  if (kind !== 'json') {
+    return v.kind === 'mesh' && MESH_FILE_FORMATS.includes(v.format as MeshFileFormat) && mesh(v.mesh) && info(v.info) && record(v.mesh) && record(v.info) && v.mesh.triCount === v.info.triangleCount
       && record(v.notice) && level(v.notice.level) && typeof v.notice.message === 'string'
       && (v.notice.detail === undefined || typeof v.notice.detail === 'string')
       && typeof v.notice.scalePrompt === 'boolean'
       && Array.isArray(v.logs) && v.logs.every(log => record(log) && level(log.level) && typeof log.message === 'string');
   }
+  if (v.kind !== 'json') return false;
   const p = v.parsed;
   if (!record(p) || !record(p.params) || !strings(p.warnings)) return false;
   const sanitized = sanitizeLatticeParams(p.params);

@@ -69,7 +69,9 @@ describe('sample parts with shipped defaults', () => {
       expect(disconnected.fragmentCount).toBe(1);
       // A closed shell around a sheet gyroid encloses the lattice's void networks.
       expect(disconnected.voidCount).toBeGreaterThan(0);
-      expect(topologyWarnings(disconnected, DEFAULT_PARAMS)[0]).toMatch(/enclosed void network/);
+      const [warning] = topologyWarnings(disconnected, DEFAULT_PARAMS);
+      expect(warning.code).toBe('trapped-voids');
+      expect(warning.message).toMatch(/enclosed void network/);
     },
   );
 
@@ -77,6 +79,7 @@ describe('sample parts with shipped defaults', () => {
     const params = { ...DEFAULT_PARAMS, escapeHoles: true };
     const { disconnected } = checkTopology(sampleField('sphere', params));
     expect(disconnected).toMatchObject({ passed: true, fragmentCount: 1 });
-    expect(topologyWarnings(disconnected, params).some((w) => w.includes('trapped'))).toBe(false);
+    const warnings = topologyWarnings(disconnected, params);
+    expect(warnings.some((w) => w.code === 'trapped-voids' || w.message.includes('trapped'))).toBe(false);
   });
 });

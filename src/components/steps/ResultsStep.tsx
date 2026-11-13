@@ -1,15 +1,21 @@
 // Results lead with the verdict, then four numbers, then the checks behind them.
 import { useMemo, type ReactNode } from 'react';
 import { useStore } from '../../store/useStore';
-import { massGrams, meshVolumeMm3, proceduralSolidVolumeMm3 } from '../../geometry/mesh-stats';
+import { massGrams, meshVolumeMm3 } from '../../geometry/mesh-stats';
 import { boundedNumberInput } from '../../utils/numeric-input';
 import { useResultStaleness } from '../../store/useResultStaleness';
 import { summarizeValidation, VALIDATION_CHECK_COUNT } from '../../utils/validation-summary';
-import { ExportControls } from '../ExportControls';
+import { formatVolume, modelExtents, volumeParts } from '../../utils/model-summary';
+import { relativeDensity, sourceSolidVolumeMm3 } from '../../utils/part-statistics';
+import { checkSuggestion, resultNotes, type CheckId, type CheckSuggestion, type GuidanceAction, type GuidanceContext } from '../../utils/result-guidance';
+import { useResultExport } from '../../hooks/useResultExport';
+import { ExportControlsView, ExportPrimaryButton } from '../ExportControls';
 import { PinnedRunPanel } from '../PinnedRunPanel';
 import { Collapsible, PanelSection, StepPanel } from '../PanelChrome';
-import { AlertIcon, CircleCheckIcon, CircleXIcon, ClockIcon } from '../icons';
+import { runGuidanceAction } from '../guidance-actions';
+import { AlertIcon, CircleAlertIcon, CircleCheckIcon, CircleXIcon, ClockIcon } from '../icons';
 import type { WorkflowInputs } from '../workflow';
+import type { ValidationResult } from '../../types/project';
 
 function formatChangeList(changes: string[]): string {
   if (changes.length === 0) return 'settings';
@@ -33,26 +39,34 @@ export function ResultsStep({ inputs }: { inputs: WorkflowInputs }) {
   const viewMode = useStore((s) => s.viewMode);
   const setViewMode = useStore((s) => s.setViewMode);
   const showPinnedRun = useStore((s) => s.showPinnedRun);
+  const params = useStore((s) => s.params);
+  const runParams = useStore((s) => s.resultSnapshot?.params) ?? params;
   const staleness = useResultStaleness();
+  const exporter = useResultExport();
   const thinPointCount = (validation?.minThickness.thinPoints?.length ?? 0) / 3;
   const checks = summarizeValidation(validation, Boolean(resultMesh), generating, staleness.stale, validationProgress);
 
   const statistics = useMemo(() => {
     if (!resultMesh || !validation?.manifold.passed) return null;
     const resultVolume = meshVolumeMm3(resultMesh);
-    const sourceVolume = sampleShape
-      ? proceduralSolidVolumeMm3(sampleShape, sphereRadius)
-      : originalMesh && meshInfo?.isWatertight
-        ? meshVolumeMm3(originalMesh)
-        : null;
+    const sourceVolume = sourceSolidVolumeMm3({ sampleShape, sphereRadius, originalMesh, meshInfo });
     return {
       resultVolume,
       sourceVolume,
-      relativeDensity: sourceVolume && sourceVolume > 0 ? resultVolume / sourceVolume : null,
+      relativeDensity: relativeDensity(resultVolume, sourceVolume),
     };
-  }, [meshInfo?.isWatertight, originalMesh, resultMesh, sampleShape, sphereRadius, validation?.manifold.passed]);
+  }, [meshInfo, originalMesh, resultMesh, sampleShape, sphereRadius, validation?.manifold.passed]);
 
-  const verdict = resultVerdict(checks.tone, checks.failedLabels, validationProgress);
+  const guidance: GuidanceContext = {
+    runParams,
+    currentParams: params,
+    extents: modelExtents(meshInfo, sampleShape, sphereRadius),
+  };
+  const notes = validation ? resultNotes(validation, guidance) : [];
+  const suggestionFor = (check: CheckId) => (validation ? checkSuggestion(check, validation, guidance) : null);
+  const resultVolume = statistics ? volumeParts(statistics.resultVolume) : null;
+
+  const verdict = resultVerdict(checks.tone, checks.failedLabels, validationProgress, checks.warningCount);
   const thinnest = validation && validation.minThickness.sampled > 0
     ? (validation.minThickness.absoluteMin ?? validation.minThickness.minMeasured)
     : null;
@@ -68,7 +82,7 @@ export function ResultsStep({ inputs }: { inputs: WorkflowInputs }) {
   );
 
   return (
-    <StepPanel step="results" inputs={inputs} heading={heading} primaryAction={<span />}>
+    <StepPanel step="results" inputs={inputs} heading={heading} primaryAction={<ExportPrimaryButton exporter={exporter} />}>
       {staleness.stale && (
         <div className="warning stale-banner" role="status">
           Out of date: {formatChangeList(staleness.changes)} changed since this run. Regenerate to refresh.
@@ -86,7 +100,7 @@ export function ResultsStep({ inputs }: { inputs: WorkflowInputs }) {
           {density > 0 && statistics ? (
             <Kpi label="Estimated mass" value={massGrams(statistics.resultVolume, density).toFixed(2)} unit="g" />
           ) : (
-            <Kpi label="Lattice volume" value={statistics ? statistics.resultVolume.toFixed(1) : '—'} unit={statistics ? 'mm³' : undefined} />
+            <Kpi label="Lattice volume" value={resultVolume?.value ?? '—'} unit={resultVolume?.unit} />
           )}
           <Kpi label="Thinnest feature" value={thinnest !== null ? thinnest.toFixed(2) : '—'} unit={thinnest !== null ? 'mm' : undefined} />
           <Kpi label="Triangles" value={resultMesh.triCount.toLocaleString()} />
@@ -103,10 +117,10 @@ export function ResultsStep({ inputs }: { inputs: WorkflowInputs }) {
           aside={<span className="panel-block-meta">{VALIDATION_CHECK_COUNT - checks.failedCount} of {VALIDATION_CHECK_COUNT} pass</span>}
         >
           <ul className="check-list">
-            <CheckRow passed={validation.outerDeviation.passed} name="Outer deviation">
-              Max <span className="mono">{validation.outerDeviation.maxDeviation.toFixed(3)} mm</span> · limit {validation.outerDeviation.tolerance} mm
+            <CheckRow passed={validation.outerDeviation.passed} name="Outer deviation" suggestion={suggestionFor('outerDeviation')}>
+              <OuterDeviationDetail outerDeviation={validation.outerDeviation} />
             </CheckRow>
-            <CheckRow passed={validation.minThickness.passed} name="Min thickness">
+            <CheckRow passed={validation.minThickness.passed} name="Min thickness" suggestion={suggestionFor('minThickness')}>
               {validation.minThickness.sampled > 0 ? (
                 <>
                   {/* The verdict is decided by the thinnest ray, so that number leads. */}
@@ -138,26 +152,29 @@ export function ResultsStep({ inputs }: { inputs: WorkflowInputs }) {
                 <>Not measured: no usable thickness samples · needs ≥ {validation.minThickness.required} mm</>
               )}
             </CheckRow>
-            <CheckRow passed={validation.manifold.passed} name="Manifold / watertight">
+            <CheckRow passed={validation.manifold.passed} name="Manifold / watertight" suggestion={suggestionFor('manifold')}>
               {validation.manifold.details}
             </CheckRow>
-            <CheckRow passed={validation.disconnected.passed} name="Connectivity">
+            <CheckRow passed={validation.disconnected.passed} name="Connectivity" suggestion={suggestionFor('connectivity')}>
               {validation.disconnected.fragmentCount} solid {validation.disconnected.fragmentCount === 1 ? 'body' : 'bodies'} · needs 1
               {(validation.disconnected.voidCount ?? 0) > 0 && ` · ${validation.disconnected.voidCount} enclosed void${validation.disconnected.voidCount === 1 ? '' : 's'}`}
               {(validation.disconnected.sliverCount ?? 0) > 0 && ` · ${validation.disconnected.sliverCount} negligible sliver${validation.disconnected.sliverCount === 1 ? '' : 's'}`}
             </CheckRow>
           </ul>
-          {validation.warnings.length > 0 && (
+          {notes.length > 0 && (
             <div className="warnings">
-              {validation.warnings.map((w, i) => (
-                <div key={i} className="warning">{w}</div>
+              {notes.map((note, i) => (
+                <div key={i} className={`warning result-note${note.actionable ? '' : ' is-info'}`}>
+                  <span>{note.message}</span>
+                  {note.action && <GuidanceButton action={note.action} />}
+                </div>
               ))}
             </div>
           )}
         </PanelSection>
       )}
 
-      <ExportControls />
+      <ExportControlsView exporter={exporter} footerPrimary />
 
       {resultMesh && (
         <Collapsible title="Material density" subtitle={density > 0 ? `${density} g/cm³` : 'Off'}>
@@ -178,10 +195,10 @@ export function ResultsStep({ inputs }: { inputs: WorkflowInputs }) {
           </div>
           {statistics && (
             <dl className="facts">
-              <dt>Lattice volume</dt><dd className="mono">{statistics.resultVolume.toFixed(1)} mm³</dd>
+              <dt>Lattice volume</dt><dd className="mono">{formatVolume(statistics.resultVolume)}</dd>
               {statistics.sourceVolume !== null && statistics.relativeDensity !== null && (
                 <>
-                  <dt>Solid volume</dt><dd className="mono">{statistics.sourceVolume.toFixed(1)} mm³</dd>
+                  <dt>Solid volume</dt><dd className="mono">{formatVolume(statistics.sourceVolume)}</dd>
                   <dt>Volume reduction</dt><dd className="mono">{((1 - statistics.relativeDensity) * 100).toFixed(1)}%</dd>
                 </>
               )}
@@ -206,28 +223,65 @@ function Kpi({ label, value, unit }: { label: string; value: string; unit?: stri
   );
 }
 
-function CheckRow({ passed, name, children }: { passed: boolean; name: string; children: ReactNode }) {
+/** sampled === 0 means the check could not run; never present that as a 0 mm pass. */
+export function OuterDeviationDetail({ outerDeviation }: { outerDeviation: ValidationResult['outerDeviation'] }) {
+  if (outerDeviation.sampled === 0) {
+    return <>Not measured: no usable deviation samples · limit {outerDeviation.tolerance} mm</>;
+  }
+  return (
+    <>Max <span className="mono">{outerDeviation.maxDeviation.toFixed(3)} mm</span> · limit {outerDeviation.tolerance} mm</>
+  );
+}
+
+function GuidanceButton({ action }: { action: GuidanceAction }) {
+  return (
+    <button type="button" className="btn btn-tiny guidance-action" onClick={() => runGuidanceAction(action)}>
+      {action.label}
+    </button>
+  );
+}
+
+function CheckRow({ passed, name, suggestion, children }: {
+  passed: boolean;
+  name: string;
+  suggestion?: CheckSuggestion | null;
+  children: ReactNode;
+}) {
   return (
     <li className={`check ${passed ? 'pass' : 'fail'}`}>
       <span className="check-icon" aria-hidden="true">{passed ? <CircleCheckIcon size={16} /> : <CircleXIcon size={16} />}</span>
       <div>
         <strong>{name}<span className="visually-hidden">: {passed ? 'passed' : 'failed'}</span></strong>
         <div className="check-detail">{children}</div>
+        {!passed && suggestion && (
+          <div className="check-fix">
+            <span><span className="check-fix-label">Try:</span> {suggestion.text}</span>
+            {suggestion.action && <GuidanceButton action={suggestion.action} />}
+          </div>
+        )}
       </div>
     </li>
   );
 }
 
-type VerdictTone = 'pass' | 'fail' | 'warn' | 'running';
+type VerdictTone = 'pass' | 'attention' | 'fail' | 'warn' | 'running';
 
 function resultVerdict(
   tone: ReturnType<typeof summarizeValidation>['tone'],
   failedLabels: string[],
   validationProgress: number | null,
+  warningCount = 0,
 ): { tone: VerdictTone; title: string; message: string; icon: ReactNode } {
   switch (tone) {
     case 'pass':
       return { tone: 'pass', title: 'All checks passed', message: 'Deviation, wall thickness, manifoldness and connectivity are within the limits you set.', icon: <CircleCheckIcon size={26} strokeWidth={1.8} /> };
+    case 'warn':
+      return {
+        tone: 'attention',
+        title: 'Passed with warnings',
+        message: `All ${VALIDATION_CHECK_COUNT} checks are within your limits, but ${warningCount === 1 ? 'one warning needs' : `${warningCount} warnings need`} a look before printing. See below.`,
+        icon: <CircleAlertIcon size={26} strokeWidth={1.8} />,
+      };
     case 'fail':
       return {
         tone: 'fail',
@@ -249,7 +303,7 @@ function resultVerdict(
     case 'running':
       return {
         tone: 'running',
-        title: validationProgress !== null ? `Checking… ${Math.round(validationProgress * 100)}%` : 'Generating…',
+        title: validationProgress !== null ? `Checking printability… ${Math.round(validationProgress * 100)}%` : 'Generating…',
         message: 'Measuring thickness, deviation and topology. Anything exported now is the previous result.',
         icon: <ClockIcon size={26} strokeWidth={1.8} />,
       };

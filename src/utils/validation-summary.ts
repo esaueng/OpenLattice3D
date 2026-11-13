@@ -1,6 +1,8 @@
 import type { ValidationResult } from '../types/project';
+import { actionableWarningCount } from './result-guidance';
 
-export type ValidationTone = 'idle' | 'running' | 'stale' | 'unvalidated' | 'pass' | 'fail';
+/** 'warn' is a pass that still carries warnings worth acting on (e.g. trapped powder). */
+export type ValidationTone = 'idle' | 'running' | 'stale' | 'unvalidated' | 'pass' | 'warn' | 'fail';
 
 export interface ValidationSummary {
   tone: ValidationTone;
@@ -11,6 +13,8 @@ export interface ValidationSummary {
   failedCount: number;
   totalCount: number;
   failedLabels: string[];
+  /** Actionable warnings on a result whose checks all passed. */
+  warningCount: number;
 }
 
 export const VALIDATION_CHECK_COUNT = 4;
@@ -35,7 +39,7 @@ export function summarizeValidation(
   stale = false,
   validationProgress: number | null = null,
 ): ValidationSummary {
-  const base = { failedCount: 0, totalCount: VALIDATION_CHECK_COUNT, failedLabels: [] as string[] };
+  const base = { failedCount: 0, totalCount: VALIDATION_CHECK_COUNT, failedLabels: [] as string[], warningCount: 0 };
 
   if (!generating && hasResult && validationProgress !== null) {
     return {
@@ -78,6 +82,7 @@ export function summarizeValidation(
       failedCount: failedLabels.length,
       totalCount: VALIDATION_CHECK_COUNT,
       failedLabels,
+      warningCount: 0,
     };
   }
 
@@ -93,6 +98,17 @@ export function summarizeValidation(
   const failedLabels = failingChecks(validation);
 
   if (failedLabels.length === 0) {
+    const warningCount = actionableWarningCount(validation);
+    if (warningCount > 0) {
+      const warnings = `${warningCount} warning${warningCount === 1 ? '' : 's'}`;
+      return {
+        ...base,
+        tone: 'warn',
+        label: `Checks: passed, ${warnings}`,
+        detail: `All ${VALIDATION_CHECK_COUNT} manufacturability checks passed, with ${warnings} to review before printing.`,
+        warningCount,
+      };
+    }
     return {
       ...base,
       tone: 'pass',
@@ -108,5 +124,6 @@ export function summarizeValidation(
     failedCount: failedLabels.length,
     totalCount: VALIDATION_CHECK_COUNT,
     failedLabels,
+    warningCount: 0,
   };
 }

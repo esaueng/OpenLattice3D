@@ -48,6 +48,19 @@ describe('persistence hydration', () => {
     expect(hydrated.viewerBackground).toBe('#000000');
   });
 
+  it('persists the build-plate grid preference, defaulting it on for older snapshots', () => {
+    const base = { version: 3, savedAt: Date.now(), params: { ...DEFAULT_PARAMS } };
+    type Snapshot = Parameters<typeof hydrateFromSnapshot>[0];
+    expect(hydrateFromSnapshot(base as unknown as Snapshot).showBuildPlateGrid).toBe(true);
+    expect(hydrateFromSnapshot({ ...base, showBuildPlateGrid: false } as unknown as Snapshot).showBuildPlateGrid).toBe(false);
+    expect(hydrateFromSnapshot({ ...base, showBuildPlateGrid: 'no' } as unknown as Snapshot).showBuildPlateGrid).toBe(true);
+
+    const previous = useStore.getState().showBuildPlateGrid;
+    useStore.getState().setShowBuildPlateGrid(false);
+    expect(buildPersistedAppState(useStore.getState()).showBuildPlateGrid).toBe(false);
+    useStore.getState().setShowBuildPlateGrid(previous);
+  });
+
   it('never restores a result-only view mode, which would show an empty canvas', () => {
     const hydrated = hydrateFromSnapshot({
       version: 3,
@@ -234,6 +247,22 @@ describe('selection history', () => {
     expect(useStore.getState().selectionUndo).toHaveLength(1);
     useStore.getState().undoSelection();
     expect(useStore.getState().keepInTris.size).toBe(0);
+  });
+
+  it('marks faces in bulk as one undo step, exclusive across regions, ignoring bad indices', () => {
+    const mesh = generateCubeMesh(10);
+    useStore.getState().setOriginalMesh(mesh, analyzeMesh(mesh), 'cube.stl');
+    useStore.getState().markFaces([0, 1, 2], 'keep_in');
+    useStore.getState().markFaces([2, 3, -1, 99, 1.5], 'keep_out');
+    expect(Array.from(useStore.getState().keepInTris)).toEqual([0, 1]);
+    expect(Array.from(useStore.getState().keepOutTris)).toEqual([2, 3]);
+    expect(useStore.getState().selectionUndo).toHaveLength(2);
+    // Marking what is already marked is not a new undo step.
+    useStore.getState().markFaces([2, 3], 'keep_out');
+    expect(useStore.getState().selectionUndo).toHaveLength(2);
+    useStore.getState().undoSelection();
+    expect(Array.from(useStore.getState().keepInTris)).toEqual([0, 1, 2]);
+    expect(useStore.getState().keepOutTris.size).toBe(0);
   });
 });
 
@@ -567,6 +596,19 @@ describe('parameter undo', () => {
 
     useStore.getState().redoSelection();
     expect(useStore.getState().params.cellSize).toBe(12);
+  });
+
+  it('undoes graded-density edits like other parameters', () => {
+    useStore.getState().updateParams({ gradientEnabled: true });
+    useStore.getState().updateParams({ gradientStrength: 0.8 });
+    expect(useStore.getState().selectionUndo).toHaveLength(2);
+    useStore.getState().undoSelection();
+    expect(useStore.getState().params.gradientStrength).toBe(0.5);
+    expect(useStore.getState().params.gradientEnabled).toBe(true);
+    useStore.getState().undoSelection();
+    expect(useStore.getState().params.gradientEnabled).toBe(false);
+    useStore.getState().redoSelection();
+    expect(useStore.getState().params.gradientEnabled).toBe(true);
   });
 
   it('collapses rapid edits of one field into a single undo step', () => {

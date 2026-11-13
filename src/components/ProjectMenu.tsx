@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useModelImport } from '../hooks/useModelImport';
 import { AnalyticsConsent } from './AnalyticsConsent';
+import { ConfirmButton } from './ConfirmButton';
 import { FolderOpenIcon, MoreIcon, UploadIcon, XIcon } from './icons';
 
 const SHORTCUTS: readonly [string, string][] = [
@@ -69,19 +70,16 @@ export function ProjectMenu() {
             </button>
           </div>
           <div className="project-menu-actions">
-            <button type="button" className="menu-row" onClick={run(intake.pickStl)}><UploadIcon size={15} />Import STL…</button>
+            <button type="button" className="menu-row" onClick={run(intake.pickModel)}><UploadIcon size={15} />Import model…</button>
             <button type="button" className="menu-row" onClick={run(intake.pickProject)}><FolderOpenIcon size={15} />Open project…</button>
-            <button
-              type="button"
-              className={`menu-row menu-row-danger${intake.clearAllArmed ? ' armed' : ''}`}
-              aria-live="polite"
+            {/* The first click arms; only the confirming click resets and closes. */}
+            <ConfirmButton
+              action="Start over"
+              className="menu-row menu-row-danger"
               title="Reset the project, parameters, and generated results."
-              // The first click arms; only the confirming click resets and closes.
-              onClick={() => { intake.reset(); if (intake.clearAllArmed) setOpen(false); }}
-            >
-              <XIcon size={15} />
-              {intake.clearAllArmed ? 'Click again to start over' : 'Start over'}
-            </button>
+              icon={<XIcon size={15} />}
+              onConfirm={() => { intake.startOver(); setOpen(false); }}
+            />
           </div>
           <div className="project-menu-section">
             <AnalyticsConsent />

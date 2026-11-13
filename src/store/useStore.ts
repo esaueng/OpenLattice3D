@@ -103,6 +103,8 @@ interface PersistedState {
   viewMode: ViewMode;
   clipPlane: ClipPlaneState;
   viewerBackground: string;
+  /** Draw the millimetre build-plate grid under the part. */
+  showBuildPlateGrid: boolean;
   brushRadius: number;
 }
 
@@ -122,6 +124,8 @@ type SelectionSnapshot = {
 const HISTORY_COALESCE_MS = 1200;
 
 const MAX_SELECTION_HISTORY = 100;
+/** Earlier log entries kept when a new one is appended (the log holds at most this plus one). */
+const LOG_HISTORY_LIMIT = 200;
 
 export interface ProjectRestoreState {
   params: LatticeParams;
@@ -254,6 +258,7 @@ function normalizePersistedState(value: unknown): PersistedState {
     viewMode,
     clipPlane,
     viewerBackground: normalizeViewerBackground(candidate.viewerBackground),
+    showBuildPlateGrid: candidate.showBuildPlateGrid !== false,
     brushRadius,
   };
 }
@@ -485,6 +490,7 @@ interface AppState {
   viewMode: ViewMode;
   clipPlane: ClipPlaneState;
   viewerBackground: string;
+  showBuildPlateGrid: boolean;
   viewportResetSignal: number;
   cameraViewRequest: { view: CameraPreset | null; signal: number };
   viewerCameraState: ViewerCameraState | null;
@@ -497,6 +503,8 @@ interface AppState {
 
   // Boot
   persistenceHydrated: boolean;
+  /** Parameters came back from a saved session; generated results never do. */
+  sessionRestored: boolean;
 
   // Workflow
   workflowStep: WorkflowStep;
@@ -520,6 +528,8 @@ interface AppState {
   toggleKeepOut: (triIdx: number) => void;
   toggleKeepIn: (triIdx: number) => void;
   selectAllKeepOut: () => void;
+  /** Add faces to one region as a single undoable step (keyboard bulk selection). */
+  markFaces: (triIndices: readonly number[], region: 'keep_out' | 'keep_in') => void;
   clearSelection: () => void;
   undoSelection: () => void;
   redoSelection: () => void;
@@ -544,6 +554,7 @@ interface AppState {
   setViewMode: (mode: ViewMode) => void;
   setClipPlane: (partial: Partial<ClipPlaneState>) => void;
   setViewerBackground: (color: string) => void;
+  setShowBuildPlateGrid: (show: boolean) => void;
   resetViewport: () => void;
   requestCameraView: (view: CameraPreset) => void;
   setWorkflowStep: (step: WorkflowStep) => void;
@@ -632,6 +643,7 @@ export const useStore = create<AppState>((set, get) => ({
   ),
   clipPlane: persisted?.clipPlane ?? { axis: 'z', position: 0.5, flipped: false },
   viewerBackground: persisted?.viewerBackground ?? DEFAULT_VIEWER_BACKGROUND,
+  showBuildPlateGrid: persisted?.showBuildPlateGrid ?? true,
   viewportResetSignal: 0,
   cameraViewRequest: { view: null, signal: 0 },
   viewerCameraState: null,
@@ -642,6 +654,7 @@ export const useStore = create<AppState>((set, get) => ({
   workflowStep: 'model',
   // IndexedDB is asynchronous, so the UI waits for saved preferences before rendering.
   persistenceHydrated: false,
+  sessionRestored: Boolean(persisted),
 
   beginModelIntake: () => {
     const epoch = get().modelIntakeEpoch + 1;
@@ -865,6 +878,23 @@ export const useStore = create<AppState>((set, get) => ({
     return { keepOutTris: all, keepInTris: new Set<number>(), ...pushSelectionHistory(s) };
   }),
 
+  markFaces: (triIndices, region) => set((s) => {
+    const triCount = s.originalMesh?.triCount ?? 0;
+    const target = new Set(region === 'keep_out' ? s.keepOutTris : s.keepInTris);
+    const other = new Set(region === 'keep_out' ? s.keepInTris : s.keepOutTris);
+    let changed = false;
+    for (const triIdx of triIndices) {
+      if (!Number.isInteger(triIdx) || triIdx < 0 || triIdx >= triCount) continue;
+      if (!target.has(triIdx)) { target.add(triIdx); changed = true; }
+      if (other.delete(triIdx)) changed = true;
+    }
+    if (!changed) return {};
+    const selection = region === 'keep_out'
+      ? { keepOutTris: target, keepInTris: other }
+      : { keepOutTris: other, keepInTris: target };
+    return { ...selection, ...pushSelectionHistory(s) };
+  }),
+
   clearSelection: () => set((s) => ({
     keepOutTris: new Set(),
     keepInTris: new Set(),
@@ -1048,6 +1078,8 @@ export const useStore = create<AppState>((set, get) => ({
 
   setViewerBackground: (color) => set({ viewerBackground: normalizeViewerBackground(color) }),
 
+  setShowBuildPlateGrid: (show) => set({ showBuildPlateGrid: show }),
+
   resetViewport: () => set((s) => ({
     viewportResetSignal: s.viewportResetSignal + 1,
     viewerCameraState: null,
@@ -1107,7 +1139,7 @@ export const useStore = create<AppState>((set, get) => ({
   }),
 
   addLog: (message, level = 'info') => set((s) => ({
-    logs: [...s.logs.slice(-200), { time: Date.now(), message, level }],
+    logs: [...s.logs.slice(-LOG_HISTORY_LIMIT), { time: Date.now(), message, level }],
   })),
 
   // Imported parameters are just parameter edits: the current result stays and
@@ -1230,6 +1262,7 @@ function persistedSubset(state: AppState): PersistedState {
     viewMode: state.viewMode,
     clipPlane: state.clipPlane,
     viewerBackground: state.viewerBackground,
+    showBuildPlateGrid: state.showBuildPlateGrid,
     brushRadius: state.brushRadius,
   };
 }
@@ -1284,11 +1317,13 @@ export function hydrateFromSnapshot(snapshot: Partial<PersistedAppState>): Parti
     ),
     clipPlane: persistedState.clipPlane,
     viewerBackground: persistedState.viewerBackground,
+    showBuildPlateGrid: persistedState.showBuildPlateGrid,
     viewerCameraState: normalizeViewerCameraState(snapshot.viewerCameraState),
     demoModeActive: false,
     demoSuspended: null,
     demoRunId: 0,
     logs: [],
+    sessionRestored: true,
   };
 }
 

@@ -1,13 +1,6 @@
 // CPU tile worker: builds one non-overlapping marching-cubes tile.
 import { marchingCubesRectangular } from '../geometry/marching-cubes';
-import {
-  buildCapsuleLattice,
-  buildCubeLattice,
-  buildCylinderLattice,
-  buildSphereLattice,
-  buildTorusLattice,
-} from '../geometry/lattice';
-import type { SampleShape } from '../types/project';
+import { buildSampleShapeLattice } from '../geometry/lattice';
 import type { LatticeTileJob, LatticeTileResponse } from './tile-types';
 import { failureCause } from '../utils/failure-cause';
 
@@ -17,18 +10,7 @@ type WorkerPostMessage = (message: unknown, transfer: Transferable[]) => void;
 const postWorkerMessage = self.postMessage.bind(self) as WorkerPostMessage;
 
 function buildShapeSdf(msg: LatticeTileJob): SdfFunction {
-  switch (msg.shape as SampleShape) {
-    case 'sphere':
-      return buildSphereLattice(msg.sphereRadius || 25, msg.params, msg.generationSeed);
-    case 'cube':
-      return buildCubeLattice(15, msg.params, msg.generationSeed);
-    case 'cylinder':
-      return buildCylinderLattice(15, 20, msg.params, msg.generationSeed);
-    case 'torus':
-      return buildTorusLattice(20, 8, msg.params, msg.generationSeed);
-    case 'capsule':
-      return buildCapsuleLattice(12, 15, msg.params, msg.generationSeed);
-  }
+  return buildSampleShapeLattice(msg.shape, msg.sphereRadius, msg.params, msg.generationSeed);
 }
 
 self.onmessage = (event: MessageEvent<LatticeTileJob>) => {

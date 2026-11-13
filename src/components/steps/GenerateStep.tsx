@@ -2,6 +2,7 @@ import { useStore } from '../../store/useStore';
 import { formatGenerationSeed } from '../../geometry/deterministic-random';
 import { modelExtents } from '../../utils/model-summary';
 import { buildPreflight, formatPreflight } from '../../utils/preflight';
+import { describeGenerationProgress } from '../../utils/generation-progress';
 import { useResultStaleness } from '../../store/useResultStaleness';
 import { useModelImport } from '../../hooks/useModelImport';
 import type { LatticeGenerationControls } from '../../hooks/useLatticeGeneration';
@@ -26,15 +27,17 @@ export function GenerateStep({ inputs, generationControls }: { inputs: WorkflowI
   const extents = modelExtents(store.meshInfo, store.sampleShape, store.sphereRadius);
   const preflight = inputs.hasModel ? buildPreflight(store.params, extents, store.meshInfo) : null;
   const blocked = preflight?.warnings.some((w) => w.level === 'block') ?? false;
+  // The raw worker message (tiles, backend, timings) stays in the run log.
+  const progressView = describeGenerationProgress(store.progress, store.progressMessage);
 
   const primaryAction = store.generating ? (
     <div className="generate-progress-track" role="status" aria-live="polite">
       <div className="progress-line">
-        <span className="progress-text" title={store.progressMessage}>{store.progressMessage || 'Starting…'}</span>
+        <span className="progress-text">{progressView.text}</span>
         <button type="button" className="btn btn-small" title="Stop the current generation job. The previous result stays." onClick={cancelGeneration}>Cancel</button>
       </div>
-      <div className="progress-bar">
-        <div className="progress-fill" style={{ width: `${store.progress * 100}%` }} />
+      <div className="progress-bar" role="progressbar" aria-label={progressView.label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progressView.percent}>
+        <div className="progress-fill" style={{ width: `${progressView.percent}%` }} />
       </div>
     </div>
   ) : (
@@ -62,8 +65,19 @@ export function GenerateStep({ inputs, generationControls }: { inputs: WorkflowI
             {formatPreflight(preflight)}
           </p>
           {preflight.warnings.map((warning, index) => (
-            <div key={index} className={`warning preflight-${warning.level}`} role={warning.level === 'block' ? 'alert' : undefined}>
-              {warning.message}
+            <div key={index} className={`warning preflight-${warning.level}${warning.fix ? ' has-fix' : ''}`} role={warning.level === 'block' ? 'alert' : undefined}>
+              <span>{warning.message}</span>
+              {warning.fix && (
+                <button
+                  type="button"
+                  className="btn btn-tiny guidance-action"
+                  title="Apply this change; the estimate above updates before you generate."
+                  disabled={store.generating}
+                  onClick={() => store.updateParams(warning.fix!.params)}
+                >
+                  {warning.fix.label}
+                </button>
+              )}
             </div>
           ))}
         </PanelSection>
@@ -86,18 +100,18 @@ export function GenerateStep({ inputs, generationControls }: { inputs: WorkflowI
           </select>
         </div>
         <div className="row">
-          <label htmlFor="thin-filter">Remove features</label>
+          <label htmlFor="thin-filter">Remove thin features</label>
           <select
             id="thin-filter"
-            title="Remove features thinner than this by morphological opening. The run log explains when the export grid cannot resolve the requested size."
+            title="Erase walls and struts thinner than this (morphological opening) so nothing too fragile to print survives. The run log explains when the grid is too coarse to apply it."
             value={store.params.thinSectionFilter}
             onChange={(e) => store.updateParams({ thinSectionFilter: Number(e.target.value) })}
           >
             <option value={0}>Off</option>
-            <option value={0.5}>Under 0.5mm</option>
-            <option value={0.8}>Under 0.8mm</option>
-            <option value={1.2}>Under 1.2mm</option>
-            <option value={2}>Under 2.0mm</option>
+            <option value={0.5}>Thinner than 0.5 mm</option>
+            <option value={0.8}>Thinner than 0.8 mm</option>
+            <option value={1.2}>Thinner than 1.2 mm</option>
+            <option value={2}>Thinner than 2.0 mm</option>
           </select>
         </div>
       </PanelSection>

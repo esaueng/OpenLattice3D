@@ -342,6 +342,13 @@ compared against `cpu-tiled` on the same end-to-end jobs.
 9. Enable only for built-in sample shapes and `gyroid`/`schwarzP`.
 10. Expand lattice coverage after visual comparisons pass.
 
+> **Reconciled with the backend decision.** Phases 9–10 predate
+> [`backend-decision.md`](backend-decision.md). Its gate 1 requires the GPU
+> backend to cover every supported TPMS formula before it returns to the
+> runtime, so a `gyroid`/`schwarzP`-only phase 9 may exist only as
+> development-only, flag-disabled work. Phase 10's TPMS coverage is a
+> precondition for enabling the backend, not a follow-up.
+
 ## Correctness checks
 
 The fixture list, comparison tolerances, and fallback behaviors sketched below

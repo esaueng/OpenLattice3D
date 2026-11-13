@@ -4,13 +4,14 @@ import { ViewerControls } from './components/ViewerControls';
 import { StepNav } from './components/StepNav';
 import { ProjectMenu } from './components/ProjectMenu';
 import { StartOverlay } from './components/StartOverlay';
+import { ModelIntakeLayer } from './components/ModelIntakeLayer';
 import { ModelStep } from './components/steps/ModelStep';
 import { RegionsStep } from './components/steps/RegionsStep';
 import { LatticeStep } from './components/steps/LatticeStep';
 import { ShellStep } from './components/steps/ShellStep';
 import { GenerateStep } from './components/steps/GenerateStep';
 import { ResultsStep } from './components/steps/ResultsStep';
-import { PlayIcon, SquareIcon } from './components/icons';
+import { PlayIcon, SquareIcon, XIcon } from './components/icons';
 import { adjacentStep, canNavigateToStep, reachableStep, visibleSteps, type WorkflowInputs } from './components/workflow';
 import { useWorkflowInputs } from './hooks/useWorkflow';
 import type { LatticeGenerationControls } from './hooks/useLatticeGeneration';
@@ -21,8 +22,12 @@ import { escapeControlCharacters } from './utils/text-safety';
 import { useLatticeGeneration } from './hooks/useLatticeGeneration';
 import { useWorkspaceHotkeys } from './hooks/useWorkspaceHotkeys';
 import { summarizeValidation } from './utils/validation-summary';
+import { describeGenerationProgress } from './utils/generation-progress';
+import { compareChecksSummary, solverStatus as describeSolverStatus } from './utils/status-bar';
 import { useResultStaleness } from './store/useResultStaleness';
 import { trackUsage } from './analytics';
+import { CONFIRM_TIMEOUT_MS, confirmActionLabel, confirmHint } from './components/confirm';
+import { keepResultsOffer, runFinishAction } from './components/results-ready';
 import { ViewportErrorBoundary } from './components/ViewportErrorBoundary';
 import './App.css';
 
@@ -84,6 +89,7 @@ function HydratedApp() {
     resultMesh,
     generating,
     progress,
+    progressMessage,
     params,
     meshFileName,
     demoModeActive,
@@ -99,6 +105,7 @@ function HydratedApp() {
     pinnedRun,
     workflowStep,
     setWorkflowStep,
+    sessionRestored,
   } = useStore();
   const generationControls = useLatticeGeneration();
   const countedOpen = useRef(false);
@@ -124,13 +131,37 @@ function HydratedApp() {
     if (!stepVisible || !canNavigateToStep(workflowStep, workflowInputs)) setWorkflowStep(reachable);
   }, [reachable, setWorkflowStep, stepVisible, workflowInputs, workflowStep]);
 
-  // A run started from the Generate step lands on its result.
+  // A run that finishes on the Generate step lands on its result. One started
+  // from the top bar while editing another step leaves the user there and
+  // offers the result instead (see results-ready.ts).
   const wasGenerating = useRef(generating);
+  const runStart = useRef<{ step: WorkflowStep; result: typeof resultMesh } | null>(null);
+  const [resultsOffered, setResultsOffered] = useState(false);
   useEffect(() => {
+    const started = !wasGenerating.current && generating;
     const finished = wasGenerating.current && !generating;
     wasGenerating.current = generating;
-    if (finished && resultMesh && useStore.getState().workflowStep === 'generate') setWorkflowStep('results');
+    if (started) {
+      runStart.current = { step: useStore.getState().workflowStep, result: resultMesh };
+      return;
+    }
+    if (!finished) return;
+    const start = runStart.current;
+    runStart.current = null;
+    const action = runFinishAction({
+      // A run already under way at mount is treated like one watched from Generate.
+      startedOnStep: start?.step ?? 'generate',
+      currentStep: useStore.getState().workflowStep,
+      hasResult: Boolean(resultMesh),
+      newResult: Boolean(resultMesh) && resultMesh !== start?.result,
+    });
+    if (action === 'show-results') setWorkflowStep('results');
+    else if (action === 'offer-results') setResultsOffered(true);
   }, [generating, resultMesh, setWorkflowStep]);
+  // Visiting Results, starting another run or losing the result retires the offer for good.
+  const resultsOfferCurrent = keepResultsOffer({ currentStep: workflowStep, generating, hasResult: Boolean(resultMesh) });
+  if (resultsOffered && !resultsOfferCurrent) setResultsOffered(false);
+  const showResultsOffer = resultsOffered && resultsOfferCurrent;
 
   // B and N walk the workflow, like the panel footer's Back and Continue.
   useEffect(() => {
@@ -178,15 +209,18 @@ function HydratedApp() {
       ? `${resultMesh.triCount.toLocaleString()} tris${staleness.stale ? ' · settings changed' : ''}`
       : 'Mesh pending';
   const progressLabel = `${Math.round(progress * 100)}%`;
-  const comparing = demoModeActive && demoQueue.total > 0;
-  const solverStatus = generating
-    ? `Generating ${progressLabel}`
-    : comparing
-      ? `Comparing ${demoQueue.done} of ${demoQueue.total}`
-      : hasModel ? 'Ready' : 'Idle';
-  const statusTone = generating || comparing ? 'busy' : hasModel ? 'ready' : 'idle';
+  const progressView = describeGenerationProgress(progress, progressMessage);
+  const { text: solverStatus, tone: statusTone } = describeSolverStatus({ generating, progressView, demoModeActive, demoQueue, hasModel });
   const showFaceLegend = keepOutTris.size > 0 || keepInTris.size > 0 || (selectionMode !== 'none' && selectionMode !== 'place_hole');
-  const checks = summarizeValidation(validation, Boolean(resultMesh), generating, staleness.stale, validationProgress);
+  const checks = demoModeActive && !generating
+    ? compareChecksSummary()
+    : summarizeValidation(validation, Boolean(resultMesh), generating, staleness.stale, validationProgress);
+  // Parameters survive a reload but meshes never do; say so once instead of silently showing the bare model.
+  const showRestoreNotice = sessionRestored && hasModel && !resultMesh && !generating && !demoModeActive;
+  const dismissRestoreNotice = useCallback(() => useStore.setState({ sessionRestored: false }), []);
+  useEffect(() => {
+    if (sessionRestored && (resultMesh || generating)) dismissRestoreNotice();
+  }, [dismissRestoreNotice, generating, resultMesh, sessionRestored]);
   const canGenerate = hasModel && !demoModeActive;
   const studySummary = hasModel
     ? `${latticeLabel(params.latticeType)} · ${params.cellSize} mm cells${resultMesh ? ` · ${resultStats}` : ''}`
@@ -211,6 +245,8 @@ function HydratedApp() {
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main-content">Skip to main content</a>
+      {/* Drag-and-drop STL import and the replace-model confirmation. */}
+      <ModelIntakeLayer />
       <h1 className="visually-hidden">OpenLattice3D — 3D lattice generator</h1>
       <header className="topbar">
         <div className="brand" aria-label="Open Lattice 3D">
@@ -265,7 +301,7 @@ function HydratedApp() {
       </div>
 
       <main className="workspace" id="main-content" tabIndex={-1}>
-        <section className="viewer-shell" aria-label="3D lattice viewer">
+        <section className={`viewer-shell${generating ? ' is-generating' : ''}`} aria-label="3D lattice viewer" aria-busy={generating || undefined}>
           {!demoModeActive && hasModel && (
             <div className="viewer-hud">
               <div className="viewer-readout">
@@ -277,6 +313,43 @@ function HydratedApp() {
           <ViewportErrorBoundary>
             <Viewer3D />
           </ViewportErrorBoundary>
+          {generating && (
+            <div className="viewer-busy" aria-hidden="true">
+              <span className="viewer-busy-pill">
+                <span className="viewer-busy-spinner" />
+                {progressView.text}
+              </span>
+            </div>
+          )}
+          {showRestoreNotice && (
+            <div className="viewer-restore-notice" role="status">
+              <span>Settings restored from your last visit. Generated lattices aren't saved between sessions — generate to see one.</span>
+              <button type="button" className="btn btn-tiny" onClick={dismissRestoreNotice} aria-label="Dismiss notice">
+                <XIcon size={12} />
+              </button>
+            </div>
+          )}
+          {/* Always mounted so screen readers announce the offer when it appears. */}
+          <div className="viewer-results-ready-region" role="status">
+            {showResultsOffer && (
+              <div className="viewer-results-ready">
+                <span className="viewer-results-ready-dot" aria-hidden="true" />
+                <span>Results ready</span>
+                <button type="button" className="btn btn-small btn-primary" onClick={() => setWorkflowStep('results')}>
+                  View results
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-tiny"
+                  onClick={() => setResultsOffered(false)}
+                  aria-label="Dismiss results notice"
+                  title="Dismiss"
+                >
+                  <XIcon size={12} />
+                </button>
+              </div>
+            )}
+          </div>
           {!hasModel && !demoModeActive && <StartOverlay />}
           {showFaceLegend && !demoModeActive && (
             <div className="viewer-legend" role="group" aria-label="Face marking legend">
@@ -438,7 +511,7 @@ const BottomLogDrawer = forwardRef<HTMLDivElement, BottomLogDrawerProps>(functio
 
   useEffect(() => {
     if (!clearPromptVisible) return undefined;
-    const timeoutId = window.setTimeout(() => setClearPromptVisible(false), 2200);
+    const timeoutId = window.setTimeout(() => setClearPromptVisible(false), CONFIRM_TIMEOUT_MS);
     return () => window.clearTimeout(timeoutId);
   }, [clearPromptVisible]);
 
@@ -553,10 +626,10 @@ const BottomLogDrawer = forwardRef<HTMLDivElement, BottomLogDrawerProps>(functio
               className="log-clear-button"
               disabled={!logs.length}
               aria-live="polite"
-              title={clearPromptVisible ? 'Activate again to clear run logs' : 'Clear run logs'}
+              title={clearPromptVisible ? confirmHint('Clear logs') : 'Clear run logs'}
               onClick={clearLogEntries}
             >
-              {clearPromptVisible ? 'Click again to clear' : 'Clear logs'}
+              {clearPromptVisible ? confirmActionLabel('Clear logs') : 'Clear logs'}
             </button>
           </div>
         </div>

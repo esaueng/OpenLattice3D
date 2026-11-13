@@ -29,11 +29,14 @@ export interface WorkflowInputs {
   resultStale: boolean;
   /** Null until validation has reported for the current result. */
   validationPassed: boolean | null;
+  /** Actionable warnings on the current result's validation (e.g. trapped powder); 0 when none. */
+  validationWarnings: number;
   paintedFaces: number;
   preflightBlocked: boolean;
 }
 
-export type StepStatus = 'done' | 'blocked' | 'attention' | 'idle';
+/** 'warned' is a Results pass that still carries warnings worth acting on. */
+export type StepStatus = 'done' | 'warned' | 'blocked' | 'attention' | 'idle';
 
 export function visibleSteps(inputs: WorkflowInputs): WorkflowStepInfo[] {
   return WORKFLOW_STEPS.filter((step) => step.id !== 'regions' || inputs.hasImportedMesh);
@@ -65,8 +68,30 @@ export function stepStatus(step: WorkflowStep, inputs: WorkflowInputs): { status
     case 'results':
       if (!inputs.hasResult || inputs.validationPassed === null) return { status: 'idle' };
       if (!inputs.validationPassed) return { status: 'blocked', reason: 'Some checks failed.' };
-      return { status: inputs.resultStale ? 'attention' : 'done', reason: inputs.resultStale ? 'The result is out of date.' : undefined };
+      if (inputs.resultStale) return { status: 'attention', reason: 'The result is out of date.' };
+      if (inputs.validationWarnings > 0) {
+        const count = inputs.validationWarnings;
+        return { status: 'warned', reason: `Passed with ${count} warning${count === 1 ? '' : 's'} to review.` };
+      }
+      return { status: 'done' };
   }
+}
+
+/**
+ * Tooltip and accessible name for a stepper segment. A pass with warnings is
+ * spelled out ("Results — passed with warnings"), never left to the amber icon.
+ * Without an aria-label the button's own text (label plus ", done") names it.
+ */
+export function stepNavLabel(label: string, state: { status: StepStatus; reason?: string }): { title: string; ariaLabel?: string } {
+  if (state.status === 'warned') {
+    const name = `${label} — passed with warnings`;
+    return { title: state.reason ? `${name}. ${state.reason}` : name, ariaLabel: name };
+  }
+  if (state.reason) {
+    const name = `${label}: ${state.reason}`;
+    return { title: name, ariaLabel: name };
+  }
+  return { title: label };
 }
 
 export function adjacentStep(step: WorkflowStep, inputs: WorkflowInputs, direction: 1 | -1): WorkflowStepInfo | undefined {

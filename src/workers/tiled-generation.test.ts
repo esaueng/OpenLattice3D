@@ -1,11 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  buildCapsuleLattice,
-  buildCubeLattice,
-  buildCylinderLattice,
-  buildSphereLattice,
-  buildTorusLattice,
-} from '../geometry/lattice';
+import { buildSampleShapeLattice } from '../geometry/lattice';
 import { marchingCubesRectangular, type MarchingCubesResult } from '../geometry/marching-cubes';
 import { DEFAULT_PARAMS } from '../types/project';
 import { closeBoundaryLoops } from '../geometry/mesh-repair';
@@ -24,13 +18,7 @@ function hash(result: MarchingCubesResult): string {
 }
 
 function sdfFor(job: LatticeTileJob) {
-  switch (job.shape) {
-    case 'sphere': return buildSphereLattice(job.sphereRadius, job.params, job.generationSeed);
-    case 'cube': return buildCubeLattice(15, job.params, job.generationSeed);
-    case 'cylinder': return buildCylinderLattice(15, 20, job.params, job.generationSeed);
-    case 'torus': return buildTorusLattice(20, 8, job.params, job.generationSeed);
-    case 'capsule': return buildCapsuleLattice(12, 15, job.params, job.generationSeed);
-  }
+  return buildSampleShapeLattice(job.shape, job.sphereRadius, job.params, job.generationSeed);
 }
 
 class ComputingTileWorker implements TileWorkerLike {

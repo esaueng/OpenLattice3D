@@ -6,6 +6,7 @@ import {
   DEFAULT_GENERATION_SEED,
   deriveGenerationSeed,
 } from '../geometry/deterministic-random';
+import { DEFAULT_SAMPLE_SPHERE_RADIUS, SAMPLE_SHAPE_DIMENSIONS } from '../geometry/sample-shapes';
 import type { SampleShape } from '../types/project';
 import type { Vec3 } from '../geometry/vec3';
 import { cross, length, normalize, sub } from '../geometry/vec3';
@@ -147,7 +148,7 @@ export function sampleSurfacePointForShape(
   random: RandomSource,
 ): SurfaceHexSample {
   if (shape === 'sphere') {
-    const radius = params.radius ?? 25;
+    const radius = params.radius ?? DEFAULT_SAMPLE_SPHERE_RADIUS;
     const theta = 2 * Math.PI * random();
     const phi = Math.acos(2 * random() - 1);
     const x = radius * Math.sin(phi) * Math.cos(theta);
@@ -157,7 +158,7 @@ export function sampleSurfacePointForShape(
     return { pos, normal: normalize(pos) };
   }
   if (shape === 'cube') {
-    const halfSize = params.halfSize ?? 15;
+    const halfSize = params.halfSize ?? SAMPLE_SHAPE_DIMENSIONS.cube.halfSize;
     const face = Math.floor(random() * 6);
     const u = (random() * 2 - 1) * halfSize;
     const v = (random() * 2 - 1) * halfSize;
@@ -171,8 +172,8 @@ export function sampleSurfacePointForShape(
     }
   }
   if (shape === 'cylinder') {
-    const radius = params.cylRadius ?? 15;
-    const halfHeight = params.cylHalfHeight ?? 20;
+    const radius = params.cylRadius ?? SAMPLE_SHAPE_DIMENSIONS.cylinder.radius;
+    const halfHeight = params.cylHalfHeight ?? SAMPLE_SHAPE_DIMENSIONS.cylinder.halfHeight;
     const sideArea = 4 * Math.PI * radius * halfHeight;
     const capArea = Math.PI * radius * radius;
     const pick = random() * (sideArea + 2 * capArea);
@@ -192,8 +193,8 @@ export function sampleSurfacePointForShape(
     };
   }
   if (shape === 'torus') {
-    const major = params.torusMajor ?? 20;
-    const tube = params.torusTube ?? 8;
+    const major = params.torusMajor ?? SAMPLE_SHAPE_DIMENSIONS.torus.majorRadius;
+    const tube = params.torusTube ?? SAMPLE_SHAPE_DIMENSIONS.torus.tubeRadius;
     const u = random() * 2 * Math.PI;
     const v = random() * 2 * Math.PI;
     const ring = major + tube * Math.cos(v);
@@ -203,8 +204,8 @@ export function sampleSurfacePointForShape(
     };
   }
 
-  const radius = params.capRadius ?? 12;
-  const halfHeight = params.capHalfHeight ?? 15;
+  const radius = params.capRadius ?? SAMPLE_SHAPE_DIMENSIONS.capsule.radius;
+  const halfHeight = params.capHalfHeight ?? SAMPLE_SHAPE_DIMENSIONS.capsule.halfHeight;
   const cylinderArea = 4 * Math.PI * radius * halfHeight;
   const sphereArea = 4 * Math.PI * radius * radius;
   if (random() * (cylinderArea + sphereArea) < cylinderArea) {
@@ -214,12 +215,16 @@ export function sampleSurfacePointForShape(
     const y = radius * Math.sin(theta);
     return { pos: [x, y, z], normal: normalize([x, y, 0]) };
   }
+  // Uniform point on a sphere, folded onto the outward hemisphere of the
+  // chosen end cap (|cos phi| stays uniform on [0,1], so the hemisphere is
+  // still sampled uniformly). The two caps together have the sphere's area.
   const theta = 2 * Math.PI * random();
   const phi = Math.acos(2 * random() - 1);
   const sx = radius * Math.sin(phi) * Math.cos(theta);
   const sy = radius * Math.sin(phi) * Math.sin(theta);
-  const sz = radius * Math.cos(phi);
-  const centerZ = random() > 0.5 ? halfHeight : -halfHeight;
+  const top = random() > 0.5;
+  const sz = top ? Math.abs(radius * Math.cos(phi)) : -Math.abs(radius * Math.cos(phi));
+  const centerZ = top ? halfHeight : -halfHeight;
   return { pos: [sx, sy, sz + centerZ], normal: normalize([sx, sy, sz]) };
 }
 

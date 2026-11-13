@@ -5,9 +5,18 @@
 import type { Vec3 } from './vec3';
 import type { MeshBVH } from './bvh';
 import type { GridSdfSampler } from './marching-cubes';
-import type { LatticeParams, LatticeType } from '../types/project';
+import type { LatticeParams, LatticeType, SampleShape } from '../types/project';
 import type { BoundingBox } from '../types/project';
 import { withEscapeHoles } from './escape-holes';
+import {
+  capsuleSdf,
+  cubeSdf,
+  cylinderSdf,
+  SAMPLE_SHAPE_DIMENSIONS,
+  sampleSphereRadius,
+  sphereSdf,
+  torusSdf,
+} from './sample-shapes';
 import {
   DEFAULT_GENERATION_SEED,
   deriveGenerationSeed,
@@ -26,6 +35,7 @@ type StrutCache = {
   corners: Vec3[];
   edges: [Vec3, Vec3][];
   faceCenters: Vec3[];
+  octetStruts: [Vec3, Vec3][];
   diamondBins: [Vec3, Vec3][][];
 };
 
@@ -94,6 +104,41 @@ function buildDiamondBins(L: number): [Vec3, Vec3][][] {
   return bins;
 }
 
+/** Octet truss struts within one unit cell: the 24 half face-diagonals
+ *  (each face centre to the 4 corners of its face) and the 12 edges of the
+ *  inscribed octahedron (each face centre to the 4 non-opposite face centres).
+ *  The cell content is mirror-symmetric about every cell face, so every strut
+ *  of a neighbouring cell has a mirror image here that is at least as close to
+ *  any point inside this cell; wrapping into [0,L)^3 is therefore exact without
+ *  explicit periodic images. */
+function buildOctetStruts(L: number, corners: Vec3[], faceCenters: Vec3[]): [Vec3, Vec3][] {
+  const struts: [Vec3, Vec3][] = [];
+  // A face centre lies on exactly one cell face (one coordinate at 0 or L);
+  // the corners of that face share that coordinate.
+  const tol = 1e-9 * L;
+  for (const fc of faceCenters) {
+    for (const cn of corners) {
+      let shared = 0;
+      for (let axis = 0; axis < 3; axis++) {
+        if (Math.abs(fc[axis] - cn[axis]) <= tol) shared++;
+      }
+      if (shared === 1) struts.push([fc, cn]);
+    }
+  }
+  // Adjacent (non-opposite) face centres are h*sqrt(2) apart; opposite ones
+  // are L apart.
+  const adjacent = (L / 2) * Math.SQRT2;
+  for (let i = 0; i < faceCenters.length; i++) {
+    for (let j = i + 1; j < faceCenters.length; j++) {
+      const a = faceCenters[i];
+      const b = faceCenters[j];
+      const d = Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+      if (Math.abs(d - adjacent) <= tol) struts.push([a, b]);
+    }
+  }
+  return struts;
+}
+
 function supportsOptimizedTpms(t: LatticeType): t is OptimizedTpmsType {
   return t === 'gyroid' || t === 'schwarzP' || t === 'schwarzD' || t === 'neovius' || t === 'iwp';
 }
@@ -114,7 +159,15 @@ function getStrutCache(L: number): StrutCache {
     [h, h, 0], [h, 0, h], [0, h, h], [h, h, L], [h, L, h], [L, h, h],
   ];
 
-  strutCache = { L, h, corners, edges, faceCenters, diamondBins: buildDiamondBins(L) };
+  strutCache = {
+    L,
+    h,
+    corners,
+    edges,
+    faceCenters,
+    octetStruts: buildOctetStruts(L, corners, faceCenters),
+    diamondBins: buildDiamondBins(L),
+  };
   return strutCache;
 }
 
@@ -147,34 +200,23 @@ export function bccStrutSDF(x: number, y: number, z: number, cellSize: number, s
   return minDist - r;
 }
 
-/** Octet Truss (FCC): face-centre nodes connected to corner nodes.
- *  The stiffest periodic strut lattice at low density. Nearly isotropic. */
+/** Octet Truss (FCC): each face-centre node connects to the 4 corners of its
+ *  face and to the 4 adjacent face centres (the inscribed octahedron), giving
+ *  the 12-connected octet truss. The stiffest periodic strut lattice at low
+ *  density. Nearly isotropic. */
 export function octetSDF(x: number, y: number, z: number, cellSize: number, strutDiameter: number): number {
   const r = strutDiameter / 2;
   const L = cellSize;
-  const { h, corners, faceCenters } = getStrutCache(L);
+  const { octetStruts } = getStrutCache(L);
   const lx = ((x % L) + L) % L;
   const ly = ((y % L) + L) % L;
   const lz = ((z % L) + L) % L;
 
   let minDist = Infinity;
   const p: Vec3 = [lx, ly, lz];
-
-  // Each face centre connects to its 4 adjacent corners
-  // +X face (L,h,h): corners with x=L
-  for (const fc of faceCenters) {
-    for (const cn of corners) {
-      // A face centre at (fx,fy,fz) connects to corner (cx,cy,cz) if they
-      // share two coordinates within h of each other — i.e. they're on the
-      // same face of the cube.
-      const dx = Math.abs(fc[0] - cn[0]);
-      const dy = Math.abs(fc[1] - cn[1]);
-      const dz = Math.abs(fc[2] - cn[2]);
-      if (dx <= h && dy <= h && dz <= h) {
-        const d = distToSegment(p, fc, cn);
-        if (d < minDist) minDist = d;
-      }
-    }
+  for (const [a, b] of octetStruts) {
+    const d = distToSegment(p, a, b);
+    if (d < minDist) minDist = d;
   }
   return minDist - r;
 }
@@ -420,7 +462,7 @@ export function hexagonPrismSDF(x: number, y: number, z: number, cellSize: numbe
   return d - r;
 }
 
-export function trianglePrismSDF(x: number, y: number, z: number, cellSize: number, strutDiameter: number): number {
+export function trianglePrismSDF(x: number, y: number, _z: number, cellSize: number, strutDiameter: number): number {
   const r = strutDiameter / 2;
   const spacing = cellSize * SQRT3 / 2;
   const n0 = [0, 1];
@@ -691,21 +733,67 @@ function tpmsValueFromTrig(
   }
 }
 
+// ═══════════════════════════════════════════════════════════
+//  Graded density
+// ═══════════════════════════════════════════════════════════
+
+/** Graded density fades from the skin toward the core over this many cells. */
+export const GRADIENT_FALLOFF_CELLS = 3;
+
+/**
+ * Half of the nominal lattice thickness that the field's zero level set
+ * encodes, in mm. Sheet types (TPMS and spinodal) return `|f|/|grad f| -
+ * wallThickness/2`; strut types (BCC, octet, diamond), the perforated-skin
+ * prisms (hexagon, triangle: the wall between holes) and Voronoi foam (half
+ * the bisector gap) return `distance - strutDiameter/2`.
+ */
+export function gradientBaseHalfThickness(params: LatticeParams): number {
+  return (isSheetType(params.latticeType) ? params.wallThickness : params.strutDiameter) * 0.5;
+}
+
+/** Applies graded density to a raw lattice value, given the object distance. */
+export type LatticeGrader = (lat: number, objectDistance: number) => number;
+
+/**
+ * Graded density: thicken the lattice near the skin. Subtracting an offset
+ * from the lattice field moves its zero level set outward, so local wall or
+ * strut thickness becomes `(1 + strength * exp(-depth / (3 * cellSize)))`
+ * times the nominal value: strength 1 doubles it at the skin, fading toward
+ * the nominal thickness a few cells into the core. `depth` is measured from
+ * the object surface, or from the inside of the shell when the lattice sits
+ * under one (`measureFromShellInterior`).
+ *
+ * Approximation: the offset varies in space, so the result is no longer an
+ * exact distance. Its gradient is at most
+ * `strength * baseHalfThickness / (3 * cellSize)` (about 0.02 for the
+ * defaults), so the field's Lipschitz bound grows by at most that much; the
+ * lattice fields are already first-order distance estimates.
+ *
+ * Returns null when grading is off, so callers leave the field untouched and
+ * ungraded output stays bit-identical.
+ */
+export function buildLatticeGrader(params: LatticeParams, measureFromShellInterior: boolean): LatticeGrader | null {
+  if (!params.gradientEnabled) return null;
+  const strength = Math.min(1, Math.max(0, params.gradientStrength));
+  const amplitude = strength * gradientBaseHalfThickness(params);
+  const falloff = params.cellSize * GRADIENT_FALLOFF_CELLS;
+  if (!(amplitude > 0) || !(falloff > 0)) return null;
+  const skinOffset = measureFromShellInterior ? params.shellThickness : 0;
+  return (lat, objectDistance) => {
+    const depth = Math.max(0, -(objectDistance + skinOffset));
+    return lat - amplitude * Math.exp(-depth / falloff);
+  };
+}
+
 function combinedLatticeSdfValue(
   dObj: number,
   lat: number,
   params: LatticeParams,
   blendK: number,
-  useShellOffsetForDefaultGradient: boolean
+  grader: LatticeGrader | null,
 ): number {
-  const { shellThickness, noShell, surfaceOnly, surfaceDepth, cellSize, gradientEnabled, gradientStrength, variant } = params;
-  let adjustedLat = lat;
-  if (gradientEnabled) {
-    const gd = (noShell || surfaceOnly || (variant !== 'shell_core' && !useShellOffsetForDefaultGradient))
-      ? Math.max(0, -dObj)
-      : Math.max(0, -(dObj + shellThickness));
-    adjustedLat *= 1.0 - gradientStrength * Math.exp(-gd / (cellSize * 3));
-  }
+  const { shellThickness, noShell, surfaceOnly, surfaceDepth, variant } = params;
+  const adjustedLat = grader ? grader(lat, dObj) : lat;
 
   if (surfaceOnly) return Math.max(adjustedLat, Math.max(dObj, -(dObj + surfaceDepth)));
   if (noShell) return Math.max(adjustedLat, dObj);
@@ -725,7 +813,7 @@ function attachTpmsGridSampler(
   objectSdf: (x: number, y: number, z: number) => number,
   params: LatticeParams,
   blendK: number,
-  useShellOffsetForDefaultGradient: boolean,
+  grader: LatticeGrader | null,
   applyConstraints: ConstraintApplier | null = null,
 ): SdfFunction {
   if (!supportsOptimizedTpms(params.latticeType)) return target;
@@ -806,7 +894,7 @@ function attachTpmsGridSampler(
             lat,
             params,
             blendK,
-            useShellOffsetForDefaultGradient
+            grader,
           );
           out[rowOffset + x] = applyConstraints
             ? applyConstraints(value, px, py, pz, objectDistance)
@@ -971,9 +1059,11 @@ export function buildSurfaceHexLattice(
 
 export function buildCombinedSDF(opts: LatticeSdfOptions): SdfFunction {
   const { bvh, params } = opts;
-  const { shellThickness, noShell, surfaceOnly, surfaceDepth, cellSize, wallThickness, strutDiameter, variant, latticeType, gradientEnabled, gradientStrength } = params;
+  const { shellThickness, noShell, surfaceOnly, surfaceDepth, cellSize, wallThickness, strutDiameter, variant, latticeType } = params;
   const blendK = Math.min(wallThickness, strutDiameter) * 0.3;
   const latticeFn = buildLatticeEvaluator(params, opts.generationSeed);
+  // Imported meshes grade from the inside of the shell only for shell + core.
+  const grader = buildLatticeGrader(params, !noShell && !surfaceOnly && variant === 'shell_core');
   const sdf = (x: number, y: number, z: number) => bvh.signedDistance([x, y, z]);
   const applyConstraints = buildConstraintApplier(
     bvh,
@@ -996,28 +1086,24 @@ export function buildCombinedSDF(opts: LatticeSdfOptions): SdfFunction {
     const result: SdfFunction = (x, y, z) => {
       const dObj = sdf(x, y, z);
       const bandSdf = Math.max(dObj, -(dObj + surfaceDepth));
-      let lat = sampleLattice(x, y, z, dObj);
-      if (gradientEnabled) {
-        lat *= 1.0 - gradientStrength * Math.exp(-Math.max(0, -dObj) / (cellSize * 3));
-      }
+      const rawLat = sampleLattice(x, y, z, dObj);
+      const lat = grader ? grader(rawLat, dObj) : rawLat;
       const value = Math.max(lat, bandSdf);
       return applyConstraints ? applyConstraints(value, x, y, z, dObj) : value;
     };
-    return attachTpmsGridSampler(result, sdf, params, blendK, false, applyConstraints);
+    return attachTpmsGridSampler(result, sdf, params, blendK, grader, applyConstraints);
   }
 
   // ── No-shell mode ──
   if (noShell) {
     const result: SdfFunction = (x, y, z) => {
       const dObj = sdf(x, y, z);
-      let lat = sampleLattice(x, y, z, dObj);
-      if (gradientEnabled) {
-        lat *= 1.0 - gradientStrength * Math.exp(-Math.max(0, -dObj) / (cellSize * 3));
-      }
+      const rawLat = sampleLattice(x, y, z, dObj);
+      const lat = grader ? grader(rawLat, dObj) : rawLat;
       const value = Math.max(lat, dObj);
       return applyConstraints ? applyConstraints(value, x, y, z, dObj) : value;
     };
-    return attachTpmsGridSampler(result, sdf, params, blendK, false, applyConstraints);
+    return attachTpmsGridSampler(result, sdf, params, blendK, grader, applyConstraints);
   }
 
   if (variant === 'shell_core') {
@@ -1025,30 +1111,26 @@ export function buildCombinedSDF(opts: LatticeSdfOptions): SdfFunction {
       const dObj = sdf(x, y, z);
       const shellSdf = Math.max(dObj, -(dObj + shellThickness));
       const coreSdf = -(dObj + shellThickness);
-      let lat = sampleLattice(x, y, z, dObj);
-      if (gradientEnabled) {
-        lat *= 1.0 - gradientStrength * Math.exp(-Math.max(0, -(dObj + shellThickness)) / (cellSize * 3));
-      }
+      const rawLat = sampleLattice(x, y, z, dObj);
+      const lat = grader ? grader(rawLat, dObj) : rawLat;
       const value = smoothMin(shellSdf, Math.max(-coreSdf, lat), blendK);
       return applyConstraints ? applyConstraints(value, x, y, z, dObj) : value;
     };
     return withEscapeHoles(
-      attachTpmsGridSampler(result, sdf, params, blendK, false, applyConstraints),
+      attachTpmsGridSampler(result, sdf, params, blendK, grader, applyConstraints),
       params,
       bvh.getBounds(),
     );
   } else {
     const result: SdfFunction = (x, y, z) => {
       const dObj = sdf(x, y, z);
-      let lat = sampleLattice(x, y, z, dObj);
-      if (gradientEnabled) {
-        lat *= 1.0 - gradientStrength * Math.exp(-Math.max(0, -dObj) / (cellSize * 3));
-      }
+      const rawLat = sampleLattice(x, y, z, dObj);
+      const lat = grader ? grader(rawLat, dObj) : rawLat;
       const shellSdf = Math.max(dObj, -(dObj + shellThickness));
       const value = smoothMin(shellSdf, Math.max(lat, dObj), blendK);
       return applyConstraints ? applyConstraints(value, x, y, z, dObj) : value;
     };
-    return attachTpmsGridSampler(result, sdf, params, blendK, false, applyConstraints);
+    return attachTpmsGridSampler(result, sdf, params, blendK, grader, applyConstraints);
   }
 }
 
@@ -1063,9 +1145,11 @@ export function buildAnalyticLattice(
   bounds: BoundingBox | null = null,
   generationSeed = DEFAULT_GENERATION_SEED,
 ): SdfFunction {
-  const { shellThickness, noShell, surfaceOnly, surfaceDepth, cellSize, wallThickness, strutDiameter, variant, latticeType, gradientEnabled, gradientStrength } = params;
+  const { shellThickness, noShell, surfaceOnly, surfaceDepth, cellSize, wallThickness, strutDiameter, variant, latticeType } = params;
   const blendK = Math.min(wallThickness, strutDiameter) * 0.3;
   const latticeFn = buildLatticeEvaluator(params, generationSeed);
+  // Analytic shapes grade from the inside of the shell whenever there is one.
+  const grader = buildLatticeGrader(params, !noShell && !surfaceOnly);
 
   const result: SdfFunction = (x, y, z) => {
     const dObj = objectSdf(x, y, z);
@@ -1075,10 +1159,7 @@ export function buildAnalyticLattice(
       const [u, v, w] = conformalCoords(objectSdf, x, y, z, dObj, cellSize);
       lat = latticeFn(u, v, w);
     }
-    if (gradientEnabled) {
-      const gd = (noShell || surfaceOnly) ? Math.max(0, -dObj) : Math.max(0, -(dObj + shellThickness));
-      lat *= 1.0 - gradientStrength * Math.exp(-gd / (cellSize * 3));
-    }
+    if (grader) lat = grader(lat, dObj);
 
     if (surfaceOnly) return Math.max(lat, Math.max(dObj, -(dObj + surfaceDepth)));
     if (noShell) return Math.max(lat, dObj);
@@ -1093,7 +1174,7 @@ export function buildAnalyticLattice(
   };
 
   return withEscapeHoles(
-    attachTpmsGridSampler(result, objectSdf, params, blendK, true),
+    attachTpmsGridSampler(result, objectSdf, params, blendK, grader),
     params,
     bounds,
   );
@@ -1105,7 +1186,7 @@ export function buildSphereLattice(
   generationSeed = DEFAULT_GENERATION_SEED,
 ): SdfFunction {
   return buildAnalyticLattice(
-    (x, y, z) => Math.sqrt(x*x + y*y + z*z) - radius,
+    sphereSdf(radius),
     params,
     { min: [-radius, -radius, -radius], max: [radius, radius, radius] },
     generationSeed,
@@ -1117,14 +1198,12 @@ export function buildCubeLattice(
   params: LatticeParams,
   generationSeed = DEFAULT_GENERATION_SEED,
 ): SdfFunction {
-  return buildAnalyticLattice((x, y, z) => {
-    const dx = Math.abs(x) - halfSize;
-    const dy = Math.abs(y) - halfSize;
-    const dz = Math.abs(z) - halfSize;
-    const outside = Math.sqrt(Math.max(dx,0)**2 + Math.max(dy,0)**2 + Math.max(dz,0)**2);
-    const inside = Math.min(Math.max(dx, dy, dz), 0);
-    return outside + inside;
-  }, params, { min: [-halfSize, -halfSize, -halfSize], max: [halfSize, halfSize, halfSize] }, generationSeed);
+  return buildAnalyticLattice(
+    cubeSdf(halfSize),
+    params,
+    { min: [-halfSize, -halfSize, -halfSize], max: [halfSize, halfSize, halfSize] },
+    generationSeed,
+  );
 }
 
 export function buildCylinderLattice(
@@ -1133,13 +1212,12 @@ export function buildCylinderLattice(
   params: LatticeParams,
   generationSeed = DEFAULT_GENERATION_SEED,
 ): SdfFunction {
-  return buildAnalyticLattice((x, y, z) => {
-    const dRadial = Math.sqrt(x*x + y*y) - radius;
-    const dAxial = Math.abs(z) - halfHeight;
-    const outside = Math.sqrt(Math.max(dRadial,0)**2 + Math.max(dAxial,0)**2);
-    const inside = Math.min(Math.max(dRadial, dAxial), 0);
-    return outside + inside;
-  }, params, { min: [-radius, -radius, -halfHeight], max: [radius, radius, halfHeight] }, generationSeed);
+  return buildAnalyticLattice(
+    cylinderSdf(radius, halfHeight),
+    params,
+    { min: [-radius, -radius, -halfHeight], max: [radius, radius, halfHeight] },
+    generationSeed,
+  );
 }
 
 export function buildTorusLattice(
@@ -1148,10 +1226,7 @@ export function buildTorusLattice(
   params: LatticeParams,
   generationSeed = DEFAULT_GENERATION_SEED,
 ): SdfFunction {
-  return buildAnalyticLattice((x, y, z) => {
-    const qx = Math.sqrt(x*x + y*y) - majorRadius;
-    return Math.sqrt(qx*qx + z*z) - tubeRadius;
-  }, params, {
+  return buildAnalyticLattice(torusSdf(majorRadius, tubeRadius), params, {
     min: [-(majorRadius + tubeRadius), -(majorRadius + tubeRadius), -tubeRadius],
     max: [majorRadius + tubeRadius, majorRadius + tubeRadius, tubeRadius],
   }, generationSeed);
@@ -1163,12 +1238,39 @@ export function buildCapsuleLattice(
   params: LatticeParams,
   generationSeed = DEFAULT_GENERATION_SEED,
 ): SdfFunction {
-  return buildAnalyticLattice((x, y, z) => {
-    // Clamp z to the cylinder body, then measure distance to that clamped point.
-    const cz = Math.max(-halfHeight, Math.min(halfHeight, z));
-    return Math.sqrt(x*x + y*y + (z - cz)*(z - cz)) - radius;
-  }, params, {
+  return buildAnalyticLattice(capsuleSdf(radius, halfHeight), params, {
     min: [-radius, -radius, -(halfHeight + radius)],
     max: [radius, radius, halfHeight + radius],
   }, generationSeed);
+}
+
+/**
+ * Lattice field for a built-in sample shape at its fixed dimensions
+ * (`SAMPLE_SHAPE_DIMENSIONS`). Generation, tile workers, parity fixtures and
+ * validation all build sample-shape fields through this one function.
+ */
+export function buildSampleShapeLattice(
+  shape: SampleShape,
+  sphereRadius: number,
+  params: LatticeParams,
+  generationSeed = DEFAULT_GENERATION_SEED,
+): SdfFunction {
+  switch (shape) {
+    case 'sphere':
+      return buildSphereLattice(sampleSphereRadius(sphereRadius), params, generationSeed);
+    case 'cube':
+      return buildCubeLattice(SAMPLE_SHAPE_DIMENSIONS.cube.halfSize, params, generationSeed);
+    case 'cylinder': {
+      const { radius, halfHeight } = SAMPLE_SHAPE_DIMENSIONS.cylinder;
+      return buildCylinderLattice(radius, halfHeight, params, generationSeed);
+    }
+    case 'torus': {
+      const { majorRadius, tubeRadius } = SAMPLE_SHAPE_DIMENSIONS.torus;
+      return buildTorusLattice(majorRadius, tubeRadius, params, generationSeed);
+    }
+    case 'capsule': {
+      const { radius, halfHeight } = SAMPLE_SHAPE_DIMENSIONS.capsule;
+      return buildCapsuleLattice(radius, halfHeight, params, generationSeed);
+    }
+  }
 }

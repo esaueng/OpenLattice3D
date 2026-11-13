@@ -1,5 +1,5 @@
 // 3D Viewer component using react-three-fiber
-import { useRef, useMemo, useCallback, useEffect, useState, type KeyboardEvent } from 'react';
+import { useRef, useMemo, useCallback, useEffect, useLayoutEffect, useState, type KeyboardEvent } from 'react';
 import { Canvas, useThree, useFrame, type RootState, type ThreeEvent } from '@react-three/fiber';
 import { Billboard, GizmoHelper, Line, OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
@@ -21,6 +21,7 @@ import {
   ThinFeatureMarkers,
   XRayView,
   SampleMeshView,
+  useRetainResultGeometries,
 } from './viewer/ViewerMeshViews';
 import { DemoGridView } from './viewer/DemoGridView';
 import {
@@ -28,6 +29,10 @@ import {
   prepareOrbitControlsForCameraReset,
   type ResettableOrbitControls,
 } from './viewer/orbit-controls-reset';
+import { BuildPlateGrid } from './viewer/BuildPlateGrid';
+import { buildPlateGridSpec, formatGridSpacing } from './viewer/build-plate-grid';
+import { resultHasClosedSkin } from './viewer/viewer-hints';
+import { UNADJUSTED_FRAMING, compactViewerFraming, type ViewerFraming } from './viewer/compact-framing';
 
 const VIEWPORT_PADDING = 1.2;
 const WORLD_UP = new THREE.Vector3(0, 0, 1);
@@ -37,6 +42,13 @@ const ISO_VIEW_UP = WORLD_UP.clone().projectOnPlane(ISO_VIEW_DIRECTION).normaliz
 const VIEWER_GIZMO_ALIGNMENT = 'bottom-right';
 const VIEWER_GIZMO_MARGIN: [number, number] = [112, 112];
 const VIEWER_GIZMO_SCALE = 40;
+// Narrow or short viewports (phones): a smaller cube in the top-right corner,
+// clear of the full-width toolbar at the bottom and of the centred part.
+const VIEWER_GIZMO_COMPACT_MAX_WIDTH = 600;
+const VIEWER_GIZMO_COMPACT_MAX_HEIGHT = 420;
+const VIEWER_GIZMO_COMPACT_ALIGNMENT = 'top-right';
+const VIEWER_GIZMO_COMPACT_MARGIN: [number, number] = [64, 68];
+const VIEWER_GIZMO_COMPACT_SCALE = 25;
 const VIEWER_AXIS_HEAD_RADIUS = 0.26;
 const VIEWER_AXIS_LABEL_BADGE_RADIUS = 0.18;
 const VIEWER_AXIS_LABEL_BADGE_COLOR = '#07111d';
@@ -52,7 +64,10 @@ const VIEWER_VIEW_CUBE_BODY_OPACITY = 1;
 const VIEWER_VIEW_CUBE_FACE_OPACITY = 0.62;
 const VIEWER_VIEW_CUBE_FACE_HOVER_OPACITY = 0.78;
 const VIEWER_VIEW_CUBE_EDGE_COLOR = '#8fb4d8';
-const VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE = 0.32;
+// Label plane height (the canvas pads around the glyphs), and the widest a
+// label may span across a face before it shrinks to fit.
+const VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE = 0.5;
+const VIEWER_VIEW_CUBE_FACE_LABEL_MAX_WIDTH = VIEWER_VIEW_CUBE_SIZE * 0.86;
 const VIEWER_VIEW_CUBE_CORNER_RADIUS = 0.082;
 const VIEWER_VIEW_CUBE_CORNER_HIT_RADIUS = 0.19;
 const VIEWER_VIEW_CUBE_FACE_VISIBILITY_THRESHOLD = 0;
@@ -65,7 +80,7 @@ type ViewCubeFaceLabel = 'Front' | 'Back' | 'Right' | 'Left' | 'Top' | 'Bottom';
 type GizmoViewTarget = '+x' | '+y' | '+z' | 'front' | 'right' | 'top' | 'iso';
 type ViewCubeFaceDirection = ViewCubeCornerDirection;
 
-function distanceToFitBoundingSphere(camera: THREE.Camera, radius: number): number {
+function distanceToFitBoundingSphere(camera: THREE.Camera, radius: number, framing: ViewerFraming = UNADJUSTED_FRAMING): number {
   if (!(camera instanceof THREE.PerspectiveCamera)) return radius * 4;
 
   const vFov = THREE.MathUtils.degToRad(camera.fov);
@@ -73,7 +88,70 @@ function distanceToFitBoundingSphere(camera: THREE.Camera, radius: number): numb
   const verticalDistance = radius / Math.sin(vFov / 2);
   const horizontalDistance = radius / Math.sin(hFov / 2);
 
-  return Math.max(verticalDistance, horizontalDistance) * VIEWPORT_PADDING;
+  return Math.max(verticalDistance, horizontalDistance) * VIEWPORT_PADDING * framing.distanceScale;
+}
+
+function isCompactViewer(size: { width: number; height: number }): boolean {
+  return size.width < VIEWER_GIZMO_COMPACT_MAX_WIDTH || size.height < VIEWER_GIZMO_COMPACT_MAX_HEIGHT;
+}
+
+// Farthest the gizmo reaches from its anchor in any orientation, in gizmo
+// units: the axis caps and the origin button sit LABEL_DISTANCE·√3/2 from the
+// content centre, plus the cap's own radius.
+const VIEWER_GIZMO_REACH = (VIEWER_GIZMO_LABEL_DISTANCE / 2) * Math.sqrt(3) + VIEWER_AXIS_HEAD_RADIUS;
+
+/**
+ * How a fitted model sits in this viewport. Wide viewers keep the plain
+ * centred fit; compact ones nudge it down-left (and, on very small viewers,
+ * back) so it stays clear of the corner view cube.
+ */
+function viewerFraming(size: { width: number; height: number }, camera: THREE.Camera): ViewerFraming {
+  if (!(camera instanceof THREE.PerspectiveCamera) || !isCompactViewer(size)) return UNADJUSTED_FRAMING;
+  return compactViewerFraming(size, {
+    fovDeg: camera.fov,
+    padding: VIEWPORT_PADDING,
+    gizmo: {
+      marginX: VIEWER_GIZMO_COMPACT_MARGIN[0],
+      marginY: VIEWER_GIZMO_COMPACT_MARGIN[1],
+      radiusPx: VIEWER_GIZMO_REACH * VIEWER_GIZMO_COMPACT_SCALE,
+    },
+    gapPx: 8,
+    edgePx: 8,
+  });
+}
+
+function useViewerFraming(): ViewerFraming {
+  const camera = useThree((state) => state.camera);
+  const width = useThree((state) => state.size.width);
+  const height = useThree((state) => state.size.height);
+  return useMemo(() => viewerFraming({ width, height }, camera), [camera, width, height]);
+}
+
+/**
+ * Shift the projection so a model at the orbit target appears at the framed
+ * centre. Orbit, zoom and picking all stay centred on the target; only where
+ * it lands on screen moves. Wide viewers clear the offset.
+ */
+function ViewerFramingOffset({ framing }: { framing: ViewerFraming }) {
+  const camera = useThree((state) => state.camera);
+  const width = useThree((state) => state.size.width);
+  const height = useThree((state) => state.size.height);
+
+  useLayoutEffect(() => {
+    if (!(camera instanceof THREE.PerspectiveCamera)) return;
+    if (framing.offsetX === 0 && framing.offsetY === 0) {
+      if (camera.view?.enabled) camera.clearViewOffset();
+      return;
+    }
+    // The sub-view moves opposite to where the content should appear.
+    camera.setViewOffset(width, height, -framing.offsetX, -framing.offsetY, width, height);
+  }, [camera, width, height, framing.offsetX, framing.offsetY]);
+
+  useEffect(() => () => {
+    if (camera instanceof THREE.PerspectiveCamera && camera.view?.enabled) camera.clearViewOffset();
+  }, [camera]);
+
+  return null;
 }
 
 function defaultViewerBounds(): THREE.Box3 {
@@ -230,8 +308,13 @@ function applyViewerCameraState(cameraState: ViewerCameraState, camera: THREE.Ca
   return finishOrbitControlsAfterCameraReset(resetSession, target);
 }
 
-function GizmoCameraReset({ view, signal }: { view: GizmoViewRequest | null; signal: number }) {
+function GizmoCameraReset({ view, signal, framing }: { view: GizmoViewRequest | null; signal: number; framing: ViewerFraming }) {
   const { camera, controls } = useThree();
+  // Read at reset time only: a resize must not replay the last view request.
+  const framingRef = useRef(framing);
+  useEffect(() => {
+    framingRef.current = framing;
+  }, [framing]);
   const store = useStore(useShallow((s) => ({
     originalMesh: s.originalMesh,
     sphereMode: s.sphereMode,
@@ -258,7 +341,7 @@ function GizmoCameraReset({ view, signal }: { view: GizmoViewRequest | null; sig
     const center = bounds.getCenter(new THREE.Vector3());
     const sphere = bounds.getBoundingSphere(new THREE.Sphere());
     const radius = Math.max(sphere.radius, 1);
-    const distance = distanceToFitBoundingSphere(camera, radius);
+    const distance = distanceToFitBoundingSphere(camera, radius, framingRef.current);
     const cameraView = cameraViewForRequest(view);
 
     camera.up.copy(cameraView.up);
@@ -296,11 +379,11 @@ function GizmoCameraReset({ view, signal }: { view: GizmoViewRequest | null; sig
   return null;
 }
 
-function CleanAxisGizmo({ onSelectView }: { onSelectView: (view: GizmoViewRequest) => void }) {
+function CleanAxisGizmo({ onSelectView, scale }: { onSelectView: (view: GizmoViewRequest) => void; scale: number }) {
   const layout = viewerGizmoLayout();
 
   return (
-    <group scale={VIEWER_GIZMO_SCALE}>
+    <group scale={scale}>
       <group position={layout.contentOffset}>
         <PositiveOctantViewCube onSelectView={onSelectView} />
         {GIZMO_AXES.map((axis) => (
@@ -588,15 +671,8 @@ function ViewCubeFace({
         <planeGeometry args={[VIEWER_VIEW_CUBE_SIZE * 0.82, VIEWER_VIEW_CUBE_SIZE * 0.82]} />
         <meshBasicMaterial color={hovered ? '#6da4c9' : '#31516b'} depthTest transparent opacity={hovered ? VIEWER_VIEW_CUBE_FACE_HOVER_OPACITY : VIEWER_VIEW_CUBE_FACE_OPACITY} depthWrite={false} toneMapped={false} />
       </mesh>
-      <group ref={labelRef} position={[0, 0, 0.075]} renderOrder={4}>
-        <GizmoTextLabel
-          color={hovered ? '#ffffff' : '#e4eef8'}
-          fontSize={VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE}
-          opacity={hovered ? 1 : 0.95}
-          depthTest
-        >
-          {label}
-        </GizmoTextLabel>
+      <group ref={labelRef}>
+        <ViewCubeFaceText text={label} color={hovered ? '#ffffff' : '#e4eef8'} opacity={hovered ? 1 : 0.95} />
       </group>
     </group>
   );
@@ -696,6 +772,51 @@ function IsoOriginButton({ onSelectView }: { onSelectView: (view: GizmoViewReque
   );
 }
 
+interface LabelTextureOptions {
+  text: string;
+  color: string;
+  fontSize: number;
+  fontWeight: number;
+  outlineColor: string;
+  outlineWidth: number;
+}
+
+const LABEL_FONT_PIXELS = 88;
+const LABEL_HORIZONTAL_PADDING = 24;
+const LABEL_CANVAS_HEIGHT = 128;
+
+/** Text drawn into a canvas texture; aspect is the texture's width over height. */
+function useLabelTexture({ text, color, fontSize, fontWeight, outlineColor, outlineWidth }: LabelTextureOptions) {
+  const texture = useMemo(() => {
+    const canvas = document.createElement('canvas');
+    const font = `${fontWeight} ${LABEL_FONT_PIXELS}px system-ui, -apple-system, BlinkMacSystemFont, sans-serif`;
+    const measuringContext = canvas.getContext('2d');
+    if (measuringContext) measuringContext.font = font;
+    const measuredWidth = measuringContext?.measureText(text).width ?? LABEL_FONT_PIXELS;
+    canvas.width = Math.max(128, Math.ceil(measuredWidth + LABEL_HORIZONTAL_PADDING * 2));
+    canvas.height = LABEL_CANVAS_HEIGHT;
+    const context = canvas.getContext('2d');
+    if (context) {
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      context.font = font;
+      context.textAlign = 'center';
+      context.textBaseline = 'middle';
+      context.lineJoin = 'round';
+      context.strokeStyle = outlineColor;
+      context.lineWidth = Math.max(2, (outlineWidth / Math.max(fontSize, 0.001)) * LABEL_FONT_PIXELS);
+      context.strokeText(text, canvas.width / 2, canvas.height / 2);
+      context.fillStyle = color;
+      context.fillText(text, canvas.width / 2, canvas.height / 2);
+    }
+    const nextTexture = new THREE.CanvasTexture(canvas);
+    nextTexture.colorSpace = THREE.SRGBColorSpace;
+    nextTexture.minFilter = THREE.LinearFilter;
+    return nextTexture;
+  }, [text, color, fontSize, fontWeight, outlineColor, outlineWidth]);
+  useEffect(() => () => texture.dispose(), [texture]);
+  return { texture, aspect: texture.image.width / texture.image.height };
+}
+
 function GizmoTextLabel({
   children,
   color,
@@ -717,43 +838,14 @@ function GizmoTextLabel({
   outlineWidth?: number;
   position?: [number, number, number];
 }) {
-  const texture = useMemo(() => {
-    const canvas = document.createElement('canvas');
-    const fontPixels = 88;
-    const horizontalPadding = 24;
-    const font = `${fontWeight} ${fontPixels}px system-ui, -apple-system, BlinkMacSystemFont, sans-serif`;
-    const measuringContext = canvas.getContext('2d');
-    if (measuringContext) measuringContext.font = font;
-    const measuredWidth = measuringContext?.measureText(children).width ?? fontPixels;
-    canvas.width = Math.max(128, Math.ceil(measuredWidth + horizontalPadding * 2));
-    canvas.height = 128;
-    const context = canvas.getContext('2d');
-    if (context) {
-      context.clearRect(0, 0, canvas.width, canvas.height);
-      context.font = font;
-      context.textAlign = 'center';
-      context.textBaseline = 'middle';
-      context.lineJoin = 'round';
-      context.strokeStyle = outlineColor;
-      context.lineWidth = Math.max(2, (outlineWidth / Math.max(fontSize, 0.001)) * fontPixels);
-      context.strokeText(children, canvas.width / 2, canvas.height / 2);
-      context.fillStyle = color;
-      context.fillText(children, canvas.width / 2, canvas.height / 2);
-    }
-    const nextTexture = new THREE.CanvasTexture(canvas);
-    nextTexture.colorSpace = THREE.SRGBColorSpace;
-    nextTexture.minFilter = THREE.LinearFilter;
-    return nextTexture;
-  }, [children, color, fontSize, fontWeight, outlineColor, outlineWidth]);
-  useEffect(() => () => texture.dispose(), [texture]);
-  const width = fontSize * (texture.image.width / texture.image.height);
+  const { texture, aspect } = useLabelTexture({ text: children, color, fontSize, fontWeight, outlineColor, outlineWidth });
 
   return (
     <sprite
       frustumCulled={false}
       position={position}
       renderOrder={5}
-      scale={[width, fontSize, 1]}
+      scale={[fontSize * aspect, fontSize, 1]}
     >
       <spriteMaterial
         map={texture}
@@ -767,12 +859,55 @@ function GizmoTextLabel({
   );
 }
 
+const noRaycast = () => {};
+
+/**
+ * A face label printed flat on its view-cube face. A camera-facing sprite
+ * poked into the opaque cube body whenever the face was oblique, and the depth
+ * test then cut letters off ("Let", "ront"); lying in the face plane it cannot.
+ * Long words shrink to fit inside the face.
+ */
+function ViewCubeFaceText({ text, color, opacity }: { text: string; color: string; opacity: number }) {
+  const { texture, aspect } = useLabelTexture({
+    text,
+    color,
+    fontSize: VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE,
+    fontWeight: 800,
+    outlineColor: '#07111d',
+    outlineWidth: 0.02,
+  });
+  const height = Math.min(
+    VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE,
+    VIEWER_VIEW_CUBE_FACE_LABEL_MAX_WIDTH / aspect,
+  );
+
+  return (
+    <mesh position={[0, 0, 0.004]} renderOrder={4} scale={[height * aspect, height, 1]} raycast={noRaycast}>
+      <planeGeometry args={[1, 1]} />
+      <meshBasicMaterial
+        map={texture}
+        transparent
+        opacity={opacity}
+        depthTest
+        depthWrite={false}
+        toneMapped={false}
+      />
+    </mesh>
+  );
+}
+
+// Scratch vectors for the per-frame face visibility test (six faces per frame).
+const viewCubeFaceNormalScratch = new THREE.Vector3();
+const viewCubeToCameraScratch = new THREE.Vector3();
+
 function shouldShowViewCubeFaceLabel(
   faceNormalWorld: THREE.Vector3,
   toCameraWorld: THREE.Vector3,
   threshold = VIEWER_VIEW_CUBE_FACE_VISIBILITY_THRESHOLD
 ) {
-  return faceNormalWorld.clone().normalize().dot(toCameraWorld.clone().normalize()) > threshold;
+  const normal = viewCubeFaceNormalScratch.copy(faceNormalWorld).normalize();
+  const toCamera = viewCubeToCameraScratch.copy(toCameraWorld).normalize();
+  return normal.dot(toCamera) > threshold;
 }
 
 type ViewportApi = { camera: THREE.Camera; controls: ResettableOrbitControls | null };
@@ -858,6 +993,67 @@ function applyViewportKeyboardAction(key: string, shiftKey: boolean, api: Viewpo
 
 
 /**
+ * The view cube, sized and placed for the viewport (smaller and top-right on
+ * phones). Reports the compact state so the DOM overlays can make room.
+ */
+function ResponsiveViewGizmo({
+  onSelectView,
+  onCompactChange,
+}: {
+  onSelectView: (view: GizmoViewRequest) => void;
+  onCompactChange: (compact: boolean) => void;
+}) {
+  const size = useThree((state) => state.size);
+  const compact = isCompactViewer(size);
+  useEffect(() => onCompactChange(compact), [compact, onCompactChange]);
+  return (
+    <GizmoHelper
+      alignment={compact ? VIEWER_GIZMO_COMPACT_ALIGNMENT : VIEWER_GIZMO_ALIGNMENT}
+      margin={compact ? VIEWER_GIZMO_COMPACT_MARGIN : VIEWER_GIZMO_MARGIN}
+    >
+      <CleanAxisGizmo onSelectView={onSelectView} scale={compact ? VIEWER_GIZMO_COMPACT_SCALE : VIEWER_GIZMO_SCALE} />
+    </GizmoHelper>
+  );
+}
+
+// Camera-space light directions (x right, y up, z toward the viewer). Lights
+// follow the camera, so curvature reads from every orbit angle the way a
+// studio key/fill/rim rig would, without shadows or extra passes.
+const KEY_LIGHT_DIRECTION = new THREE.Vector3(-0.55, 0.75, 0.7).normalize();
+const FILL_LIGHT_DIRECTION = new THREE.Vector3(0.85, -0.15, 0.5).normalize();
+const RIM_LIGHT_DIRECTION = new THREE.Vector3(0.25, 0.55, -1).normalize();
+
+function ViewerLighting() {
+  const camera = useThree((state) => state.camera);
+  const keyRef = useRef<THREE.DirectionalLight>(null);
+  const fillRef = useRef<THREE.DirectionalLight>(null);
+  const rimRef = useRef<THREE.DirectionalLight>(null);
+
+  // Directional lights shine from position toward their target (the origin by
+  // default); only the direction matters, so a unit offset is enough.
+  useFrame(() => {
+    const rig: Array<[THREE.DirectionalLight | null, THREE.Vector3]> = [
+      [keyRef.current, KEY_LIGHT_DIRECTION],
+      [fillRef.current, FILL_LIGHT_DIRECTION],
+      [rimRef.current, RIM_LIGHT_DIRECTION],
+    ];
+    for (const [light, direction] of rig) {
+      if (light) light.position.copy(direction).applyQuaternion(camera.quaternion);
+    }
+  });
+
+  return (
+    <>
+      {/* Sky above, ground below in the scene's Z-up frame. */}
+      <hemisphereLight args={['#dfe9f5', '#2a2622', 0.85]} position={[0, 0, 1]} />
+      <directionalLight ref={keyRef} intensity={2.1} />
+      <directionalLight ref={fillRef} intensity={0.55} />
+      <directionalLight ref={rimRef} intensity={1.1} />
+    </>
+  );
+}
+
+/**
  * Keep the drawing buffer in step with the viewer's box. R3F measures its own
  * wrapper, which has lagged a layout behind when the shell's grid row changed
  * (log drawer) or the Canvas remounted (leaving multiview), leaving a squashed
@@ -886,7 +1082,7 @@ function ViewportResizeSync() {
   return null;
 }
 
-function AutoFit() {
+function AutoFit({ framing }: { framing: ViewerFraming }) {
   const { camera, controls, size: canvasSize } = useThree();
   const store = useStore(useShallow((s) => ({
     originalMesh: s.originalMesh,
@@ -916,7 +1112,7 @@ function AutoFit() {
     const center = bounds.getCenter(new THREE.Vector3());
     const sphere = bounds.getBoundingSphere(new THREE.Sphere());
     const radius = Math.max(sphere.radius, 1);
-    const distance = distanceToFitBoundingSphere(camera, radius);
+    const distance = distanceToFitBoundingSphere(camera, radius, framing);
 
     camera.up.copy(ISO_VIEW_UP);
     camera.position.copy(center).add(ISO_VIEW_DIRECTION.clone().multiplyScalar(distance));
@@ -935,9 +1131,22 @@ function AutoFit() {
     controls,
     canvasSize.width,
     canvasSize.height,
+    framing,
   ]);
 
   return null;
+}
+
+/** Fitting and view-cube resets, framed for the viewport (see viewerFraming). */
+function FramedCamera({ view, signal }: { view: GizmoViewRequest | null; signal: number }) {
+  const framing = useViewerFraming();
+  return (
+    <>
+      <ViewerFramingOffset framing={framing} />
+      <AutoFit framing={framing} />
+      <GizmoCameraReset view={view} signal={signal} framing={framing} />
+    </>
+  );
 }
 
 function ViewerCameraSession() {
@@ -1053,7 +1262,7 @@ export function Viewer3D() {
     keepOutTris, keepInTris, selectionMode, resultMesh, brushRadius,
     paintTriangles, beginSelectionStroke, endSelectionStroke, viewerBackground, demoModeActive,
     demoRunId, params, generationSeed, demoParamsByType, setLatticeType, viewportResetSignal,
-    validation, showThinFeatures, pinnedRun, showPinnedRun,
+    validation, showThinFeatures, pinnedRun, showPinnedRun, showBuildPlateGrid, resultSnapshot, setViewMode,
   } = useStore(useShallow((s) => ({
     originalMesh: s.originalMesh,
     sphereMode: s.sphereMode,
@@ -1081,10 +1290,17 @@ export function Viewer3D() {
     showThinFeatures: s.showThinFeatures,
     pinnedRun: s.pinnedRun,
     showPinnedRun: s.showPinnedRun,
+    showBuildPlateGrid: s.showBuildPlateGrid,
+    resultSnapshot: s.resultSnapshot,
+    setViewMode: s.setViewMode,
   })));
   // The result views can show the pinned run instead of the current one.
-  const displayedResult = showPinnedRun && pinnedRun ? pinnedRun.resultMesh : resultMesh;
-  const displayedValidation = showPinnedRun && pinnedRun ? pinnedRun.validation : validation;
+  const shownPinnedRun = showPinnedRun ? pinnedRun : null;
+  const displayedResult = shownPinnedRun ? shownPinnedRun.resultMesh : resultMesh;
+  const displayedValidation = shownPinnedRun ? shownPinnedRun.validation : validation;
+  const displayedSnapshot = shownPinnedRun ? shownPinnedRun.snapshot : resultSnapshot;
+  // Cached display geometry survives only for the current and pinned results.
+  useRetainResultGeometries(resultMesh, pinnedRun?.resultMesh);
   const thinPoints = displayedValidation?.minThickness.thinPoints ?? [];
   const thinBounds = useMemo(() => (displayedResult ? resultBounds(displayedResult) : new THREE.Box3()), [displayedResult]);
   const [gizmoViewRequest, setGizmoViewRequest] = useState<{ view: GizmoViewRequest | null; signal: number }>({ view: null, signal: 0 });
@@ -1095,6 +1311,20 @@ export function Viewer3D() {
     if (sphereMode && sampleShape) return meshBounds(generateSampleMesh(sampleShape, sphereRadius));
     return new THREE.Box3();
   }, [originalMesh, sampleShape, sphereMode, sphereRadius]);
+  // The grid sits under whatever the viewer shows: the result in the result
+  // views, else the source model.
+  const gridSourceBounds = viewMode !== 'original' && displayedResult ? thinBounds : escapeHolePreviewBounds;
+  const gridSpec = useMemo(() => {
+    if (!showBuildPlateGrid || gridSourceBounds.isEmpty()) return null;
+    const { min, max } = gridSourceBounds;
+    return buildPlateGridSpec({ min: [min.x, min.y, min.z], max: [max.x, max.y, max.z] });
+  }, [gridSourceBounds, showBuildPlateGrid]);
+  const [skinHintDismissed, setSkinHintDismissed] = useState(false);
+  const [compactViewer, setCompactViewer] = useState(false);
+  const showSkinHint = viewMode === 'lattice'
+    && Boolean(displayedResult)
+    && !skinHintDismissed
+    && resultHasClosedSkin(displayedSnapshot?.params);
 
   const placingHoles = selectionMode === 'place_hole';
   const placeHole = useCallback((point: [number, number, number]) => {
@@ -1172,13 +1402,10 @@ export function Viewer3D() {
           watchContextLoss(state.gl.domElement);
         }}
       >
-        <ambientLight intensity={0.4} />
-        <directionalLight position={[50, 50, 50]} intensity={0.8} />
-        <directionalLight position={[-30, -20, 40]} intensity={0.3} />
+        <ViewerLighting />
 
         <ViewportResizeSync />
-        <AutoFit />
-        <GizmoCameraReset view={gizmoViewRequest.view} signal={gizmoViewRequest.signal} />
+        <FramedCamera view={gizmoViewRequest.view} signal={gizmoViewRequest.signal} />
 
         {viewMode === 'original' && originalMesh && (
           <OriginalMeshView
@@ -1204,6 +1431,7 @@ export function Viewer3D() {
           />
         )}
         {viewMode === 'original' && <EscapeHolePreview bounds={escapeHolePreviewBounds} params={params} />}
+        {gridSpec && <BuildPlateGrid spec={gridSpec} />}
 
         {viewMode === 'lattice' && displayedResult && <ResultMeshView result={displayedResult} />}
         {viewMode === 'cross_section' && displayedResult && <CrossSectionView result={displayedResult} clip={clipPlane} />}
@@ -1214,10 +1442,41 @@ export function Viewer3D() {
 
         <OrbitControls makeDefault enabled={!painting} target={[0, 0, 0]} />
         <ViewerCameraSession />
-        <GizmoHelper alignment={VIEWER_GIZMO_ALIGNMENT} margin={VIEWER_GIZMO_MARGIN}>
-          <CleanAxisGizmo onSelectView={requestView} />
-        </GizmoHelper>
+        <ResponsiveViewGizmo onSelectView={requestView} onCompactChange={setCompactViewer} />
       </Canvas>
+      </div>
+      {/* Wide viewers place these separately; compact ones stack them above the toolbar. */}
+      <div className={`viewer-overlay-dock${compactViewer ? ' is-compact' : ''}`}>
+      {gridSpec && (
+        <div className="viewer-scale-label">
+          <span className="viewer-scale-swatch" aria-hidden="true" />
+          Grid {formatGridSpacing(gridSpec.major)}
+          <span className="viewer-scale-minor">
+            <span className="visually-hidden"> squares, subdivided every </span>
+            <span aria-hidden="true">· </span>
+            {formatGridSpacing(gridSpec.minor)}
+          </span>
+        </div>
+      )}
+      {showSkinHint && (
+        <div className="viewer-skin-hint" role="note">
+          <span className="viewer-skin-hint-text">The skin hides the lattice. Use Cross-Section or X-Ray to see inside.</span>
+          <span className="viewer-skin-hint-text-short" aria-hidden="true">Skin hides the lattice</span>
+          <div className="viewer-skin-hint-actions">
+            <button type="button" className="btn btn-small" onClick={() => setViewMode('cross_section')}>Cross-Section</button>
+            <button type="button" className="btn btn-small" onClick={() => setViewMode('xray')}>X-Ray</button>
+            <button
+              type="button"
+              className="btn btn-small viewer-skin-hint-dismiss"
+              aria-label="Dismiss hint"
+              title="Dismiss hint"
+              onClick={() => setSkinHintDismissed(true)}
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      )}
       </div>
     </div>
   );

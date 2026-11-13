@@ -105,4 +105,22 @@ describe('shared model intake worker controller', () => {
       expect(worker.terminated).toBe(1);
     }
   });
+
+  it('accepts any mesh format for a mesh request, since content sniffing can override the extension', async () => {
+    const cube = generateCubeMesh(10);
+    const stl = prepareStl(exportBinarySTL(cube.positions, cube.normals, cube.triCount), 'cube.stl');
+    const meshRequest = { kind: '3mf' as const, file: { name: 'cube.3mf', size: 20 } as File };
+    for (const format of ['stl', '3mf', 'obj']) {
+      const worker = new FakeWorker();
+      const pending = new ModelIntakeController(() => worker).run(1, meshRequest);
+      worker.onmessage!({ data: { type: 'result', result: { ...stl, format } } });
+      expect(await pending).toMatchObject({ kind: 'mesh', format });
+    }
+    for (const malformed of [{ ...stl, format: 'step' }, result.result, { ...stl, kind: 'stl' }]) {
+      const worker = new FakeWorker();
+      const pending = new ModelIntakeController(() => worker).run(1, meshRequest);
+      worker.onmessage!({ data: { type: 'result', result: malformed } });
+      await expect(pending).rejects.toThrow('malformed');
+    }
+  });
 });

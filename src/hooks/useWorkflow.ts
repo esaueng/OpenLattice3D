@@ -4,6 +4,7 @@ import { useStore } from '../store/useStore';
 import { useResultStaleness } from '../store/useResultStaleness';
 import { modelExtents } from '../utils/model-summary';
 import { buildPreflight } from '../utils/preflight';
+import { actionableWarningCount } from '../utils/result-guidance';
 import type { WorkflowInputs } from '../components/workflow';
 
 export function useWorkflowInputs(): WorkflowInputs {
@@ -35,6 +36,7 @@ export function useWorkflowInputs(): WorkflowInputs {
     hasResult: Boolean(s.resultMesh),
     resultStale: staleness.stale,
     validationPassed: s.resultMesh && s.validation ? s.validation.passed : null,
+    validationWarnings: s.resultMesh && s.validation ? actionableWarningCount(s.validation) : 0,
     paintedFaces: s.keepOutCount + s.keepInCount,
     preflightBlocked,
   };

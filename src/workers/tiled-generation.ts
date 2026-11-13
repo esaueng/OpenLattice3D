@@ -1,5 +1,6 @@
 import { generationSampleCount, assertGenerationOutputBudget } from '../geometry/generation-limits';
 import type { MarchingCubesResult } from '../geometry/marching-cubes';
+import { sampleShapeObjectSdf } from '../geometry/sample-shapes';
 import type { Vec3 } from '../geometry/vec3';
 import type { LatticeParams, SampleShape } from '../types/project';
 import type {
@@ -36,39 +37,6 @@ export function terminateTileWorkers(): void {
 
 export function tileWorkerCount(): number {
   return Math.max(1, Math.min(MAX_TILE_WORKERS, (globalThis.navigator?.hardwareConcurrency || 4) - 1));
-}
-
-function objectSdfForShape(shape: SampleShape, sphereRadius: number): (x: number, y: number, z: number) => number {
-  switch (shape) {
-    case 'sphere': {
-      const radius = sphereRadius || 25;
-      return (x, y, z) => Math.sqrt(x * x + y * y + z * z) - radius;
-    }
-    case 'cube': {
-      const halfSize = 15;
-      return (x, y, z) => {
-        const dx = Math.abs(x) - halfSize;
-        const dy = Math.abs(y) - halfSize;
-        const dz = Math.abs(z) - halfSize;
-        const outside = Math.hypot(Math.max(dx, 0), Math.max(dy, 0), Math.max(dz, 0));
-        return outside + Math.min(Math.max(dx, dy, dz), 0);
-      };
-    }
-    case 'cylinder': {
-      return (x, y, z) => {
-        const radial = Math.hypot(x, y) - 15;
-        const axial = Math.abs(z) - 20;
-        return Math.hypot(Math.max(radial, 0), Math.max(axial, 0)) + Math.min(Math.max(radial, axial), 0);
-      };
-    }
-    case 'torus':
-      return (x, y, z) => Math.hypot(Math.hypot(x, y) - 20, z) - 8;
-    case 'capsule':
-      return (x, y, z) => {
-        const centerZ = Math.max(-15, Math.min(15, z));
-        return Math.hypot(x, y, z - centerZ) - 12;
-      };
-  }
 }
 
 function sparseSkipMargin(params: LatticeParams, tileBounds: { min: Vec3; max: Vec3 }): number {
@@ -134,7 +102,7 @@ function buildTileJobs(
   let tileId = 0;
   let tilesTotal = 0;
   let tilesSkipped = 0;
-  const objectSdf = objectSdfForShape(shape, sphereRadius);
+  const objectSdf = sampleShapeObjectSdf(shape, sphereRadius);
 
   for (let z = 0; z < resolution; z += TILE_SIZE) {
     const cellsZ = Math.min(TILE_SIZE, resolution - z);

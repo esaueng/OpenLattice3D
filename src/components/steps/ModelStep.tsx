@@ -4,6 +4,7 @@ import { useModelImport } from '../../hooks/useModelImport';
 import { describeMeshCondition, formatDimensions, formatVolume, modelExtents } from '../../utils/model-summary';
 import { PanelSection, StepPanel } from '../PanelChrome';
 import { FolderOpenIcon, UploadIcon } from '../icons';
+import { ConfirmButton } from '../ConfirmButton';
 import type { WorkflowInputs } from '../workflow';
 
 export function ModelStep({ inputs }: { inputs: WorkflowInputs }) {
@@ -22,22 +23,27 @@ export function ModelStep({ inputs }: { inputs: WorkflowInputs }) {
           <button
             type="button"
             className={`btn ${hasModel ? '' : 'btn-primary'}`}
-            title="Upload an STL mesh to generate a lattice from."
-            onClick={intake.pickStl}
+            aria-describedby="model-import-hint"
+            onClick={intake.pickModel}
           >
             <UploadIcon size={15} />
-            Import STL
+            Import model
           </button>
           <button
             type="button"
             className="btn"
-            title="Open a saved project, or apply a parameter-only JSON file."
+            aria-describedby="model-import-hint"
             onClick={intake.pickProject}
           >
             <FolderOpenIcon size={15} />
             Open project
           </button>
         </div>
+        <p className="field-hint" id="model-import-hint">
+          STL, 3MF or OBJ (3MF units are converted to millimetres; STL and OBJ are read as
+          millimetres), or a saved project (.json). You can also drop a file onto the page;
+          it is read on this device, never uploaded.
+        </p>
 
         {notice && (
           <div className={`import-notice level-${notice.level}`} role={notice.level === 'error' ? 'alert' : 'status'}>
@@ -88,17 +94,12 @@ export function ModelStep({ inputs }: { inputs: WorkflowInputs }) {
         <PanelSection
           title="This part"
           aside={(
-            <button
-              type="button"
-              className={`text-button text-button-danger${intake.clearAllArmed ? ' armed' : ''}`}
-              title={intake.clearAllArmed
-                ? 'Confirm reset of the project, parameters, and generated results.'
-                : 'Reset the project, parameters, and generated results.'}
-              aria-live="polite"
-              onClick={intake.reset}
-            >
-              {intake.clearAllArmed ? 'Confirm start over' : 'Start over'}
-            </button>
+            <ConfirmButton
+              action="Start over"
+              className="text-button text-button-danger"
+              title="Reset the project, parameters, and generated results."
+              onConfirm={intake.startOver}
+            />
           )}
         >
           <dl className="facts">
@@ -119,7 +120,7 @@ export function ModelStep({ inputs }: { inputs: WorkflowInputs }) {
           {meshCondition?.level === 'warn' && store.meshInfo && (
             <div className="warning">
               {meshCondition.message}
-              {!store.meshInfo.isWatertight && (
+              {store.meshInfo.boundaryEdges > 0 && (
                 <div style={{ marginTop: '6px' }}>
                   <button type="button" className="btn btn-tiny" onClick={intake.closeHoles} title="Fill each open boundary loop with triangles.">
                     Close holes

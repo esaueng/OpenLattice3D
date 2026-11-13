@@ -6,7 +6,7 @@ A browser-based tool for generating 3D-printable lattice structures inside arbit
 
 ## Main Features
 
-- Import binary or ASCII STL meshes, or start from a printable procedural sample shape.
+- Import binary or ASCII STL, 3MF (declared units converted to millimetres, components and build transforms applied), or OBJ meshes, or start from a printable procedural sample shape.
 - Generate twelve TPMS, strut, and stochastic lattice families with adjustable cell size, shell, feature, drainage-hole, and resolution parameters.
 - Keep work local: generation and validation run in browser Web Workers, and projects can be saved and restored as JSON.
 - Check printable-mesh properties including surface deviation, minimum thickness, manifoldness, watertightness, and connected components.
@@ -36,7 +36,13 @@ npm run lint       # ESLint
 npm run typecheck  # TypeScript project check
 npm test           # Vitest unit tests (geometry core)
 npm run build      # Typecheck + production build into dist/
+npm run test:e2e   # Playwright end-to-end and axe checks against the production build
 ```
+
+`npm run test:e2e` builds the app (without re-running unit tests), serves it
+with `vite preview` on `127.0.0.1:4180`, and drives Chromium with SwiftShader
+WebGL. Install the browser once with `npx playwright install chromium`, or point
+`PLAYWRIGHT_CHROMIUM_EXECUTABLE` at an existing Chromium build.
 
 `npm run dev` binds only to `127.0.0.1`. Use the generated `dist/` directory
 with `npm run preview` to inspect the production bundle locally.
@@ -46,7 +52,7 @@ with `npm run preview` to inspect the production bundle locally.
 Production is a static Cloudflare Workers site. Cloudflare serves the Vite
 bundle from `dist/`; the small Worker in `worker/index.ts` provides the
 uncached health responses used by uptime monitors and a strictly allowlisted optional analytics relay. The application has
-no configured application secrets. Optional Glimpse analytics have a rate-limit binding and two collection switches, both disabled by default; the collector service binding is deferred. See [analytics and rollout](docs/glimpse.md).
+no configured application secrets. Optional Glimpse analytics have a rate-limit binding and two collection switches (`GLIMPSE_BASIC_ENABLED`, `GLIMPSE_USAGE_ENABLED`). `wrangler.jsonc` sets both to `"true"` for production and binds the `GLIMPSE` collector service; branch previews set both to `"false"`. Optional browser usage events additionally require each browser's opt-in consent, which is off by default. See [analytics and rollout](docs/glimpse.md).
 
 ```bash
 npm ci
@@ -79,7 +85,11 @@ host, configure all of the following:
    request to `index.html`.
 
 The supplied `public/_headers` file configures the required cross-origin
-isolation headers on Cloudflare. Other hosts use their own equivalent header
+isolation headers on Cloudflare, plus a same-origin-only
+`Content-Security-Policy`, `X-Content-Type-Options: nosniff`,
+`Referrer-Policy: no-referrer`, and a restrictive `Permissions-Policy`.
+`npm run preview` sends the same set; the dev server omits only the CSP
+because Vite's hot reload injects inline code. Other hosts use their own equivalent header
 and rewrite configuration. Avoid third-party embedded assets unless they send
 headers compatible with the isolation policy described below.
 
@@ -114,10 +124,11 @@ less-used settings sit under **More options**. Generate is always available in t
 
 ### 1. Import a Model
 
-- **Import STL**: load any STL file (binary or ASCII). The model card shows its size,
-  volume, and how many lattice cells fit across the shortest side. STL carries no units, so
-  a part under 5 mm or over 1 m across gets a prompt to keep it as millimetres or convert
-  (from inches, ×10, ×0.1). Open or non-manifold meshes get their face normals recomputed
+- **Import a model**: load an STL (binary or ASCII), 3MF, or OBJ file, from the picker or
+  by dropping it onto the page. The model card shows its size, volume, and how many lattice
+  cells fit across the shortest side. 3MF files declare their unit, which is converted to
+  millimetres explicitly. STL and OBJ carry no units, so a part under 5 mm or over 1 m across
+  gets a prompt to keep it as millimetres or convert (from inches, ×10, ×0.1). Open or non-manifold meshes get their face normals recomputed
   and the card says so plainly; **Close holes** fills the boundary loops so the mesh can be
   used. Your lattice parameters survive a model change.
 - **Open project**: resume a versioned project with its parameters, embedded source mesh,
@@ -227,6 +238,8 @@ src/
     mesh-analysis.ts        # Watertight/manifold checks, repair, procedural meshes
     mesh-topology.ts        # Edge topology, manifold defects, connected components
     marching-cubes.ts       # Marching cubes iso-surface extraction
+    mesh-repair.ts          # Post-generation cleanup: closes marching-cubes cracks and tile seams
+    morphology.ts           # Thin-section opening on the sampled field before extraction
     lattice.ts              # Lattice SDFs + combined shell/core/surface builders
     validation.ts           # Deviation, thickness, manifold, connectivity checks
   workers/
@@ -234,7 +247,7 @@ src/
     lattice-tile-worker.ts  # One marching-cubes tile per message (CPU tiled backend)
     tiled-generation.ts     # Bounded worker fan-out, sparse skipping, deterministic merge
     generation-estimate.ts  # Resolution and memory estimates
-    mesh-cleanup.ts         # Post-generation fragment cleanup
+    progress-reporter.ts    # Throttled generation progress messages
     surface-sample-worker.ts# Poisson surface sampling for hex/tri surface lattices
     validation-worker.ts    # Post-generation validation
   components/

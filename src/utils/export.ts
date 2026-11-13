@@ -17,13 +17,28 @@ export interface MeshExportOptions {
   generationSeed?: number;
 }
 
+/**
+ * How long a download's object URL stays valid after the click. Browsers read
+ * the blob asynchronously; revoking in the same tick can cancel or truncate
+ * large downloads, so the URL is released well afterwards.
+ */
+export const DOWNLOAD_URL_REVOKE_DELAY_MS = 60_000;
+
 function saveBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
   anchor.download = filename;
-  anchor.click();
-  URL.revokeObjectURL(url);
+  anchor.rel = 'noopener';
+  anchor.style.display = 'none';
+  // Firefox ignores clicks on anchors that are not attached to the document.
+  document.body.appendChild(anchor);
+  try {
+    anchor.click();
+  } finally {
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), DOWNLOAD_URL_REVOKE_DELAY_MS);
+  }
 }
 
 function prepareMesh(

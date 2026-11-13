@@ -56,10 +56,11 @@ Node 22 and npm 10+; install with `npm ci` (lockfile-pinned).
 ```bash
 npm run dev        # Vite dev server on http://127.0.0.1:5176 (localhost only)
 npm run lint       # ESLint (flat config)
-npm run typecheck  # tsc -b (app + node + test projects)
+npm run typecheck  # tsc -b (app + node + test + e2e projects)
 npm test           # Vitest, node environment, 60s testTimeout
 npm run build      # prebuild runs npm test, then tsc -b && vite build
 npm run preview    # serve the production dist/ locally
+npm run test:e2e   # Playwright + axe against vite preview on 127.0.0.1:4180 (builds first, skips unit tests)
 ```
 
 `npm run deploy` (wrangler) requires authorization; an explicit deploy request is sufficient:
@@ -85,8 +86,9 @@ and the smoke workflow is disabled by default (see
   computational geometry out of components.
 - `src/store/useStore.ts` — Zustand global state; browser persistence is
   limited to parameters and viewer preferences.
-- `worker/index.ts` — tiny production Worker serving `/health` and `/healthz`; static
-  assets come from `dist/`.
+- `worker/index.ts` — tiny production Worker serving `/health` and `/healthz`
+  plus the allowlisted opt-in analytics relay (`worker/glimpse.ts`,
+  `docs/glimpse.md`); static assets come from `dist/`.
 
 ## Geometry invariants
 
@@ -109,11 +111,14 @@ and the smoke workflow is disabled by default (see
   `pre*` hooks.
 - Tests are colocated `*.test.ts` plus `src/**/__tests__/`; geometry tests run
   marching cubes at production resolutions, hence the 60s timeout.
+- Playwright specs live in `e2e/*.spec.ts` (Vitest excludes them). Prefer
+  role/text locators; `e2e/a11y.spec.ts` fails on serious/critical axe findings
+  except the exact rule+selector pairs in its `KNOWN_ISSUES` list.
 - Dev, preview, and production all send COOP/COEP isolation headers; third-
   party embeds that cannot opt in must stay external links.
 - `ci.yml` must pin `fleet-ci.yml` to a commit main already contains. Change
   `fleet-ci.yml` in one PR, then re-pin `ci.yml` to its squash commit in a
   second; a pin to a PR branch commit breaks every CI run once GitHub deletes
   that branch at merge. `scripts/test-direct-fleet.py` fails such a pin.
-- Models never leave the browser. Do not add telemetry, upload endpoints, or
-  third-party model handling.
+- Models never leave the browser. Do not add upload endpoints or third-party
+  model handling.

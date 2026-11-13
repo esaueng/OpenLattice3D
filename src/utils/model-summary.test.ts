@@ -8,6 +8,7 @@ import {
   formatVolume,
   latticeCellCount,
   modelExtents,
+  volumeParts,
 } from './model-summary';
 
 describe('lattice cell count', () => {
@@ -35,6 +36,16 @@ describe('model summary', () => {
     expect(extents.volumeMm3).toBeCloseTo(27_000, 3);
     expect(formatDimensions(extents.size)).toBe('30.0 × 30.0 × 30.0 mm');
     expect(formatVolume(extents.volumeMm3)).toBe('27.00 cm³');
+  });
+
+  it('formats every volume with one rule: cm³ from 1000 mm³, grouped thousands', () => {
+    expect(volumeParts(29_970.8)).toEqual({ value: '29.97', unit: 'cm³' });
+    expect(volumeParts(1_234_567)).toEqual({ value: '1,234.57', unit: 'cm³' });
+    expect(volumeParts(999.94)).toEqual({ value: '999.9', unit: 'mm³' });
+    expect(volumeParts(1000)).toEqual({ value: '1.00', unit: 'cm³' });
+    expect(volumeParts(4.5)).toEqual({ value: '4.50', unit: 'mm³' });
+    expect(formatVolume(65_449.85)).toBe('65.45 cm³');
+    expect(formatVolume(null)).toBe('unknown (mesh is open)');
   });
 
   it('knows the analytic size of every sample part', () => {
@@ -70,5 +81,14 @@ describe('model summary', () => {
     expect(condition.message).toContain('Normals recomputed');
     expect(condition.message).toContain('still open (8 boundary edges)');
     expect(condition.message).not.toContain('repaired');
+  });
+
+  it('does not call a closed non-manifold mesh open', () => {
+    const closed = analyzeMesh(generateCubeMesh(10));
+    const finned = { ...closed, isWatertight: false, isManifold: false, nonManifoldEdges: 3 };
+    const condition = describeMeshCondition(finned);
+    expect(condition.level).toBe('warn');
+    expect(condition.message).toContain('3 non-manifold edges');
+    expect(condition.message).not.toContain('open');
   });
 });

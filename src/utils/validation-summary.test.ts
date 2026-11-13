@@ -40,6 +40,32 @@ describe('summarizeValidation', () => {
     expect(s.failedCount).toBe(0);
   });
 
+  it('qualifies a pass that carries an actionable warning', () => {
+    const v = { ...makeValidation(), warnings: ['1 enclosed void network and no escape holes: trapped powder/resin likely'] };
+    const s = summarizeValidation(v, true, false);
+    expect(s.tone).toBe('warn');
+    expect(s.label).toBe('Checks: passed, 1 warning');
+    expect(s.warningCount).toBe(1);
+    expect(s.failedCount).toBe(0);
+  });
+
+  it('keeps an unqualified pass when the only notes are informational', () => {
+    const v = { ...makeValidation(), warnings: ['2 zero-volume slivers (negligible, but present in the export)'] };
+    expect(summarizeValidation(v, true, false).tone).toBe('pass');
+  });
+
+  it('classifies a coded warning by its code', () => {
+    const trapped = { ...makeValidation(), warnings: ['Sealed pockets'], warningDetails: [{ code: 'trapped-voids' as const, message: 'Sealed pockets' }] };
+    expect(summarizeValidation(trapped, true, false)).toMatchObject({ tone: 'warn', warningCount: 1 });
+    const sliver = { ...makeValidation(), warnings: ['trapped?'], warningDetails: [{ code: 'zero-volume-slivers' as const, message: 'trapped?' }] };
+    expect(summarizeValidation(sliver, true, false)).toMatchObject({ tone: 'pass', warningCount: 0 });
+  });
+
+  it('lets failures outrank warnings', () => {
+    const v = { ...makeValidation({ connected: false }), warnings: ['1 enclosed void network and no escape holes: trapped powder/resin likely'] };
+    expect(summarizeValidation(v, true, false)).toMatchObject({ tone: 'fail', warningCount: 0 });
+  });
+
   it('counts and names every failing check', () => {
     const s = summarizeValidation(
       makeValidation({ thickness: false, manifold: false, connected: false }),

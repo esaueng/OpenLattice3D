@@ -8,6 +8,7 @@ import {
   countNormalWindingAgreement,
   flipMeshOrientation,
   generateCubeMesh,
+  generateSphereMesh,
 } from './mesh-analysis';
 import { parseSTL } from './stl-parser';
 
@@ -38,6 +39,33 @@ describe('imported STL orientation guards', () => {
   });
 });
 
+describe('generateSphereMesh', () => {
+  it('winds every face outward, in agreement with its stored normals', () => {
+    const radius = 25;
+    const sphere = generateSphereMesh(radius, 32);
+    const info = analyzeMesh(sphere);
+    expect(info.isWatertight).toBe(true);
+    // Positive signed volume close to the analytic 4/3 pi r^3 (tessellation loses a little).
+    const analytic = (4 / 3) * Math.PI * radius ** 3;
+    const signedVolume = computeSignedVolume(sphere);
+    expect(signedVolume).toBeGreaterThan(analytic * 0.98);
+    expect(signedVolume).toBeLessThan(analytic);
+    const agreement = countNormalWindingAgreement(sphere);
+    expect(agreement.disagree).toBe(0);
+    expect(agreement.agree).toBe(sphere.triCount);
+    // Each face's winding normal points away from the centre.
+    const p = sphere.positions;
+    for (let t = 0; t < sphere.triCount; t++) {
+      const o = t * 9;
+      const ux = p[o + 3] - p[o], uy = p[o + 4] - p[o + 1], uz = p[o + 5] - p[o + 2];
+      const vx = p[o + 6] - p[o], vy = p[o + 7] - p[o + 1], vz = p[o + 8] - p[o + 2];
+      const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+      const cx = p[o] + p[o + 3] + p[o + 6], cy = p[o + 1] + p[o + 4] + p[o + 7], cz = p[o + 2] + p[o + 5] + p[o + 8];
+      expect(nx * cx + ny * cy + nz * cz).toBeGreaterThan(0);
+    }
+  });
+});
+
 describe('analyzeMesh condition report', () => {
   it('reports the enclosed volume of a closed mesh and no edge defects', () => {
     const info = analyzeMesh(generateCubeMesh(30));
@@ -57,6 +85,41 @@ describe('analyzeMesh condition report', () => {
     const info = analyzeMesh(open);
     expect(info.isWatertight).toBe(false);
     expect(info.boundaryEdges).toBe(4);
+    expect(info.volumeMm3).toBeNull();
+  });
+
+  it('treats edges shared by three or more triangles as not watertight', () => {
+    // Three triangles fanning out from the shared edge (0,0,0)-(0,0,10).
+    const positions = new Float32Array([
+      0, 0, 0, 10, 0, 0, 0, 0, 10,
+      0, 0, 0, 0, 10, 0, 0, 0, 10,
+      0, 0, 0, -10, -10, 0, 0, 0, 10,
+    ]);
+    const fin = { positions, normals: new Float32Array(9), triCount: 3 };
+    const info = analyzeMesh(fin);
+    expect(info.nonManifoldEdges).toBe(1);
+    expect(info.boundaryEdges).toBe(6);
+    expect(info.isManifold).toBe(false);
+    expect(info.isWatertight).toBe(false);
+    expect(info.volumeMm3).toBeNull();
+  });
+
+  it('rejects a closed mesh with an extra fin sharing one of its edges', () => {
+    const cube = generateCubeMesh(30);
+    // Duplicate one triangle with reversed winding: every one of its edges is
+    // now shared by three triangles, and no edge is open.
+    const o = 0;
+    const tri = cube.positions.slice(o, o + 9);
+    const reversed = new Float32Array([tri[0], tri[1], tri[2], tri[6], tri[7], tri[8], tri[3], tri[4], tri[5]]);
+    const positions = new Float32Array(cube.positions.length + 9);
+    positions.set(cube.positions);
+    positions.set(reversed, cube.positions.length);
+    const normals = new Float32Array(cube.normals.length + 3);
+    normals.set(cube.normals);
+    const info = analyzeMesh({ positions, normals, triCount: cube.triCount + 1 });
+    expect(info.boundaryEdges).toBe(0);
+    expect(info.nonManifoldEdges).toBe(3);
+    expect(info.isWatertight).toBe(false);
     expect(info.volumeMm3).toBeNull();
   });
 });

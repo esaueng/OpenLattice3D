@@ -27,6 +27,12 @@ describe('import byte budgets', () => {
       maxTriangles: 5_000_000,
       maxEmbeddedStlBytes: 128 * 1024 * 1024,
       maxProjectBytes: 256 * 1024 * 1024,
+      maxVertices: 15_000_000,
+      maxThreeMfBytes: 128 * 1024 * 1024,
+      maxThreeMfUncompressedBytes: 256 * 1024 * 1024,
+      maxZipEntries: 4096,
+      maxComponentInstances: 100_000,
+      maxObjBytes: 256 * 1024 * 1024,
     });
   });
 

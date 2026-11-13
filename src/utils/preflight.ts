@@ -9,7 +9,17 @@ export interface PreflightWarning {
   /** 'block' means the run is very unlikely to produce a usable lattice. */
   level: 'warn' | 'block';
   message: string;
+  /** A one-click parameter change that clears this warning, when one exists. */
+  fix?: PreflightFix;
 }
+
+export interface PreflightFix {
+  label: string;
+  params: Partial<LatticeParams>;
+}
+
+export const MIN_RESOLUTION_LEVEL = 1;
+export const MAX_RESOLUTION_LEVEL = 10;
 
 export interface Preflight {
   /** Samples per axis of the marching-cubes grid. */
@@ -26,6 +36,40 @@ export function gridForResolution(exportResolution: number): number {
   return Math.round(24 + exportResolution * 24);
 }
 
+/** Longest span the sampling grid covers, in mm: the part plus half a cell of padding each side. */
+export function sampledSpanMm(params: Pick<LatticeParams, 'cellSize'>, extents: ModelExtents | null): number {
+  return extents ? Math.max(...extents.size) + params.cellSize : 50;
+}
+
+/**
+ * Lowest resolution level whose voxels are no larger than maxVoxelMm over this
+ * span, or null when even the finest level is too coarse.
+ */
+export function minimumResolutionForVoxel(spanMm: number, maxVoxelMm: number): number | null {
+  if (!(spanMm > 0) || !(maxVoxelMm > 0)) return null;
+  for (let level = MIN_RESOLUTION_LEVEL; level <= MAX_RESOLUTION_LEVEL; level++) {
+    if (spanMm / gridForResolution(level) <= maxVoxelMm) return level;
+  }
+  return null;
+}
+
+/** The wall or strut that must span two voxels, by lattice family. */
+export function resolvedFeature(params: LatticeParams): { label: string; sizeMm: number } {
+  return isSheetType(params.latticeType)
+    ? { label: 'Wall thickness', sizeMm: params.wallThickness }
+    : { label: 'Strut diameter', sizeMm: params.strutDiameter };
+}
+
+/** Lowest level that puts two voxels across the wall or strut, or null when none does. */
+export function minimumResolutionForFeature(params: LatticeParams, extents: ModelExtents | null): number | null {
+  return minimumResolutionForVoxel(sampledSpanMm(params, extents), resolvedFeature(params).sizeMm / 2);
+}
+
+function raiseResolutionFix(level: number | null, current: number): PreflightFix | undefined {
+  if (level === null || level <= current) return undefined;
+  return { label: `Raise resolution to ${level}`, params: { exportResolution: level } };
+}
+
 // Triangle count scales with the sampled surface, roughly grid². The constant
 // comes from measured runs: 434k tris at 96³ and 2.9M at 264³ on the samples.
 const TRIANGLES_PER_GRID_CELL_FACE = 44;
@@ -38,7 +82,7 @@ export function buildPreflight(
   meshInfo: MeshInfo | null,
 ): Preflight {
   const grid = gridForResolution(params.exportResolution);
-  const maxSpan = extents ? Math.max(...extents.size) + params.cellSize : 50;
+  const maxSpan = sampledSpanMm(params, extents);
   const voxelMm = maxSpan / grid;
   const timings = estimateGenerationTimings(params, grid, Boolean(meshInfo));
   const estimatedTriangles = Math.round(TRIANGLES_PER_GRID_CELL_FACE * grid * grid);
@@ -50,7 +94,9 @@ export function buildPreflight(
   if (meshInfo && !meshInfo.isWatertight) {
     warnings.push({
       level: 'block',
-      message: `The mesh is open (${meshInfo.boundaryEdges.toLocaleString()} boundary edges); inside and outside are undefined. Close the holes first.`,
+      message: meshInfo.boundaryEdges > 0
+        ? `The mesh is open (${meshInfo.boundaryEdges.toLocaleString()} boundary edges); inside and outside are undefined. Close the holes first.`
+        : `The mesh has ${meshInfo.nonManifoldEdges.toLocaleString()} non-manifold edges (shared by three or more triangles); inside and outside are undefined. Repair it in a mesh editor first.`,
     });
   }
   if (extents) {
@@ -79,18 +125,19 @@ export function buildPreflight(
       });
     }
   }
-  const feature = isSheetType(params.latticeType) ? params.wallThickness : params.strutDiameter;
-  const featureLabel = isSheetType(params.latticeType) ? 'Wall thickness' : 'Strut diameter';
+  const { label: featureLabel, sizeMm: feature } = resolvedFeature(params);
   if (feature < voxelMm * 2) {
     warnings.push({
       level: 'warn',
       message: `${featureLabel} ${feature.toFixed(2)} mm is under two ${voxelMm.toFixed(2)} mm voxels; raise the resolution or thicken it for reliable geometry.`,
+      fix: raiseResolutionFix(minimumResolutionForVoxel(maxSpan, feature / 2), params.exportResolution),
     });
   }
   if (params.thinSectionFilter > 0 && params.thinSectionFilter / 2 < voxelMm) {
     warnings.push({
       level: 'warn',
-      message: `Remove Features under ${params.thinSectionFilter} mm cannot be resolved at ${voxelMm.toFixed(2)} mm voxels and will be skipped.`,
+      message: `Thin-feature removal under ${params.thinSectionFilter} mm cannot be resolved at ${voxelMm.toFixed(2)} mm voxels and will be skipped.`,
+      fix: raiseResolutionFix(minimumResolutionForVoxel(maxSpan, params.thinSectionFilter / 2), params.exportResolution),
     });
   }
   if (estimatedTriangles > 2_000_000) {

@@ -1,21 +1,5 @@
-import {
-  trackExportLatency,
-  trackFailure,
-  trackFeature,
-  trackProjectSize,
-  trackUsage,
-} from '../analytics';
-import { useState } from 'react';
-import { useShallow } from 'zustand/react/shallow';
-import { useStore } from '../store/useStore';
-import { summarizeValidation } from '../utils/validation-summary';
-import { useResultStaleness } from '../store/useResultStaleness';
-import {
-  download3MF,
-  downloadOBJ,
-  downloadProjectJSON,
-  downloadSTL,
-} from '../utils/export';
+import { useResultExport, type ResultExport } from '../hooks/useResultExport';
+import { DownloadIcon } from './icons';
 
 const SIMPLIFY_LEVELS = [
   { ratio: 1, label: 'Full detail' },
@@ -26,104 +10,52 @@ const SIMPLIFY_LEVELS = [
 ];
 
 export function ExportControls() {
-  const {
-    validation,
-    resultMesh,
-    resultSnapshot,
-    params,
-    meshFileName,
-    keepOutTris,
-    keepInTris,
-    originalMesh,
-    sampleShape,
-    sphereRadius,
-    clipPlane,
-    viewerBackground,
-    generationSeed,
-    generating,
-  } = useStore(useShallow((s) => ({
-    validation: s.validation,
-    resultMesh: s.resultMesh,
-    resultSnapshot: s.resultSnapshot,
-    params: s.params,
-    meshFileName: s.meshFileName,
-    keepOutTris: s.keepOutTris,
-    keepInTris: s.keepInTris,
-    originalMesh: s.originalMesh,
-    sampleShape: s.sampleShape,
-    sphereRadius: s.sphereRadius,
-    clipPlane: s.clipPlane,
-    viewerBackground: s.viewerBackground,
-    generationSeed: s.generationSeed,
-    generating: s.generating,
-  })));
-  const staleness = useResultStaleness();
-  const [simplifyRatio, setSimplifyRatio] = useState(1);
-  const [busyFormat, setBusyFormat] = useState<'3MF' | 'STL' | 'OBJ' | null>(null);
-  const busy = busyFormat !== null;
-  const meshParams = resultSnapshot?.params ?? params;
-  const meshSeed = resultSnapshot?.generationSeed ?? generationSeed;
+  return <ExportControlsView exporter={useResultExport()} />;
+}
 
-  const source = originalMesh
-    ? { kind: 'mesh' as const, fileName: meshFileName, mesh: originalMesh }
-    : sampleShape
-      ? { kind: 'sample' as const, fileName: meshFileName, shape: sampleShape, sphereRadius }
-      : null;
-  if (!source) return null;
-
-  const baseName = meshFileName.replace(/\.[^.]+$/i, '') || 'lattice';
-  const meshOptions = {
-    simplifyRatio,
-    maxError: meshParams.toleranceMm,
-    generationSeed: meshSeed,
-  };
-  const estimatedTriangles = resultMesh ? Math.round(resultMesh.triCount * simplifyRatio) : 0;
-  // Never blocks the export -- wanting the mesh anyway is legitimate -- but the
-  // risk must not be silent on a print-preparation tool.
-  const checks = summarizeValidation(validation, Boolean(resultMesh), false, staleness.stale);
-  const checksFailed = checks.tone === 'fail' || (checks.tone === 'stale' && checks.failedCount > 0);
-  const previousResult = staleness.stale || generating;
-  const caution = checksFailed || previousResult;
-  const meshLabel = (format: string) => (
-    checksFailed ? `Export ${format} anyway` : previousResult ? `Export previous ${format}` : `Export ${format}`
+/** The Results footer's primary action: the default 3MF export, with the same caution wording. */
+export function ExportPrimaryButton({ exporter }: { exporter: ResultExport }) {
+  const { resultMesh, source, busy, busyFormat, caution, meshLabel, exportMesh } = exporter;
+  if (!resultMesh || !source) return <span />;
+  const label = busyFormat === '3MF' ? 'Working...' : meshLabel('3MF');
+  return (
+    <button
+      type="button"
+      className={`btn ${caution ? 'btn-caution' : 'btn-primary'} workflow-nav-next export-primary`}
+      disabled={busy}
+      aria-describedby={caution ? 'export-validation-note' : undefined}
+      title={`${label}: a 3MF package with millimetre units and indexed vertices, at the detail chosen under Export.`}
+      onClick={() => exportMesh('3MF')}
+    >
+      <span className="workflow-nav-label"><DownloadIcon size={14} /><span className="export-primary-text">{label}</span></span>
+    </button>
   );
-  const saveProject = () => {
-    const started = performance.now();
-    try {
-      const bytes = downloadProjectJSON({ params, generationSeed, source, keepOutTris, keepInTris, validation, clipPlane, viewerBackground });
-      const elapsedMs = performance.now() - started;
-      trackUsage('export_completed');
-      trackUsage('operation_latency', elapsedMs);
-      trackExportLatency(elapsedMs);
-      trackProjectSize(bytes);
-      trackFeature('export');
-    } catch (error) {
-      trackUsage('export_failed');
-      trackFailure('error_export', error);
-      useStore.getState().addLog('Project export failed. Try again or free browser memory.', 'error');
-    }
-  };
-  const runExport = async (format: '3MF' | 'STL' | 'OBJ', task: () => void) => {
-    setBusyFormat(format);
-    const started = performance.now();
-    try {
-      // Paint the busy state before synchronous decimation starts.
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      task();
-      const elapsedMs = performance.now() - started;
-      trackUsage('export_completed');
-      trackUsage('operation_latency', elapsedMs);
-      trackExportLatency(elapsedMs);
-      trackFeature('export');
-    } catch (error) {
-      trackUsage('export_failed');
-      trackFailure('error_export', error);
-      // Event handlers have no caller to catch a rejected promise.
-      useStore.getState().addLog('Mesh export failed; try a lower detail setting.', 'error');
-    } finally {
-      setBusyFormat(null);
-    }
-  };
+}
+
+/**
+ * The Export section. With footerPrimary the 3MF button steps down to a
+ * secondary style because the footer carries the same action.
+ */
+export function ExportControlsView({ exporter, footerPrimary = false }: { exporter: ResultExport; footerPrimary?: boolean }) {
+  const {
+    source,
+    resultMesh,
+    generating,
+    staleness,
+    simplifyRatio,
+    setSimplifyRatio,
+    busyFormat,
+    busy,
+    meshParams,
+    estimatedTriangles,
+    checks,
+    checksFailed,
+    caution,
+    meshLabel,
+    exportMesh,
+    saveProject,
+  } = exporter;
+  if (!source) return null;
 
   return (
     <section className="panel-block export-section" aria-label="Export">
@@ -165,15 +97,11 @@ export function ExportControls() {
         {resultMesh && (
           <>
             <button
-              className={`btn btn-small ${caution ? 'btn-caution' : 'btn-primary'}`}
+              className={`btn btn-small ${caution ? 'btn-caution' : footerPrimary ? '' : 'btn-primary'}`}
               disabled={busy}
               aria-describedby={caution ? 'export-validation-note' : undefined}
               title="Download a 3MF package with millimetre units and indexed vertices."
-              onClick={() => void runExport('3MF', () => download3MF(
-                resultMesh,
-                `${baseName}-lattice.3mf`,
-                meshOptions,
-              ))}
+              onClick={() => exportMesh('3MF')}
             >
               {busyFormat === '3MF' ? 'Working...' : meshLabel('3MF')}
             </button>
@@ -182,11 +110,7 @@ export function ExportControls() {
               disabled={busy}
               aria-describedby={caution ? 'export-validation-note' : undefined}
               title="Download as STL. This format does not declare its units."
-              onClick={() => void runExport('STL', () => downloadSTL(
-                resultMesh,
-                `${baseName}-lattice.stl`,
-                meshOptions,
-              ))}
+              onClick={() => exportMesh('STL')}
             >
               {busyFormat === 'STL' ? 'Working...' : meshLabel('STL')}
             </button>
@@ -195,12 +119,7 @@ export function ExportControls() {
               disabled={busy}
               aria-describedby={caution ? 'export-validation-note' : undefined}
               title="Download as Wavefront OBJ. Indexed, but the format does not declare its units."
-              onClick={() => void runExport('OBJ', () => downloadOBJ(
-                resultMesh,
-                { meshFileName, params: meshParams },
-                `${baseName}-lattice.obj`,
-                meshOptions,
-              ))}
+              onClick={() => exportMesh('OBJ')}
             >
               {busyFormat === 'OBJ' ? 'Working...' : meshLabel('OBJ')}
             </button>
