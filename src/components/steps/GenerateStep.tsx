@@ -1,7 +1,13 @@
 import { useStore } from '../../store/useStore';
 import { formatGenerationSeed } from '../../geometry/deterministic-random';
 import { modelExtents } from '../../utils/model-summary';
-import { buildPreflight, formatPreflight } from '../../utils/preflight';
+import { buildPreflight, formatPreflight, gridForResolution } from '../../utils/preflight';
+import {
+  expectedGenerationPath,
+  fullFieldRequirement,
+  MAX_EXPORT_RESOLUTION_LEVEL,
+  maxResolutionLevel,
+} from '../../geometry/generation-limits';
 import { describeGenerationProgress } from '../../utils/generation-progress';
 import { useResultStaleness } from '../../store/useResultStaleness';
 import { useModelImport } from '../../hooks/useModelImport';
@@ -12,6 +18,13 @@ import { PlayIcon } from '../icons';
 import type { WorkflowInputs } from '../workflow';
 
 const RESOLUTION_LABELS = ['Min', 'Low', 'Med', 'Good', 'High', 'Fine', 'Ultra', 'Extreme', 'Hyper', 'Max'] as const;
+
+/** Level 1-10 keep their names; levels above run tiled only and show their grid. */
+function resolutionOptionLabel(level: number): string {
+  return level <= RESOLUTION_LABELS.length
+    ? `${level} - ${RESOLUTION_LABELS[level - 1]}`
+    : `${level} - Large ${gridForResolution(level)}³ (tiled)`;
+}
 
 function generateButtonLabel(demoModeActive: boolean, blocked: boolean, stale: boolean): string {
   if (demoModeActive) return 'Generate (close compare first)';
@@ -27,6 +40,9 @@ export function GenerateStep({ inputs, generationControls }: { inputs: WorkflowI
   const extents = modelExtents(store.meshInfo, store.sampleShape, store.sphereRadius);
   const preflight = inputs.hasModel ? buildPreflight(store.params, extents, store.meshInfo) : null;
   const blocked = preflight?.warnings.some((w) => w.level === 'block') ?? false;
+  const generationPath = expectedGenerationPath(store.params);
+  const allowedResolutionLevel = maxResolutionLevel(generationPath);
+  const singleFieldReason = fullFieldRequirement(store.params);
   // The raw worker message (tiles, backend, timings) stays in the run log.
   const progressView = describeGenerationProgress(store.progress, store.progressMessage);
 
@@ -90,14 +106,23 @@ export function GenerateStep({ inputs, generationControls }: { inputs: WorkflowI
           <label htmlFor="export-resolution">Resolution</label>
           <select
             id="export-resolution"
-            title="Sampling resolution for marching cubes. Higher values increase detail and compute time."
+            title={`Sampling resolution for marching cubes. Higher values increase detail, compute time and memory. Levels above ${RESOLUTION_LABELS.length} run in tiles and can need about 1 GB of memory.`}
             value={store.params.exportResolution}
             onChange={(e) => store.updateParams({ exportResolution: Number(e.target.value) })}
           >
-            {RESOLUTION_LABELS.map((label, index) => (
-              <option key={label} value={index + 1}>{index + 1} - {label}</option>
+            {Array.from({ length: MAX_EXPORT_RESOLUTION_LEVEL }, (_, index) => index + 1).map((level) => (
+              <option key={level} value={level} disabled={level > allowedResolutionLevel}>
+                {resolutionOptionLabel(level)}
+              </option>
             ))}
           </select>
+        </div>
+        {singleFieldReason && (
+          <p className="panel-copy">
+            Levels above {allowedResolutionLevel} are unavailable: {singleFieldReason}.
+          </p>
+        )}
+        <div className="row">
         </div>
         <div className="row">
           <label htmlFor="thin-filter">Remove thin features</label>

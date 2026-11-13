@@ -1,4 +1,9 @@
-import { generationSampleCount, assertGenerationOutputBudget } from '../geometry/generation-limits';
+import {
+  assertGenerationGrid,
+  assertGenerationOutputBudget,
+  MAX_TILE_WORKERS,
+  TILE_SIZE,
+} from '../geometry/generation-limits';
 import type { MarchingCubesResult } from '../geometry/marching-cubes';
 import type { MeshBVH } from '../geometry/bvh';
 import {
@@ -22,9 +27,8 @@ import type {
 } from './tile-types';
 import { DiagnosedError, parseFailureCause, workerFailure } from '../utils/failure-cause';
 
-export const TILE_SIZE = 32;
+export { TILE_SIZE };
 export const ENABLE_SPARSE_TILE_SKIPPING = true;
-const MAX_TILE_WORKERS = 8;
 
 export interface TileWorkerLike {
   onmessage: ((event: { data: unknown }) => void) | null;
@@ -113,7 +117,8 @@ function buildTileJobs(
   resolution: number,
 ): { jobs: LatticeTileJob[]; stats: TileSkipStats } {
   const jobs: LatticeTileJob[] = [];
-  generationSampleCount([resolution, resolution, resolution]);
+  const gridCells: Vec3 = [resolution, resolution, resolution];
+  assertGenerationGrid(gridCells, 'cpu-tiled');
   const dx = (bounds.max[0] - bounds.min[0]) / resolution;
   const dy = (bounds.max[1] - bounds.min[1]) / resolution;
   const dz = (bounds.max[2] - bounds.min[2]) / resolution;
@@ -150,6 +155,9 @@ function buildTileJobs(
           sphereRadius,
           cells: [cellsX, cellsY, cellsZ],
           bounds: tileBounds,
+          gridBounds: bounds,
+          gridCells,
+          origin: [x, y, z],
         });
       }
     }
