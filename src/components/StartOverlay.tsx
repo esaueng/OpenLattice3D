@@ -25,10 +25,10 @@ export function StartOverlay() {
             <strong>Try a sample</strong>
             <small>Loads a 50 mm sphere</small>
           </button>
-          <button type="button" className="start-action" onClick={intake.pickStl}>
+          <button type="button" className="start-action" onClick={intake.pickModel}>
             <UploadIcon size={16} />
-            <strong>Import STL</strong>
-            <small>Millimetres, closed mesh. Or drop it here.</small>
+            <strong>Import a model</strong>
+            <small>STL, 3MF or OBJ, closed mesh. Or drop it here.</small>
           </button>
           <button type="button" className="start-action" onClick={intake.pickProject}>
             <FolderOpenIcon size={16} />

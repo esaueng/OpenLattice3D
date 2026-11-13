@@ -1,17 +1,17 @@
 // Model intake shared by the Model step and the empty-viewer start card:
-// STL import with orientation and unit checks, project/parameter JSON, samples.
+// STL/3MF/OBJ import with orientation and unit checks, project/parameter JSON, samples.
 import { useCallback, useEffect, useRef } from 'react';
 import { useStore } from '../store/useStore';
-import { assertFileSizeWithinBudget, DEFAULT_IMPORT_LIMITS } from '../geometry/mesh-limits';
+import { assertFileSizeWithinBudget, DEFAULT_IMPORT_LIMITS, MESH_FORMAT_LABEL, meshFileByteBudget, type MeshFileFormat } from '../geometry/mesh-limits';
 import type { SampleShape } from '../types/project';
 import { modelIntake } from './model-intake-client';
 import { SAMPLE_SHAPE_INFO } from '../store/useStore';
 import { formatGenerationSeed } from '../geometry/deterministic-random';
 import { formatDimensions, modelExtents } from '../utils/model-summary';
 import { describeWorkAtRisk, workLostByReplacingModel } from '../utils/model-replacement';
-import { classifyModelFile } from '../utils/dropped-files';
+import { classifyModelFile, isMeshFileKind, MESH_FILE_ACCEPT } from '../utils/dropped-files';
 import { confirmHint, REPLACE_MODEL_ACTION } from '../components/confirm';
-import type { StlIntake } from '../workers/model-intake';
+import type { MeshIntake } from '../workers/model-intake';
 import type { RestoredProjectFile } from '../utils/project-file';
 import { isPendingCurrent, pendingReplacementLabel, usePendingReplacement, type PendingModelReplacement } from './pending-model-replacement';
 
@@ -45,26 +45,26 @@ export function useModelImport() {
     return true;
   }, [store]);
 
-  const commitStl = useCallback((result: StlIntake, fileName: string) => {
+  const commitMesh = useCallback((result: MeshIntake, fileName: string) => {
     for (const log of result.logs) store.addLog(log.message, log.level);
     store.setOriginalMesh(result.mesh, result.info, fileName);
     if (!result.info.isManifold || !result.info.isWatertight) store.setMeshRepaired(result.info.repaired);
     store.setImportNotice(result.notice);
   }, [store]);
 
-  const importStl = useCallback(async (file: File) => {
+  const importMesh = useCallback(async (file: File, format: MeshFileFormat) => {
     const epoch = store.beginModelIntake();
     activeIntake.current = epoch;
     store.addLog(`Importing ${file.name}...`);
     try {
       // Check the declared size before reading: arrayBuffer() would otherwise
       // pull the whole file into tab memory before any limit could apply.
-      assertFileSizeWithinBudget(file.size, DEFAULT_IMPORT_LIMITS.maxStlBytes, `STL file ${file.name}`);
-      const result = await modelIntake.run(epoch, { kind: 'stl', file });
+      assertFileSizeWithinBudget(file.size, meshFileByteBudget(format), `${MESH_FORMAT_LABEL[format]} file ${file.name}`);
+      const result = await modelIntake.run(epoch, { kind: format, file });
       if (!result || useStore.getState().modelIntakeEpoch !== epoch) return;
-      if (result.kind !== 'stl') throw new Error('Import worker returned the wrong file kind');
-      if (deferIfWorkAtRisk({ kind: 'stl', result, fileName: file.name, epoch })) return;
-      commitStl(result, file.name);
+      if (result.kind !== 'mesh') throw new Error('Import worker returned the wrong file kind');
+      if (deferIfWorkAtRisk({ kind: 'mesh', result, fileName: file.name, epoch })) return;
+      commitMesh(result, file.name);
     } catch (err) {
       if (useStore.getState().modelIntakeEpoch !== epoch) return;
       const message = errorMessage(err);
@@ -78,15 +78,7 @@ export function useModelImport() {
     } finally {
       if (activeIntake.current === epoch) activeIntake.current = null;
     }
-  }, [commitStl, deferIfWorkAtRisk, store]);
-
-  const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    // Reset the input so the same file can be re-imported after a fix.
-    e.target.value = '';
-    if (!file) return;
-    await importStl(file);
-  }, [importStl]);
+  }, [commitMesh, deferIfWorkAtRisk, store]);
 
   const commitSample = useCallback((shape: SampleShape) => {
     store.setSampleShape(shape);
@@ -160,27 +152,44 @@ export function useModelImport() {
     await importProject(file);
   }, [importProject]);
 
+  const rejectUnsupported = useCallback((file: File) => {
+    store.addLog(`Import skipped: ${file.name} is not an STL, 3MF, OBJ or project file`, 'warn');
+    store.setImportNotice({
+      level: 'error',
+      message: `Could not import ${file.name}: use an .stl, .3mf or .obj mesh, or a .json project file.`,
+      detail: useStore.getState().originalMesh || useStore.getState().sphereMode ? 'The previous model is still loaded.' : undefined,
+    });
+  }, [store]);
+
+  const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    // Reset the input so the same file can be re-imported after a fix.
+    e.target.value = '';
+    if (!file) return;
+    // The accept list is only a hint. Route by extension; a file the picker
+    // let through without one is read as STL (as before 3MF/OBJ support),
+    // and the worker still recognizes a 3MF by its ZIP signature.
+    const kind = classifyModelFile(file.name);
+    if (kind === 'project') await importProject(file);
+    else await importMesh(file, isMeshFileKind(kind) ? kind : 'stl');
+  }, [importMesh, importProject]);
+
   /** Import a file chosen any other way (drag and drop), routed by its extension. */
   const importFile = useCallback(async (file: File) => {
     const kind = classifyModelFile(file.name);
-    if (kind === 'stl') return importStl(file);
+    if (isMeshFileKind(kind)) return importMesh(file, kind);
     if (kind === 'project') return importProject(file);
-    store.addLog(`Import skipped: ${file.name} is not an STL or project file`, 'warn');
-    store.setImportNotice({
-      level: 'error',
-      message: `Could not import ${file.name}: drop an .stl mesh or a .json project file.`,
-      detail: useStore.getState().originalMesh || useStore.getState().sphereMode ? 'The previous model is still loaded.' : undefined,
-    });
-  }, [importProject, importStl, store]);
+    rejectUnsupported(file);
+  }, [importMesh, importProject, rejectUnsupported]);
 
   const confirmReplacement = useCallback(() => {
     const { pending, clear } = usePendingReplacement.getState();
     clear();
     if (!pending || !isPendingCurrent(pending, useStore.getState().modelIntakeEpoch)) return;
     if (pending.kind === 'sample') commitSample(pending.shape);
-    else if (pending.kind === 'stl') commitStl(pending.result, pending.fileName);
+    else if (pending.kind === 'mesh') commitMesh(pending.result, pending.fileName);
     else commitProject(pending.parsed, pending.fileName);
-  }, [commitProject, commitSample, commitStl]);
+  }, [commitMesh, commitProject, commitSample]);
 
   const cancelReplacement = useCallback(() => {
     const { pending, clear } = usePendingReplacement.getState();
@@ -236,14 +245,14 @@ export function useModelImport() {
 
   const fileInputs = (
     <>
-      <input ref={fileRef} type="file" accept=".stl" onChange={handleFileUpload} hidden />
+      <input ref={fileRef} type="file" accept={MESH_FILE_ACCEPT} onChange={handleFileUpload} hidden />
       <input ref={jsonRef} type="file" accept=".json" onChange={handleJsonImport} hidden />
     </>
   );
 
   return {
     fileInputs,
-    pickStl: () => fileRef.current?.click(),
+    pickModel: () => fileRef.current?.click(),
     pickProject: () => jsonRef.current?.click(),
     loadSample: handleSampleShape,
     importFile,

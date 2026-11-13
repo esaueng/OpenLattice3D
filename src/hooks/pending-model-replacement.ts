@@ -4,12 +4,12 @@
 import { create } from 'zustand';
 import { SAMPLE_SHAPE_INFO, useStore } from '../store/useStore';
 import type { SampleShape } from '../types/project';
-import type { StlIntake } from '../workers/model-intake';
+import type { MeshIntake } from '../workers/model-intake';
 import type { RestoredProjectFile } from '../utils/project-file';
 
 export type PendingModelReplacement =
   | { kind: 'sample'; shape: SampleShape; epoch: number }
-  | { kind: 'stl'; result: StlIntake; fileName: string; epoch: number }
+  | { kind: 'mesh'; result: MeshIntake; fileName: string; epoch: number }
   | { kind: 'project'; parsed: RestoredProjectFile; fileName: string; epoch: number };
 
 type PendingReplacementState = {
