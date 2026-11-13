@@ -176,7 +176,7 @@ export function repairMesh(mesh: TriangleMesh): { mesh: TriangleMesh; repaired: 
   };
 }
 
-/** Generate a procedural sphere mesh as a test asset */
+/** Generate a procedural sphere mesh (outward winding, outward face normals), in mm. */
 export function generateSphereMesh(radius: number, segments: number): TriangleMesh {
   const tris: number[] = [];
 
@@ -208,11 +208,13 @@ export function generateSphereMesh(radius: number, segments: number): TriangleMe
         radius * Math.cos(theta1),
       ];
 
+      // Counter-clockwise seen from outside (theta runs pole to pole, phi
+      // eastward), so winding agrees with the outward stored normals.
       if (lat > 0) {
-        tris.push(p00[0], p00[1], p00[2], p01[0], p01[1], p01[2], p10[0], p10[1], p10[2]);
+        tris.push(p00[0], p00[1], p00[2], p10[0], p10[1], p10[2], p01[0], p01[1], p01[2]);
       }
       if (lat < segments - 1) {
-        tris.push(p01[0], p01[1], p01[2], p11[0], p11[1], p11[2], p10[0], p10[1], p10[2]);
+        tris.push(p01[0], p01[1], p01[2], p10[0], p10[1], p10[2], p11[0], p11[1], p11[2]);
       }
     }
   }

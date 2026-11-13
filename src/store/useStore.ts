@@ -99,6 +99,8 @@ interface PersistedState {
   viewMode: ViewMode;
   clipPlane: ClipPlaneState;
   viewerBackground: string;
+  /** Draw the millimetre build-plate grid under the part. */
+  showBuildPlateGrid: boolean;
   brushRadius: number;
 }
 
@@ -252,6 +254,7 @@ function normalizePersistedState(value: unknown): PersistedState {
     viewMode,
     clipPlane,
     viewerBackground: normalizeViewerBackground(candidate.viewerBackground),
+    showBuildPlateGrid: candidate.showBuildPlateGrid !== false,
     brushRadius,
   };
 }
@@ -478,6 +481,7 @@ interface AppState {
   viewMode: ViewMode;
   clipPlane: ClipPlaneState;
   viewerBackground: string;
+  showBuildPlateGrid: boolean;
   viewportResetSignal: number;
   cameraViewRequest: { view: CameraPreset | null; signal: number };
   viewerCameraState: ViewerCameraState | null;
@@ -541,6 +545,7 @@ interface AppState {
   setViewMode: (mode: ViewMode) => void;
   setClipPlane: (partial: Partial<ClipPlaneState>) => void;
   setViewerBackground: (color: string) => void;
+  setShowBuildPlateGrid: (show: boolean) => void;
   resetViewport: () => void;
   requestCameraView: (view: CameraPreset) => void;
   setWorkflowStep: (step: WorkflowStep) => void;
@@ -629,6 +634,7 @@ export const useStore = create<AppState>((set, get) => ({
   ),
   clipPlane: persisted?.clipPlane ?? { axis: 'z', position: 0.5, flipped: false },
   viewerBackground: persisted?.viewerBackground ?? DEFAULT_VIEWER_BACKGROUND,
+  showBuildPlateGrid: persisted?.showBuildPlateGrid ?? true,
   viewportResetSignal: 0,
   cameraViewRequest: { view: null, signal: 0 },
   viewerCameraState: null,
@@ -1063,6 +1069,8 @@ export const useStore = create<AppState>((set, get) => ({
 
   setViewerBackground: (color) => set({ viewerBackground: normalizeViewerBackground(color) }),
 
+  setShowBuildPlateGrid: (show) => set({ showBuildPlateGrid: show }),
+
   resetViewport: () => set((s) => ({
     viewportResetSignal: s.viewportResetSignal + 1,
     viewerCameraState: null,
@@ -1245,6 +1253,7 @@ function persistedSubset(state: AppState): PersistedState {
     viewMode: state.viewMode,
     clipPlane: state.clipPlane,
     viewerBackground: state.viewerBackground,
+    showBuildPlateGrid: state.showBuildPlateGrid,
     brushRadius: state.brushRadius,
   };
 }
@@ -1299,6 +1308,7 @@ export function hydrateFromSnapshot(snapshot: Partial<PersistedAppState>): Parti
     ),
     clipPlane: persistedState.clipPlane,
     viewerBackground: persistedState.viewerBackground,
+    showBuildPlateGrid: persistedState.showBuildPlateGrid,
     viewerCameraState: normalizeViewerCameraState(snapshot.viewerCameraState),
     demoModeActive: false,
     demoSuspended: null,

@@ -8,6 +8,7 @@ import {
   countNormalWindingAgreement,
   flipMeshOrientation,
   generateCubeMesh,
+  generateSphereMesh,
 } from './mesh-analysis';
 import { parseSTL } from './stl-parser';
 
@@ -35,6 +36,33 @@ describe('imported STL orientation guards', () => {
     const after = countNormalWindingAgreement(aligned);
     expect(after.disagree).toBe(0);
     expect(after.agree).toBeGreaterThan(0);
+  });
+});
+
+describe('generateSphereMesh', () => {
+  it('winds every face outward, in agreement with its stored normals', () => {
+    const radius = 25;
+    const sphere = generateSphereMesh(radius, 32);
+    const info = analyzeMesh(sphere);
+    expect(info.isWatertight).toBe(true);
+    // Positive signed volume close to the analytic 4/3 pi r^3 (tessellation loses a little).
+    const analytic = (4 / 3) * Math.PI * radius ** 3;
+    const signedVolume = computeSignedVolume(sphere);
+    expect(signedVolume).toBeGreaterThan(analytic * 0.98);
+    expect(signedVolume).toBeLessThan(analytic);
+    const agreement = countNormalWindingAgreement(sphere);
+    expect(agreement.disagree).toBe(0);
+    expect(agreement.agree).toBe(sphere.triCount);
+    // Each face's winding normal points away from the centre.
+    const p = sphere.positions;
+    for (let t = 0; t < sphere.triCount; t++) {
+      const o = t * 9;
+      const ux = p[o + 3] - p[o], uy = p[o + 4] - p[o + 1], uz = p[o + 5] - p[o + 2];
+      const vx = p[o + 6] - p[o], vy = p[o + 7] - p[o + 1], vz = p[o + 8] - p[o + 2];
+      const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+      const cx = p[o] + p[o + 3] + p[o + 6], cy = p[o + 1] + p[o + 4] + p[o + 7], cz = p[o + 2] + p[o + 5] + p[o + 8];
+      expect(nx * cx + ny * cy + nz * cz).toBeGreaterThan(0);
+    }
   });
 });
 
