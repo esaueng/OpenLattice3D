@@ -61,6 +61,26 @@ describe('persistence hydration', () => {
     useStore.getState().setShowBuildPlateGrid(previous);
   });
 
+  it('persists lattice orientation and restores older snapshots at the identity', () => {
+    type Snapshot = Parameters<typeof hydrateFromSnapshot>[0];
+    const oriented = { ...DEFAULT_PARAMS, latticeRotationDeg: [0, 30, 0], cellScale: [1, 2, 1] };
+    const restored = hydrateFromSnapshot({ version: 3, savedAt: Date.now(), params: oriented } as unknown as Snapshot);
+    expect(restored.params?.latticeRotationDeg).toEqual([0, 30, 0]);
+    expect(restored.params?.cellScale).toEqual([1, 2, 1]);
+
+    const legacyParams: Record<string, unknown> = { ...DEFAULT_PARAMS };
+    delete legacyParams.latticeRotationDeg;
+    delete legacyParams.cellScale;
+    const legacy = hydrateFromSnapshot({ version: 3, savedAt: Date.now(), params: legacyParams } as unknown as Snapshot);
+    expect(legacy.params?.latticeRotationDeg).toEqual([0, 0, 0]);
+    expect(legacy.params?.cellScale).toEqual([1, 1, 1]);
+
+    const invalid = hydrateFromSnapshot({
+      version: 3, savedAt: Date.now(), params: { ...DEFAULT_PARAMS, cellScale: [1, 1, 99] },
+    } as unknown as Snapshot);
+    expect(invalid.params?.cellScale).toEqual([1, 1, 1]);
+  });
+
   it('never restores a result-only view mode, which would show an empty canvas', () => {
     const hydrated = hydrateFromSnapshot({
       version: 3,
@@ -207,6 +227,19 @@ describe('selection history', () => {
 
     useStore.getState().redoSelection();
     expect(useStore.getState().keepOutTris.has(4)).toBe(true);
+  });
+
+  it('undoes and redoes lattice orientation edits by value', () => {
+    useStore.getState().updateParams({ latticeRotationDeg: [10, 0, 0] });
+    expect(useStore.getState().selectionUndo).toHaveLength(1);
+    // A fresh array with the same values is not an edit.
+    useStore.getState().updateParams({ latticeRotationDeg: [10, 0, 0] });
+    expect(useStore.getState().selectionUndo).toHaveLength(1);
+
+    useStore.getState().undoSelection();
+    expect(useStore.getState().params.latticeRotationDeg).toEqual([0, 0, 0]);
+    useStore.getState().redoSelection();
+    expect(useStore.getState().params.latticeRotationDeg).toEqual([10, 0, 0]);
   });
 
   it('clears redo history after a new painting action', () => {
@@ -441,6 +474,8 @@ describe('completed result staleness', () => {
   const edits = [
     ['cell size', () => useStore.getState().updateParams({ cellSize: 12 }), 'cell size'],
     ['validation tolerance', () => useStore.getState().updateParams({ toleranceMm: 0.4 }), 'tolerance'],
+    ['lattice rotation', () => useStore.getState().updateParams({ latticeRotationDeg: [0, 0, 45] }), 'lattice rotation'],
+    ['cell stretch', () => useStore.getState().updateParams({ cellScale: [1, 1, 2] }), 'cell stretch'],
     ['lattice type', () => useStore.getState().setLatticeType('bcc'), 'lattice type'],
     ['process preset', () => useStore.getState().setProcessPreset('SLA_DLP'), 'process preset'],
     ['variant', () => useStore.getState().setVariant('implicit_conformal'), 'generation variant'],

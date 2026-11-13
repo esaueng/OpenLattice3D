@@ -1,7 +1,7 @@
 // Global app state using Zustand with preference-only persistence
 import { create } from 'zustand';
 import type { LatticeParams, MeshInfo, ValidationResult, ProcessPreset, LatticeType, GenerationVariant, SelectionMode, SampleShape } from '../types/project';
-import { DEFAULT_PARAMS, PROCESS_DEFAULTS, sanitizeLatticeParams } from '../types/project';
+import { DEFAULT_PARAMS, paramValuesEqual, PROCESS_DEFAULTS, sanitizeLatticeParams } from '../types/project';
 import type { TriangleMesh } from '../geometry/stl-parser';
 import type { MarchingCubesResult } from '../geometry/marching-cubes';
 import { DEFAULT_VIEWER_BACKGROUND, normalizeViewerBackground } from '../utils/viewer-color';
@@ -930,7 +930,7 @@ export const useStore = create<AppState>((set, get) => ({
   updateParams: (partial) => set((s) => {
     const nextParams = { ...s.params, ...partial };
     const keys = Object.keys(partial) as (keyof LatticeParams)[];
-    if (keys.every((key) => s.params[key] === partial[key])) return {};
+    if (keys.every((key) => paramValuesEqual(s.params[key], partial[key]))) return {};
     const history = pushSelectionHistory(s, `params:${keys.join(',')}`);
     if (!s.demoModeActive) return { params: nextParams, ...history };
     const shared: DemoParamsByType = {};
