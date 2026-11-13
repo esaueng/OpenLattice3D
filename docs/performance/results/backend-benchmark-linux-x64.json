@@ -1,0 +1,102 @@
+{
+  "hardware": {
+    "platform": "linux",
+    "arch": "x64",
+    "cpuModel": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+    "cores": 4,
+    "node": "v22.23.4"
+  },
+  "startedAt": "2026-11-13T04:03:10.532Z",
+  "options": {
+    "warmupIterations": 1,
+    "iterations": 5
+  },
+  "fixtures": [
+    {
+      "fixture": "sphere-gyroid-bench",
+      "resolution": 160,
+      "backends": [
+        {
+          "backend": "cpu-single",
+          "iterations": 5,
+          "medianTotalMs": 1240.197716999999,
+          "p95TotalMs": 1603.7088339999998,
+          "phases": {
+            "fieldMs": 336.17450700000063,
+            "classifyScanEmitMs": 277.468746,
+            "classifyMs": null,
+            "scanMs": null,
+            "emitMs": null,
+            "readbackMs": 0,
+            "mergeMs": null,
+            "cleanupMs": 506.2473299999997
+          },
+          "speedupVsCpuTiled": 1.0908439795168559
+        },
+        {
+          "backend": "cpu-tiled",
+          "iterations": 5,
+          "medianTotalMs": 1352.8622129999985,
+          "p95TotalMs": 2066.570221,
+          "phases": {
+            "fieldMs": null,
+            "classifyScanEmitMs": 930.9791139999925,
+            "classifyMs": null,
+            "scanMs": null,
+            "emitMs": null,
+            "readbackMs": 0,
+            "mergeMs": 35.05582499999946,
+            "cleanupMs": 421.9748769999969
+          },
+          "speedupVsCpuTiled": null
+        }
+      ]
+    },
+    {
+      "fixture": "sphere-schwarzP-bench",
+      "resolution": 160,
+      "backends": [
+        {
+          "backend": "cpu-single",
+          "iterations": 5,
+          "medianTotalMs": 688.262622000002,
+          "p95TotalMs": 965.5251790000002,
+          "phases": {
+            "fieldMs": 303.05758499999865,
+            "classifyScanEmitMs": 186.0250390000001,
+            "classifyMs": null,
+            "scanMs": null,
+            "emitMs": null,
+            "readbackMs": 0,
+            "mergeMs": null,
+            "cleanupMs": 208.153201000001
+          },
+          "speedupVsCpuTiled": 1.0835527038107802
+        },
+        {
+          "backend": "cpu-tiled",
+          "iterations": 5,
+          "medianTotalMs": 745.7688249999992,
+          "p95TotalMs": 1172.4780900000005,
+          "phases": {
+            "fieldMs": null,
+            "classifyScanEmitMs": 511.9650120000297,
+            "classifyMs": null,
+            "scanMs": null,
+            "emitMs": null,
+            "readbackMs": 0,
+            "mergeMs": 35.36551299998246,
+            "cleanupMs": 206.05313199999728
+          },
+          "speedupVsCpuTiled": null
+        }
+      ]
+    }
+  ],
+  "promotion": {
+    "minSpeedup": 1.5,
+    "gpuBackendPresent": false,
+    "gpuMedianSpeedupVsCpuTiled": null,
+    "meetsSpeedupThreshold": null
+  }
+}
