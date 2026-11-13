@@ -14,6 +14,14 @@ import type { GenerationWorkerLike, WorkerErrorLike } from './generation-worker-
 import { MESH_FILE_ACCEPT } from '../utils/dropped-files';
 import { create3MF } from '../geometry/three-mf';
 import { buildObj } from '../utils/obj';
+import { trackFailure, trackFeature } from '../analytics';
+import { failureCause } from '../utils/failure-cause';
+
+vi.mock('../analytics', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../analytics')>(),
+  trackFailure: vi.fn(),
+  trackFeature: vi.fn(),
+}));
 
 // Exercise actual file reads/parsers in Node while retaining worker lifecycle
 // and deliberately delivering late messages after termination.
@@ -67,6 +75,35 @@ beforeEach(async () => {
   useStore.getState().resetProject();
 });
 afterEach(() => { modelIntake.dispose(); vi.unstubAllGlobals(); });
+
+describe('import analytics wiring', () => {
+  beforeEach(() => vi.clearAllMocks());
+  it('records an import action for a model and parameters', async () => {
+    const mesh = generateCubeMesh(10);
+    const stl = exportBinarySTL(mesh.positions, mesh.normals, mesh.triCount);
+    const intake = controls();
+    await change(intake, 'mesh')(event({ name: 'private-part.stl', size: stl.byteLength, arrayBuffer: async () => stl }));
+    await change(intake, '.json')(event(parameterFile('private.json', 11)));
+    expect(vi.mocked(trackFeature).mock.calls).toEqual([['import'], ['import']]);
+    expect(trackFailure).not.toHaveBeenCalled();
+  });
+  it('records error_import with a worker cause when the import worker crashes', async () => {
+    class CrashingWorker extends InProcessWorker {
+      override postMessage() { this.onerror?.({ message: 'private-part.stl' }); }
+    }
+    vi.stubGlobal('Worker', CrashingWorker);
+    await change(controls(), '.json')(event(parameterFile('private.json', 11)));
+    expect(trackFailure).toHaveBeenCalledExactlyOnceWith('error_import', expect.any(Error));
+    expect(failureCause(vi.mocked(trackFailure).mock.calls[0][1])).toBe('worker');
+    expect(trackFeature).not.toHaveBeenCalled();
+  });
+  it('records error_import for unreadable files and files without usable parameters', async () => {
+    const intake = controls();
+    await change(intake, '.json')(event({ name: 'broken.json', size: 5, text: async () => '{bad' }));
+    await change(intake, '.json')(event({ name: 'empty.json', size: 2, text: async () => '{}' }));
+    expect(vi.mocked(trackFailure).mock.calls.map((call) => call[0])).toEqual(['error_import', 'error_import']);
+  });
+});
 
 describe('shared model intake ownership', () => {
   it('preserves the valid model when startup, crash or protocol failure occurs', async () => {
@@ -238,8 +275,11 @@ describe('confirm before replacing work', () => {
     const intake = controls();
     await change(intake, 'mesh')(event(stlFile('first.stl')));
     useStore.getState().markFaces([0], 'keep_in');
+    vi.mocked(trackFeature).mockClear();
     await intake.importFile(stlFile('second.stl', 20) as unknown as File);
+    expect(trackFeature).not.toHaveBeenCalled();
     intake.confirmReplacement();
+    expect(trackFeature).toHaveBeenCalledExactlyOnceWith('import');
     expect(useStore.getState().meshFileName).toBe('second.stl');
     expect(useStore.getState().keepInTris.size).toBe(0);
     expect(useStore.getState().importNotice).not.toBeNull();

@@ -4,6 +4,7 @@ import type { GenerationWorkerLike, WorkerErrorLike } from './generation-worker-
 import { prepareStl } from '../workers/model-intake';
 import { exportBinarySTL } from '../geometry/stl-parser';
 import { generateCubeMesh } from '../geometry/mesh-analysis';
+import { failureCause } from '../utils/failure-cause';
 
 class FakeWorker implements GenerationWorkerLike {
   onmessage: ((event: { data: unknown }) => void) | null = null;
@@ -69,6 +70,23 @@ describe('shared model intake worker controller', () => {
       expect(worker.terminated).toBe(1);
       expect([worker.onmessage, worker.onerror, worker.onmessageerror]).toEqual([null, null, null]);
     }
+  });
+
+  it('marks worker failures and reported allocation failures with a fixed cause', async () => {
+    const causes: unknown[] = [];
+    for (const failure of ['start', 'post', 'crash', 'decode', 'malformed', 'oom', 'reported']) {
+      const worker = new FakeWorker();
+      if (failure === 'post') worker.postMessage = () => { throw new Error('post failed'); };
+      const controller = new ModelIntakeController(() => { if (failure === 'start') throw new Error('blocked'); return worker; });
+      const pending = controller.run(1, request).catch((error: unknown) => error);
+      if (failure === 'crash') worker.onerror!({ message: 'boom' });
+      if (failure === 'decode') worker.onmessageerror!({});
+      if (failure === 'malformed') worker.onmessage!({ data: { type: 'result', result: {} } });
+      if (failure === 'oom') worker.onmessage!({ data: { type: 'error', message: 'Array buffer allocation failed', diagnostic: 'out_of_memory' } });
+      if (failure === 'reported') worker.onmessage!({ data: { type: 'error', message: 'bad STL', diagnostic: 'private.stl' } });
+      causes.push(failureCause(await pending));
+    }
+    expect(causes).toEqual(['worker', 'worker', 'worker', 'worker', 'worker', 'out_of_memory', undefined]);
   });
 
   it('rejects malformed and wrong-kind results without exposing partial state', async () => {

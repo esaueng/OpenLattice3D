@@ -5,6 +5,7 @@ import { Billboard, GizmoHelper, Line, OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../store/useStore';
+import { watchContextLoss } from '../analytics';
 import type { TriangleMesh } from '../geometry/stl-parser';
 import type { MarchingCubesResult } from '../geometry/marching-cubes';
 import type { ViewerCameraState, ViewerVector3 } from '../store/useStore';
@@ -1398,6 +1399,7 @@ export function Viewer3D() {
         onCreated={(state) => {
           state.camera.up.set(0, 0, 1);
           r3fStateRef.current = state;
+          watchContextLoss(state.gl.domElement);
         }}
       >
         <ViewerLighting />

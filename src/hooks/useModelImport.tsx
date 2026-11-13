@@ -14,6 +14,7 @@ import { confirmHint, REPLACE_MODEL_ACTION } from '../components/confirm';
 import type { MeshIntake } from '../workers/model-intake';
 import type { RestoredProjectFile } from '../utils/project-file';
 import { isPendingCurrent, pendingReplacementLabel, usePendingReplacement, type PendingModelReplacement } from './pending-model-replacement';
+import { trackFailure, trackFeature } from '../analytics';
 
 function errorMessage(err: unknown): string {
   if (err instanceof Error) return err.message.replace(/^Error:\s*/, '');
@@ -50,6 +51,7 @@ export function useModelImport() {
     store.setOriginalMesh(result.mesh, result.info, fileName);
     if (!result.info.isManifold || !result.info.isWatertight) store.setMeshRepaired(result.info.repaired);
     store.setImportNotice(result.notice);
+    trackFeature('import');
   }, [store]);
 
   const importMesh = useCallback(async (file: File, format: MeshFileFormat) => {
@@ -67,6 +69,7 @@ export function useModelImport() {
       commitMesh(result, file.name);
     } catch (err) {
       if (useStore.getState().modelIntakeEpoch !== epoch) return;
+      trackFailure('error_import', err);
       const message = errorMessage(err);
       const current = useStore.getState();
       store.addLog(`Import failed: ${message}`, 'error');
@@ -100,6 +103,7 @@ export function useModelImport() {
       message: `Opened project ${fileName}. Generate to rebuild the lattice.`,
       detail,
     });
+    trackFeature('import');
   }, [store]);
 
   const importProject = useCallback(async (file: File) => {
@@ -124,6 +128,7 @@ export function useModelImport() {
             message: `${file.name} contains no usable lattice parameters.`,
             detail,
           });
+          trackFailure('error_import');
           return;
         }
         store.importParams(parsed.params);
@@ -133,9 +138,11 @@ export function useModelImport() {
           message: `Applied ${parsed.accepted.length} parameter(s) from ${file.name}: ${parsed.accepted.join(', ')}.`,
           detail,
         });
+        trackFeature('import');
       }
     } catch (err) {
       if (useStore.getState().modelIntakeEpoch !== epoch) return;
+      trackFailure('error_import', err);
       const message = errorMessage(err);
       store.addLog(`JSON import failed: ${message}`, 'error');
       store.setImportNotice({ level: 'error', message: `Could not read ${file.name}: ${message}` });

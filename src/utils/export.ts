@@ -138,9 +138,14 @@ export function downloadOBJ(
   saveBlob(new Blob([bytes as BlobPart], { type: 'model/obj' }), filename);
 }
 
-/** Export project data as JSON (includes parameters, selections, validation). */
-export function downloadProjectJSON(input: ProjectExportInput) {
+/**
+ * Export project data as JSON (includes parameters, selections, validation).
+ * Returns the saved file's size in bytes.
+ */
+export function downloadProjectJSON(input: ProjectExportInput): number {
   const project = createProjectFile(input);
   const json = JSON.stringify(project, null, 2);
-  saveBlob(new Blob([json], { type: 'application/json' }), 'lattice-project.json');
+  const blob = new Blob([json], { type: 'application/json' });
+  saveBlob(blob, 'lattice-project.json');
+  return blob.size;
 }

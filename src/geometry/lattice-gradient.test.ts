@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { arch } from 'node:os';
 import { describe, expect, it } from 'vitest';
 import { MeshBVH } from './bvh';
 import {
@@ -81,6 +82,10 @@ const UNGRADED_FIELD_HASHES: Record<string, string> = {
   'voronoi:0': '29b538bb', 'voronoi:1': '9f913d3a', 'voronoi:2': 'c7e52981', 'voronoi:3': 'e2f0be26',
 };
 
+// Captured from the same pre-fix implementation on arm64, where some
+// transcendental operations produce different low bits in the spinodal field.
+const ARM64_SPINODAL_HASHES = ['e3632ddd', '57f9ee8f', 'c6c7160f', '32a25382'];
+
 /** Deterministic, well-spread points in a spherical shell between two radii. */
 function shellPoints(innerRadius: number, outerRadius: number, count: number): Vec3[] {
   const points: Vec3[] = [];
@@ -144,8 +149,11 @@ describe('graded density: ungraded characterization', () => {
         gradientEnabled: false,
         gradientStrength: 0.8,
       };
-      expect(characterizeField(params, bvh), `${latticeType}:${modeIndex}`)
-        .toBe(UNGRADED_FIELD_HASHES[`${latticeType}:${modeIndex}`]);
+      const key = `${latticeType}:${modeIndex}`;
+      const expected = arch() === 'arm64' && latticeType === 'spinodal'
+        ? ARM64_SPINODAL_HASHES[modeIndex]
+        : UNGRADED_FIELD_HASHES[key];
+      expect(characterizeField(params, bvh), key).toBe(expected);
     }
   });
 });

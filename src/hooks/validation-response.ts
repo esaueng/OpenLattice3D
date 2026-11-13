@@ -1,6 +1,7 @@
 // Shape checks for messages coming back from the validation worker. Anything
 // that does not match is rejected rather than rendered as a verdict.
 import { isValidationWarningCode, type ValidationResult } from '../types/project';
+import { parseFailureCause, type FailureCause } from '../utils/failure-cause';
 
 export type ValidationProgressResponse = {
   type: 'progress';
@@ -17,6 +18,7 @@ export type ValidationResultResponse = {
 export type ValidationErrorResponse = {
   type: 'error';
   message: string;
+  diagnostic?: FailureCause;
 };
 
 export type ParsedValidationResponse =
@@ -131,7 +133,8 @@ export function parseValidationResponse(value: unknown): ParsedValidationRespons
   }
   if (value.type === 'error') {
     if (typeof value.message !== 'string' || value.message.trim().length === 0) return null;
-    return { type: 'error', message: value.message };
+    const diagnostic = parseFailureCause(value.diagnostic);
+    return { type: 'error', message: value.message, ...(diagnostic ? { diagnostic } : {}) };
   }
   return null;
 }

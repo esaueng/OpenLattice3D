@@ -5,13 +5,17 @@ import { generateCubeMesh } from '../geometry/mesh-analysis';
 import { buildGenerationSnapshot } from '../store/generation-snapshot';
 import { selectGenerationInputs } from '../store/useResultStaleness';
 import { useStore } from '../store/useStore';
-import { download3MF, downloadOBJ, downloadSTL } from '../utils/export';
-import { trackUsage } from '../analytics';
+import { download3MF, downloadOBJ, downloadProjectJSON, downloadSTL } from '../utils/export';
+import { trackExportLatency, trackFailure, trackFeature, trackProjectSize, trackUsage } from '../analytics';
 import { useResultExport } from '../hooks/useResultExport';
 import type { ValidationResult } from '../types/project';
 import { ExportControls, ExportPrimaryButton } from './ExportControls';
 
-vi.mock('../analytics', () => ({ trackUsage: vi.fn() }));
+vi.mock('../analytics', () => ({
+  trackUsage: vi.fn(), trackDiagnostic: vi.fn(), trackFailure: vi.fn(), trackFailureCause: vi.fn(),
+  trackFeature: vi.fn(), trackLatticeCells: vi.fn(), trackExportLatency: vi.fn(), trackProjectSize: vi.fn(),
+  watchContextLoss: vi.fn(),
+}));
 
 const captured = vi.hoisted(() => ({
   buttons: [] as { children?: unknown; disabled?: boolean; onClick?: () => void }[],
@@ -125,6 +129,37 @@ describe('export analytics wiring', () => {
     captured.buttons.at(-1)!.onClick!();
     expect(trackUsage).toHaveBeenCalledWith('export_completed');
   });
+  it('records export time and the export category on a mesh export', async () => {
+    renderToStaticMarkup(createElement(ExportControls));
+    captured.buttons[0].onClick!();
+    await vi.runAllTimersAsync();
+    expect(trackExportLatency).toHaveBeenCalledExactlyOnceWith(expect.any(Number));
+    expect(trackFeature).toHaveBeenCalledExactlyOnceWith('export');
+    expect(trackFailure).not.toHaveBeenCalled();
+  });
+  it('records the saved project size as bytes for local bucketing only', () => {
+    vi.mocked(downloadProjectJSON).mockReturnValueOnce(2_000_000);
+    renderToStaticMarkup(createElement(ExportControls));
+    captured.buttons.at(-1)!.onClick!();
+    expect(trackProjectSize).toHaveBeenCalledExactlyOnceWith(2_000_000);
+    expect(trackFeature).toHaveBeenCalledExactlyOnceWith('export');
+  });
+  it('records error_export with the error for local cause classification', async () => {
+    const error = new RangeError('Array buffer allocation failed');
+    vi.mocked(download3MF).mockImplementationOnce(() => { throw error; });
+    renderToStaticMarkup(createElement(ExportControls));
+    captured.buttons[0].onClick!();
+    await vi.runAllTimersAsync();
+    expect(trackFailure).toHaveBeenCalledExactlyOnceWith('error_export', error);
+    expect(trackExportLatency).not.toHaveBeenCalled();
+  });
+  it('records a failed project save as error_export', () => {
+    vi.mocked(downloadProjectJSON).mockImplementationOnce(() => { throw new Error('private'); });
+    renderToStaticMarkup(createElement(ExportControls));
+    captured.buttons.at(-1)!.onClick!();
+    expect(trackFailure).toHaveBeenCalledExactlyOnceWith('error_export', expect.any(Error));
+    expect(trackProjectSize).not.toHaveBeenCalled();
+  });
 });
 
 describe('results footer export', () => {
@@ -140,6 +175,7 @@ describe('results footer export', () => {
     await vi.runAllTimersAsync();
     expect(download3MF).toHaveBeenCalledTimes(1);
     expect(vi.mocked(download3MF).mock.calls[0][1]).toMatch(/-lattice\.3mf$/);
+    expect(trackFeature).toHaveBeenCalledExactlyOnceWith('export');
   });
 
   it('carries the same "anyway" caution as the Export section when checks failed', () => {

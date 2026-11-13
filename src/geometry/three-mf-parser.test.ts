@@ -231,12 +231,29 @@ describe('3MF transforms and build', () => {
   });
 
   it('follows production-extension p:path references into other model parts', async () => {
-    const objectPart = model(`<resources>${cubeObject(7)}</resources><build/>`);
+    const objectPart = model(`<resources>${cubeObject(7)}</resources><build><item objectid="7" p:path="/ignored.model"/></build>`);
     const root = model('<resources><object id="1" type="model"><components>'
       + '<component p:path="/3D/Objects/object_1.model" objectid="7" transform="1 0 0 0 1 0 0 0 1 0 0 2"/>'
       + '</components></object></resources><build><item objectid="1"/></build>');
     const parsed = await parse3MF(await pkg(root, [{ name: '3D/Objects/object_1.model', data: objectPart, deflate: true }]));
     expect(bounds(parsed.mesh)).toEqual({ min: [0, 0, 2], max: [1, 1, 3] });
+  });
+
+  it('rejects component paths in child model parts', async () => {
+    const root = model('<resources/><build><item objectid="1" p:path="/child.model"/></build>');
+    const child = model('<resources><object id="1"><components>'
+      + '<component objectid="1" p:path="/other.model"/></components></object></resources><build/>');
+    await expect(parse3MF(await pkg(root, [{ name: 'child.model', data: child }])))
+      .rejects.toThrow('child.model cannot reference another model part');
+  });
+
+  it('honors required extensions using their namespaces, including aliased prefixes', async () => {
+    const build = `<resources>${cubeObject(1)}</resources><build><item objectid="1"/></build>`;
+    const supported = model(build, `requiredextensions="prod" xmlns:prod="${PROD}"`);
+    expect((await parse3MF(await pkg(supported))).mesh.triCount).toBe(12);
+
+    const unsupported = model(build, 'requiredextensions="p beam" xmlns:beam="http://schemas.microsoft.com/3dmanufacturing/beamlattice/2017/02"');
+    await expect(parse3MF(await pkg(unsupported))).rejects.toThrow('requires an unsupported extension ("beam")');
   });
 
   it('skips support objects, ignores extension elements, and drops degenerate triangles', async () => {

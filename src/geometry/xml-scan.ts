@@ -25,7 +25,7 @@ export interface XmlElement {
 }
 
 export interface XmlHandlers {
-  start(element: XmlElement): void;
+  start(element: XmlElement, namespaces: ReadonlyMap<string, string>): void;
   end?(local: string, ns: string | undefined, depth: number): void;
 }
 
@@ -210,7 +210,7 @@ export function scanXml(bytes: Uint8Array, handlers: XmlHandlers, label: string)
     const [prefix, local] = splitName(qualified);
     const ns = scope.get(prefix);
     sawRoot = true;
-    handlers.start({ local, ns, attributes, depth: open.length });
+    handlers.start({ local, ns, attributes, depth: open.length }, scope);
     if (selfClosing) {
       handlers.end?.(local, ns, open.length);
     } else {

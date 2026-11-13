@@ -22,6 +22,7 @@ import {
 } from '../geometry/validation';
 import type { LatticeParams, SampleShape, ValidationResult } from '../types/project';
 import type { Vec3 } from '../geometry/vec3';
+import type { FailureCause } from '../utils/failure-cause';
 
 type SdfFunction = (x: number, y: number, z: number) => number;
 
@@ -53,6 +54,7 @@ export interface ValidationWorkerResponse {
   type: 'progress' | 'result' | 'error';
   message?: string;
   validation?: ValidationResult;
+  diagnostic?: FailureCause;
 }
 
 export function unpackSurfaceSamples(
