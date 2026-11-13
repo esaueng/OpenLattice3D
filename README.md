@@ -36,7 +36,13 @@ npm run lint       # ESLint
 npm run typecheck  # TypeScript project check
 npm test           # Vitest unit tests (geometry core)
 npm run build      # Typecheck + production build into dist/
+npm run test:e2e   # Playwright end-to-end and axe checks against the production build
 ```
+
+`npm run test:e2e` builds the app (without re-running unit tests), serves it
+with `vite preview` on `127.0.0.1:4180`, and drives Chromium with SwiftShader
+WebGL. Install the browser once with `npx playwright install chromium`, or point
+`PLAYWRIGHT_CHROMIUM_EXECUTABLE` at an existing Chromium build.
 
 `npm run dev` binds only to `127.0.0.1`. Use the generated `dist/` directory
 with `npm run preview` to inspect the production bundle locally.
