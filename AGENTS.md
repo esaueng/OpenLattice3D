@@ -56,10 +56,11 @@ Node 22 and npm 10+; install with `npm ci` (lockfile-pinned).
 ```bash
 npm run dev        # Vite dev server on http://127.0.0.1:5176 (localhost only)
 npm run lint       # ESLint (flat config)
-npm run typecheck  # tsc -b (app + node + test projects)
+npm run typecheck  # tsc -b (app + node + test + e2e projects)
 npm test           # Vitest, node environment, 60s testTimeout
 npm run build      # prebuild runs npm test, then tsc -b && vite build
 npm run preview    # serve the production dist/ locally
+npm run test:e2e   # Playwright + axe against vite preview on 127.0.0.1:4180 (builds first, skips unit tests)
 ```
 
 `npm run deploy` (wrangler) requires authorization; an explicit deploy request is sufficient:
@@ -110,6 +111,9 @@ and the smoke workflow is disabled by default (see
   `pre*` hooks.
 - Tests are colocated `*.test.ts` plus `src/**/__tests__/`; geometry tests run
   marching cubes at production resolutions, hence the 60s timeout.
+- Playwright specs live in `e2e/*.spec.ts` (Vitest excludes them). Prefer
+  role/text locators; `e2e/a11y.spec.ts` fails on serious/critical axe findings
+  except the exact rule+selector pairs in its `KNOWN_ISSUES` list.
 - Dev, preview, and production all send COOP/COEP isolation headers; third-
   party embeds that cannot opt in must stay external links.
 - `ci.yml` must pin `fleet-ci.yml` to a commit main already contains. Change

@@ -79,11 +79,42 @@ jobs:
       - name: Test
         run: npm test
 
+      # `npm run build` would re-run the unit tests through its prebuild hook;
+      # they already ran above. prebuild stays for local and Workers Builds use.
       - name: Build
-        run: npm run build
+        run: npx tsc -b && npx vite build
+  e2e:
+    timeout-minutes: 30
+    runs-on: *fleet-runner
+    env:
+      CI: "true"
+    steps:
+      - *fleet-isolation
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Self-hosted runners are unprivileged (NoNewPrivs), so system libraries
+      # must already be provisioned there; hosted runners install them via apt.
+      - name: Install Playwright Chromium (hosted)
+        if: runner.environment != 'self-hosted'
+        run: npx playwright install --with-deps chromium
+      - name: Install Playwright Chromium (self-hosted)
+        if: runner.environment == 'self-hosted'
+        run: npx playwright install chromium
+
+      - name: End-to-end and accessibility tests
+        run: npm run test:e2e
   ci:
     name: ci
-    needs: [quality]
+    needs: [quality, e2e]
     if: always()
     runs-on: *fleet-runner
     steps:
