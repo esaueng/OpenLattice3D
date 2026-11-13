@@ -1,4 +1,4 @@
-import { trackUsage } from '../analytics';
+import { trackDiagnostic, trackFailureCause, trackFeature, trackLatticeCells, trackUsage } from '../analytics';
 import { createElement } from 'react';
 import { renderToString } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -10,7 +10,11 @@ import type { ValidationWorkerMessage } from '../workers/validation-worker';
 import { useLatticeGeneration, type LatticeGenerationControls } from './useLatticeGeneration';
 import { computeStaleness, selectGenerationInputs } from '../store/useResultStaleness';
 
-vi.mock('../analytics', () => ({ trackUsage: vi.fn() }));
+vi.mock('../analytics', () => ({
+  trackUsage: vi.fn(), trackDiagnostic: vi.fn(), trackFailure: vi.fn(), trackFailureCause: vi.fn(),
+  trackFeature: vi.fn(), trackLatticeCells: vi.fn(), trackExportLatency: vi.fn(), trackProjectSize: vi.fn(),
+  watchContextLoss: vi.fn(),
+}));
 
 type ViewMode = ReturnType<typeof useStore.getState>['viewMode'];
 
@@ -237,5 +241,53 @@ describe('generation analytics wiring', () => {
     controls.startGeneration();
     FakeWorker.instances[0].onerror?.({ message: 'private.stl' });
     expect(trackUsage).toHaveBeenCalledExactlyOnceWith('generation_failed');
+    expect(trackFailureCause).toHaveBeenCalledExactlyOnceWith('worker');
+  });
+});
+
+describe('targeted-subset wiring', () => {
+  it('records a create action and the lattice size range from the run inputs on completion', () => {
+    // The sphere sample is 50 mm across; 8 mm cells give 7 per axis.
+    useStore.getState().updateParams({ cellSize: 8 });
+    controls.startGeneration();
+    useStore.getState().updateParams({ cellSize: 2 }); // A mid-run edit does not change the run's count.
+    finishGeneration();
+    expect(trackFeature).toHaveBeenCalledExactlyOnceWith('create');
+    expect(trackLatticeCells).toHaveBeenCalledExactlyOnceWith(7 * 7 * 7);
+  });
+  it('records a measure action when validation completes', () => {
+    controls.startGeneration();
+    const validator = finishGeneration();
+    validator.emit({ type: 'result', validation });
+    expect(trackFeature).toHaveBeenLastCalledWith('measure');
+  });
+  it('passes only a fixed cause from a worker error, never its message', () => {
+    controls.startGeneration();
+    FakeWorker.instances[0].emit({ type: 'error', message: 'private.stl: Array buffer allocation failed', diagnostic: 'out_of_memory' });
+    expect(trackFailureCause).toHaveBeenCalledExactlyOnceWith('out_of_memory');
+    expect(trackLatticeCells).not.toHaveBeenCalled();
+  });
+  it('ignores an unknown cause and still records the v1 failure', () => {
+    controls.startGeneration();
+    FakeWorker.instances[0].emit({ type: 'error', message: 'failed', diagnostic: 'private.stl' });
+    expect(trackUsage).toHaveBeenCalledExactlyOnceWith('generation_failed');
+    expect(trackFailureCause).toHaveBeenCalledExactlyOnceWith(undefined);
+  });
+  it('records a tile-worker fallback reported in progress', () => {
+    controls.startGeneration();
+    FakeWorker.instances[0].emit({ type: 'progress', progress: 0.12, message: 'fallback', diagnostic: 'worker' });
+    expect(trackFailureCause).toHaveBeenCalledWith('worker');
+  });
+  it('records a crashed validation worker', () => {
+    controls.startGeneration();
+    const validator = finishGeneration();
+    validator.onerror?.({ message: 'private' });
+    expect(trackDiagnostic).toHaveBeenCalledWith('error_worker');
+  });
+  it('records a generation worker that cannot be created', () => {
+    vi.stubGlobal('Worker', class { constructor() { throw new Error('blocked'); } });
+    controls.startGeneration();
+    expect(trackUsage).toHaveBeenCalledExactlyOnceWith('generation_failed');
+    expect(trackDiagnostic).toHaveBeenCalledExactlyOnceWith('error_worker');
   });
 });

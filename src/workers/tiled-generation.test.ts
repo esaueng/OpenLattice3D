@@ -12,6 +12,7 @@ import { closeBoundaryLoops } from '../geometry/mesh-repair';
 import { analyzeTopology } from '../geometry/__tests__/helpers';
 import type { LatticeTileJob, LatticeTileResponse } from './tile-types';
 import { runTiledGeneration, type TileWorkerLike } from './tiled-generation';
+import { failureCause } from '../utils/failure-cause';
 
 function hash(result: MarchingCubesResult): string {
   let value = 2166136261;
@@ -65,6 +66,37 @@ class RejectingTileWorker implements TileWorkerLike {
   postMessage(): void { throw new Error('worker channel closed'); }
   terminate(): void { this.terminateCount++; }
 }
+
+class FailingTileWorker implements TileWorkerLike {
+  onmessage: ((event: { data: unknown }) => void) | null = null;
+  onerror: ((event: unknown) => void) | null = null;
+  onmessageerror: ((event: unknown) => void) | null = null;
+  private readonly mode: 'crash' | 'unreadable' | 'oom' | 'error';
+  constructor(mode: 'crash' | 'unreadable' | 'oom' | 'error') { this.mode = mode; }
+  postMessage(job: LatticeTileJob): void {
+    setTimeout(() => {
+      if (this.mode === 'crash') this.onerror?.({});
+      else if (this.mode === 'unreadable') this.onmessageerror?.({});
+      else this.onmessage?.({ data: { type: 'error', tileId: job.tileId, message: 'private', diagnostic: this.mode === 'oom' ? 'out_of_memory' : undefined } });
+    }, 0);
+  }
+  terminate(): void {}
+}
+
+describe('tile failure causes', () => {
+  it.each([
+    ['crash', 'worker'], ['unreadable', 'worker'], ['oom', 'out_of_memory'], ['error', undefined],
+  ] as const)('classifies a %s tile failure as %s', async (mode, expected) => {
+    const error = await runTiledGeneration(
+      DEFAULT_PARAMS, 1, 'sphere', 25,
+      { min: [-29, -29, -29], max: [29, 29, 29] }, 36,
+      () => undefined, () => false,
+      { workerCount: 1, createWorker: () => new FailingTileWorker(mode) },
+    ).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(Error);
+    expect(failureCause(error)).toBe(expected);
+  });
+});
 
 describe('tiled generation scheduling determinism', () => {
   it.each([

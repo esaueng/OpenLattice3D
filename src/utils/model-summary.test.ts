@@ -6,8 +6,26 @@ import {
   describeMeshCondition,
   formatDimensions,
   formatVolume,
+  latticeCellCount,
   modelExtents,
 } from './model-summary';
+
+describe('lattice cell count', () => {
+  it('counts whole cells across the bounding box, at least one per axis', () => {
+    expect(latticeCellCount([30, 30, 30], 8)).toBe(4 * 4 * 4);
+    expect(latticeCellCount([32, 32, 32], 8)).toBe(4 * 4 * 4);
+    expect(latticeCellCount([0.3, 0.7, 1], 0.1)).toBe(3 * 7 * 10);
+    expect(latticeCellCount([0, 10, 10], 5)).toBe(1 * 2 * 2);
+    expect(latticeCellCount([1000, 1000, 1000], 0.1)).toBe(1e12);
+  });
+  it('gives no count for unusable inputs', () => {
+    expect(latticeCellCount(null, 8)).toBeNull();
+    expect(latticeCellCount([10, 10, 10], 0)).toBeNull();
+    expect(latticeCellCount([10, 10, 10], NaN)).toBeNull();
+    expect(latticeCellCount([10, Infinity, 10], 1)).toBeNull();
+    expect(latticeCellCount([10, -1, 10], 1)).toBeNull();
+  });
+});
 
 describe('model summary', () => {
   it('reports imported mesh size and closed-mesh volume', () => {

@@ -1,4 +1,10 @@
-import { trackUsage } from '../analytics';
+import {
+  trackExportLatency,
+  trackFailure,
+  trackFeature,
+  trackProjectSize,
+  trackUsage,
+} from '../analytics';
 import { useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../store/useStore';
@@ -84,11 +90,16 @@ export function ExportControls() {
   const saveProject = () => {
     const started = performance.now();
     try {
-      downloadProjectJSON({ params, generationSeed, source, keepOutTris, keepInTris, validation, clipPlane, viewerBackground });
+      const bytes = downloadProjectJSON({ params, generationSeed, source, keepOutTris, keepInTris, validation, clipPlane, viewerBackground });
+      const elapsedMs = performance.now() - started;
       trackUsage('export_completed');
-      trackUsage('operation_latency', performance.now() - started);
-    } catch {
+      trackUsage('operation_latency', elapsedMs);
+      trackExportLatency(elapsedMs);
+      trackProjectSize(bytes);
+      trackFeature('export');
+    } catch (error) {
       trackUsage('export_failed');
+      trackFailure('error_export', error);
       useStore.getState().addLog('Project export failed. Try again or free browser memory.', 'error');
     }
   };
@@ -99,10 +110,14 @@ export function ExportControls() {
       // Paint the busy state before synchronous decimation starts.
       await new Promise((resolve) => setTimeout(resolve, 0));
       task();
+      const elapsedMs = performance.now() - started;
       trackUsage('export_completed');
-      trackUsage('operation_latency', performance.now() - started);
-    } catch {
+      trackUsage('operation_latency', elapsedMs);
+      trackExportLatency(elapsedMs);
+      trackFeature('export');
+    } catch (error) {
       trackUsage('export_failed');
+      trackFailure('error_export', error);
       // Event handlers have no caller to catch a rejected promise.
       useStore.getState().addLog('Mesh export failed; try a lower detail setting.', 'error');
     } finally {

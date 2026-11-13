@@ -12,8 +12,12 @@ import {
 } from '../geometry/deterministic-random';
 import type { GenerationSnapshot } from './generation-snapshot';
 import { defaultBrushRadius } from '../utils/model-summary';
+import { trackDiagnostic } from '../analytics';
 import { analyzeMesh } from '../geometry/mesh-analysis';
 import { closeBoundaryLoops } from '../geometry/mesh-repair';
+
+/** Saving or restoring the local project state failed. Only the fixed code is reported. */
+const storageFailed = () => trackDiagnostic('error_storage');
 
 export type ViewMode = 'original' | 'lattice' | 'cross_section' | 'xray';
 
@@ -277,6 +281,7 @@ function loadLegacyPersistedState(): PersistedState | null {
     if (!raw) return null;
     return normalizePersistedState(JSON.parse(raw));
   } catch {
+    storageFailed();
     return null;
   }
 }
@@ -285,7 +290,7 @@ function saveLegacyPersistedState(s: PersistedState) {
   try {
     if (!canUseBrowserStorage()) return;
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
-  } catch { /* quota exceeded — ignore */ }
+  } catch { storageFailed(); /* quota exceeded: the app keeps working */ }
 }
 
 function clearLegacyPersistedState() {
@@ -306,7 +311,7 @@ function openPersistenceDb(): Promise<IDBDatabase | null> {
     };
 
     request.onsuccess = () => resolve(request.result);
-    request.onerror = () => resolve(null);
+    request.onerror = () => { storageFailed(); resolve(null); };
     request.onblocked = () => resolve(null);
   });
 }
@@ -320,7 +325,7 @@ async function loadPersistedAppState(): Promise<Partial<PersistedAppState> | nul
     const request = transaction.objectStore(DB_STORE).get(DB_STATE_KEY);
 
     request.onsuccess = () => resolve((request.result ?? null) as Partial<PersistedAppState> | null);
-    request.onerror = () => resolve(null);
+    request.onerror = () => { storageFailed(); resolve(null); };
     transaction.oncomplete = () => db.close();
     transaction.onerror = () => db.close();
     transaction.onabort = () => db.close();
@@ -339,10 +344,12 @@ async function savePersistedAppState(snapshot: PersistedAppState): Promise<void>
       resolve();
     };
     transaction.onerror = () => {
+      storageFailed();
       db.close();
       resolve();
     };
     transaction.onabort = () => {
+      storageFailed();
       db.close();
       resolve();
     };
@@ -361,10 +368,12 @@ async function clearPersistedAppState(): Promise<void> {
       resolve();
     };
     transaction.onerror = () => {
+      storageFailed();
       db.close();
       resolve();
     };
     transaction.onabort = () => {
+      storageFailed();
       db.close();
       resolve();
     };
@@ -1297,7 +1306,7 @@ function schedulePersistence() {
     const state = useStore.getState();
     if (state.generating) return;
     saveLegacyPersistedState(persistedSubset(state));
-    void savePersistedAppState(buildPersistedAppState(state));
+    savePersistedAppState(buildPersistedAppState(state)).catch(storageFailed);
   }, 250);
 }
 
@@ -1312,6 +1321,7 @@ async function hydratePersistence() {
     }
   } catch {
     // Storage-disabled/private contexts must fall back to a usable new project.
+    storageFailed();
   } finally {
     persistenceReady = true;
     useStore.setState({ persistenceHydrated: true });

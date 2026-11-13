@@ -1,4 +1,6 @@
 // Fixed wire contract over the app-specific RPC binding. No public collector URL.
+import { isExpandedMetric, isUsageMetric } from '../src/glimpse-contract';
+
 export type GlimpseEnv = Omit<Partial<Env>, 'GLIMPSE'> & { GLIMPSE?: unknown };
 interface Collector { record(value: { level: 'basic' | 'optional'; event: string; bucket: string }): Promise<void> }
 function collector(value: unknown): Collector | undefined {
@@ -6,13 +8,16 @@ function collector(value: unknown): Collector | undefined {
   const candidate = value as Partial<Collector>;
   return typeof candidate.record === 'function' ? candidate as Collector : undefined;
 }
-const EVENTS = new Set(['workspace_opened', 'export_completed', 'export_failed', 'generation_completed', 'generation_failed', 'operation_latency']);
-const BUCKETS = new Set(['lt_100ms', '100ms_1s', '1s_10s', '10s_60s', 'gte_60s']);
+/**
+ * Exactly `{event,bucket}`: an original usage event, or one of the targeted
+ * subset (Glimpse `LATTICE_EXPANDED`). The browser sends the subset only under
+ * the current consent grant; the relay cannot verify consent, as for every app.
+ */
 export function parseUsage(value: unknown): { level: 'optional'; event: string; bucket: string } | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const v = value as Record<string, unknown>;
-  if (Object.keys(v).length !== 2 || typeof v.event !== 'string' || typeof v.bucket !== 'string' || !EVENTS.has(v.event)) return null;
-  if (v.event === 'operation_latency' ? !BUCKETS.has(v.bucket) : v.bucket !== 'none') return null;
+  if (Object.keys(v).length !== 2 || typeof v.event !== 'string' || typeof v.bucket !== 'string') return null;
+  if (!isUsageMetric(v.event, v.bucket) && !isExpandedMetric(v.event, v.bucket)) return null;
   return { level: 'optional', event: v.event, bucket: v.bucket };
 }
 export async function handleGlimpseUsage(request: Request, env: GlimpseEnv): Promise<Response> {
@@ -48,7 +53,13 @@ export async function handleGlimpseUsage(request: Request, env: GlimpseEnv): Pro
     const value = parseUsage(decoded);
     if (!value) return reply(400);
     // No forwarded client headers, URLs, filenames, app identity or timestamps.
-    await binding.record(value);
+    try { await binding.record(value); }
+    catch (error) {
+      // A Glimpse deployed before the targeted subset rejects those events. Nothing
+      // is retried, so treat that as dropped rather than as an outage.
+      if (isExpandedMetric(value.event, value.bucket)) return reply(204);
+      throw error;
+    }
     return reply(204);
   } catch { return reply(503); }
 }

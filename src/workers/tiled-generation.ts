@@ -8,6 +8,7 @@ import type {
   LatticeTileResult,
   TileSkipStats,
 } from './tile-types';
+import { DiagnosedError, parseFailureCause, workerFailure } from '../utils/failure-cause';
 
 export const TILE_SIZE = 32;
 export const ENABLE_SPARSE_TILE_SKIPPING = true;
@@ -258,7 +259,7 @@ export function runTiledGeneration(
           worker.postMessage(job);
         } catch (error) {
           const detail = error instanceof Error && error.message ? `: ${error.message}` : '';
-          fail(new Error(`Could not start tile worker job${detail}`));
+          fail(workerFailure(`Could not start tile worker job${detail}`));
         }
       };
       worker.onmessage = (event) => {
@@ -270,11 +271,12 @@ export function runTiledGeneration(
           || (response.type !== 'result' && response.type !== 'error')
           || response.tileId !== inFlightTileId
         ) {
-          fail(new Error('Tile worker returned a malformed response'));
+          fail(workerFailure('Tile worker returned a malformed response'));
           return;
         }
         if (response.type === 'error') {
-          fail(new Error(response.message));
+          const cause = parseFailureCause(response.diagnostic);
+          fail(cause ? new DiagnosedError(response.message, cause) : new Error(response.message));
           return;
         }
         if (
@@ -286,7 +288,7 @@ export function runTiledGeneration(
           || response.normals.length < response.triCount * 3
           || !Number.isFinite(response.timing?.totalMs)
         ) {
-          fail(new Error('Tile worker returned a malformed response'));
+          fail(workerFailure('Tile worker returned a malformed response'));
           return;
         }
         const responseBytes = response.positions.buffer.byteLength
@@ -314,15 +316,15 @@ export function runTiledGeneration(
         if (completed === jobs.length) finish();
         else postNext();
       };
-      worker.onerror = () => fail(new Error('Tile worker failed'));
-      worker.onmessageerror = () => fail(new Error('Tile worker returned an unreadable response'));
+      worker.onerror = () => fail(workerFailure('Tile worker failed'));
+      worker.onmessageerror = () => fail(workerFailure('Tile worker returned an unreadable response'));
       postNext();
     };
     try {
       for (let i = 0; i < workerCount; i++) startWorker();
     } catch (error) {
       terminateTileWorkers();
-      fail(error instanceof Error ? error : new Error('Tile worker creation failed'));
+      fail(workerFailure(error instanceof Error ? error.message : 'Tile worker creation failed'));
     }
   }).finally(() => terminateTileWorkers());
 }

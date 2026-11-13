@@ -1,8 +1,12 @@
+import { parseFailureCause, type FailureCause } from '../utils/failure-cause';
+
 export type GenerationProgressResponse = {
   type: 'progress';
   progress: number;
   message: string;
   transient?: boolean;
+  /** A fixed cause for a recovered internal failure (a tile worker fell back to one thread). */
+  diagnostic?: FailureCause;
 };
 
 export type GenerationResultResponse = {
@@ -20,10 +24,14 @@ export type GenerationResultResponse = {
   thinFilterSkipped?: string;
 };
 
-export type GenerationResponse = GenerationProgressResponse | GenerationResultResponse | {
+export type GenerationErrorResponse = {
   type: 'error';
   message: string;
+  /** A fixed cause the worker classified locally; never the error text itself. */
+  diagnostic?: FailureCause;
 };
+
+export type GenerationResponse = GenerationProgressResponse | GenerationResultResponse | GenerationErrorResponse;
 
 export type WorkerErrorLike = {
   message?: string;
@@ -41,7 +49,8 @@ export interface GenerationWorkerLike {
 export interface GenerationWorkerCallbacks {
   onProgress(response: GenerationProgressResponse): void;
   onResult(response: GenerationResultResponse): void;
-  onFailure(message: string): void;
+  /** `cause` is 'worker' when the worker itself failed, or a cause the worker reported. */
+  onFailure(message: string, cause?: FailureCause): void;
 }
 
 type ActiveSession = {
@@ -65,12 +74,14 @@ export function parseGenerationResponse(value: unknown): GenerationResponse | nu
       || response.progress > 1
       || typeof response.message !== 'string'
       || (response.transient !== undefined && typeof response.transient !== 'boolean')
+      || (response.diagnostic !== undefined && !parseFailureCause(response.diagnostic))
     ) return null;
     return response as GenerationProgressResponse;
   }
   if (response.type === 'error') {
     if (typeof response.message !== 'string' || response.message.trim().length === 0) return null;
-    return { type: 'error', message: response.message };
+    const diagnostic = parseFailureCause(response.diagnostic);
+    return diagnostic ? { type: 'error', message: response.message, diagnostic } : { type: 'error', message: response.message };
   }
   if (response.type !== 'result') return null;
   if (
@@ -120,10 +131,10 @@ export class GenerationWorkerController {
       const detail = typeof event.message === 'string' && event.message.trim()
         ? `: ${event.message.trim()}`
         : '';
-      this.fail(session, `Generation worker crashed${detail}`);
+      this.fail(session, `Generation worker crashed${detail}`, 'worker');
     };
     worker.onmessageerror = () => {
-      this.fail(session, 'Generation worker returned an unreadable response');
+      this.fail(session, 'Generation worker returned an unreadable response', 'worker');
     };
     return session.id;
   }
@@ -135,7 +146,7 @@ export class GenerationWorkerController {
       session.worker.postMessage(message, transfer);
     } catch (error) {
       const detail = error instanceof Error && error.message ? `: ${error.message}` : '';
-      this.fail(session, `Could not start generation worker${detail}`);
+      this.fail(session, `Could not start generation worker${detail}`, 'worker');
     }
   }
 
@@ -163,7 +174,7 @@ export class GenerationWorkerController {
     if (!this.isCurrent(session)) return;
     const response = parseGenerationResponse(value);
     if (!response) {
-      this.fail(session, 'Generation worker returned a malformed response');
+      this.fail(session, 'Generation worker returned a malformed response', 'worker');
       return;
     }
     if (response.type === 'progress') {
@@ -171,7 +182,7 @@ export class GenerationWorkerController {
       return;
     }
     if (response.type === 'error') {
-      this.fail(session, `Generation failed: ${response.message}`);
+      this.fail(session, `Generation failed: ${response.message}`, response.diagnostic);
       return;
     }
     this.active = null;
@@ -179,11 +190,12 @@ export class GenerationWorkerController {
     session.callbacks.onResult(response);
   }
 
-  private fail(session: ActiveSession, message: string): void {
+  private fail(session: ActiveSession, message: string, cause?: FailureCause): void {
     if (!this.isCurrent(session)) return;
     this.active = null;
     session.worker.terminate();
-    session.callbacks.onFailure(message);
+    if (cause) session.callbacks.onFailure(message, cause);
+    else session.callbacks.onFailure(message);
   }
 
   private isCurrent(session: ActiveSession): boolean {

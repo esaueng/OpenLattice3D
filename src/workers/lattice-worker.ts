@@ -43,6 +43,7 @@ import {
   normalizeGenerationSeed,
 } from '../geometry/deterministic-random';
 import { createProgressReporter } from './progress-reporter';
+import { failureCause, workerFailure, type FailureCause } from '../utils/failure-cause';
 
 type SdfFunction = ((x: number, y: number, z: number) => number) & Partial<GridSdfSampler>;
 type WorkerPostMessage = (message: unknown, transfer: Transferable[]) => void;
@@ -156,6 +157,8 @@ export interface WorkerResponse {
   thinFilterSkipped?: string;
   backend?: TileBackend;
   transient?: boolean;
+  /** A fixed failure cause classified here; error text stays in `message` for the local log. */
+  diagnostic?: FailureCause;
 }
 
 let cancelled = false;
@@ -205,8 +208,8 @@ async function generatePoissonSamplesParallel(
       const worker = new Worker(new URL('./surface-sample-worker.ts', import.meta.url), { type: 'module' });
       const response = await new Promise<SurfaceSampleWorkerResponse>((resolve, reject) => {
         worker.onmessage = (event: MessageEvent<SurfaceSampleWorkerResponse>) => resolve(event.data);
-        worker.onerror = () => reject(new Error('Surface sampling worker failed'));
-        worker.onmessageerror = () => reject(new Error('Surface sampling worker returned an unreadable response'));
+        worker.onerror = () => reject(workerFailure('Surface sampling worker failed'));
+        worker.onmessageerror = () => reject(workerFailure('Surface sampling worker returned an unreadable response'));
         const payload: ShapeSampleWorkerMessage = {
           mode: 'shape',
           shape,
@@ -225,7 +228,7 @@ async function generatePoissonSamplesParallel(
         || response.positions.length !== response.normals.length
         || response.positions.length % 3 !== 0
       ) {
-        throw new Error('Surface sampling worker returned a malformed response');
+        throw workerFailure('Surface sampling worker returned a malformed response');
       }
       const samples: SurfaceHexSample[] = [];
       for (let j = 0; j < response.positions.length; j += 3) {
@@ -741,7 +744,8 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
           postMessage({
             type: 'progress',
             progress: 0.12,
-            message: `cpu-tiled unavailable (${message}); falling back to cpu-single`
+            message: `cpu-tiled unavailable (${message}); falling back to cpu-single`,
+            diagnostic: failureCause(err),
           } as WorkerResponse);
         }
       }
@@ -855,7 +859,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
       if (message === 'Cancelled') {
         postMessage({ type: 'progress', progress: 0, message: 'Cancelled' } as WorkerResponse);
       } else {
-        postMessage({ type: 'error', message } as WorkerResponse);
+        postMessage({ type: 'error', message, diagnostic: failureCause(err) } as WorkerResponse);
       }
     }
   }

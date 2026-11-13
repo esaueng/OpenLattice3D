@@ -23,6 +23,7 @@ import { useWorkspaceHotkeys } from './hooks/useWorkspaceHotkeys';
 import { summarizeValidation } from './utils/validation-summary';
 import { useResultStaleness } from './store/useResultStaleness';
 import { trackUsage } from './analytics';
+import { ViewportErrorBoundary } from './components/ViewportErrorBoundary';
 import './App.css';
 
 function App() {
@@ -273,7 +274,9 @@ function HydratedApp() {
               </div>
             </div>
           )}
-          <Viewer3D />
+          <ViewportErrorBoundary>
+            <Viewer3D />
+          </ViewportErrorBoundary>
           {!hasModel && !demoModeActive && <StartOverlay />}
           {showFaceLegend && !demoModeActive && (
             <div className="viewer-legend" role="group" aria-label="Face marking legend">

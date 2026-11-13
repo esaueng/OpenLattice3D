@@ -18,6 +18,7 @@ import {
   topologyWarnings,
 } from '../geometry/validation';
 import type { LatticeParams, SampleShape, ValidationResult } from '../types/project';
+import { failureCause, type FailureCause } from '../utils/failure-cause';
 import type { Vec3 } from '../geometry/vec3';
 
 type SdfFunction = (x: number, y: number, z: number) => number;
@@ -50,6 +51,8 @@ export interface ValidationWorkerResponse {
   type: 'progress' | 'result' | 'error';
   message?: string;
   validation?: ValidationResult;
+  /** A fixed failure cause classified here; never the error text itself. */
+  diagnostic?: FailureCause;
 }
 
 function unpackSurfaceSamples(
@@ -217,6 +220,6 @@ self.onmessage = (event: MessageEvent<ValidationWorkerMessage>) => {
     postMessage({ type: 'result', validation } as ValidationWorkerResponse);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown validation error';
-    postMessage({ type: 'error', message } as ValidationWorkerResponse);
+    postMessage({ type: 'error', message, diagnostic: failureCause(err) } as ValidationWorkerResponse);
   }
 };
