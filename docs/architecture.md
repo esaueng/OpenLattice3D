@@ -50,10 +50,16 @@ local roots.
 
 Two production CPU paths are intentionally supported:
 
-- `cpu-tiled` splits procedural grids into bounded 32-cell tiles, skips tiles
-  proven to be outside the active region, runs a capped worker pool, and merges
-  results in deterministic tile order.
-- `cpu-single` handles imported meshes and serves as the universal fallback.
+- `cpu-tiled` splits procedural and imported-mesh grids into bounded 32-cell
+  tiles, skips tiles proven to be outside the active region, runs a capped
+  worker pool, and merges results in deterministic tile order. Imported meshes
+  ship their BVH (tree, triangle and pseudonormal tables) to the workers once,
+  as a SharedArrayBuffer when the page is cross-origin isolated and as a
+  transferred copy per worker otherwise. Mesh tiles are windows of the
+  single-worker grid and are merged back in grid order, so their output is
+  byte-identical to `cpu-single`.
+- `cpu-single` handles demo grids, hex/triangle surface lattices and
+  thin-section filtering, and serves as the universal fallback.
 
 Inactive WebGPU and WASM placeholders were removed. Their reinstatement gates
 and a full GPU marching-cubes design live under `docs/performance/`.

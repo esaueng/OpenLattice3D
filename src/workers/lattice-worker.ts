@@ -9,7 +9,7 @@ import {
 } from '../geometry/marching-cubes';
 import type { GridSdfSampler } from '../geometry/marching-cubes';
 import { openField, openingIsResolvable } from '../geometry/morphology';
-import { buildCombinedSDF, buildSampleShapeLattice, buildSurfaceHexLattice, buildSphereLattice } from '../geometry/lattice';
+import { buildSampleShapeLattice, buildSurfaceHexLattice, buildSphereLattice } from '../geometry/lattice';
 import {
   DEFAULT_SAMPLE_SPHERE_RADIUS,
   SAMPLE_SHAPE_DIMENSIONS,
@@ -28,8 +28,10 @@ import type { Vec3 } from '../geometry/vec3';
 import { add, sub, dot, length, scale, normalize } from '../geometry/vec3';
 import type { SurfaceHexSample } from '../geometry/lattice';
 import type { TileBackend } from './tile-types';
+import { buildImportedMeshSdf } from './mesh-tiles';
 import {
   ENABLE_SPARSE_TILE_SKIPPING,
+  runMeshTiledGeneration,
   runTiledGeneration,
   terminateTileWorkers,
   TILE_SIZE,
@@ -540,13 +542,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         const keepOutSet = new Set(msg.keepOutTris || []);
         const keepInSet = new Set(msg.keepInTris || []);
         objectSdf = (x, y, z) => bvh!.signedDistance([x, y, z]);
-        sdf = buildCombinedSDF({
-          bvh,
-          params: fieldParams,
-          generationSeed,
-          keepOutTris: keepOutSet,
-          keepInTris: keepInSet,
-        });
+        sdf = buildImportedMeshSdf(bvh, fieldParams, generationSeed, msg.keepOutTris || [], msg.keepInTris || []);
         if (keepOutSet.size > 0 || keepInSet.size > 0) {
           postMessage({
             type: 'progress',
@@ -587,8 +583,10 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
 
       // Morphological opening is a whole-volume distance transform; tiling it
       // would make neighbouring seams disagree.
+      // Imported meshes tile too: workers share the BVH and sample windows
+      // of the same grid, so the result matches the single-worker path.
       const tileWorkerPoolAvailable = Boolean(
-        shape
+        (shape || bvh)
         && !isSurfacePolygon
         && !isDemoGrid
         && !thinFilterActive
@@ -601,7 +599,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         message: `Selected backend ${selectedBackend}`
       } as WorkerResponse);
 
-      if (selectedBackend === 'cpu-tiled' && shape) {
+      if (selectedBackend === 'cpu-tiled' && (shape || bvh)) {
         try {
           const tiledStart = performance.now();
           postMessage({
@@ -609,21 +607,37 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
             progress: 0.12,
             message: `Backend ${selectedBackend}: ${tileWorkerCount()} workers, ${TILE_SIZE}^3 tiles, sparse skip ${ENABLE_SPARSE_TILE_SKIPPING ? 'on' : 'off'}`
           } as WorkerResponse);
-          const { result: rawTiledResult, stats: tileStats } = await runTiledGeneration(
-            params,
-            generationSeed,
-            shape,
-            sphereRadius ?? msg.sphereRadius ?? 25,
-            bounds,
-            resolution,
-            (completed, total, timingMs, stats) => {
-              progressReporter.report(
-                0.12 + (completed / Math.max(1, total)) * 0.76,
-                `cpu-tiled: ${completed}/${total} tiles processed, ${stats.tilesSkipped}/${stats.tilesTotal} skipped (${Math.round(timingMs)}ms worker time)`,
-              );
-            },
-            () => cancelled,
-          );
+          const onTileProgress = (completed: number, total: number, timingMs: number, stats: { tilesSkipped: number; tilesTotal: number }) => {
+            progressReporter.report(
+              0.12 + (completed / Math.max(1, total)) * 0.76,
+              `cpu-tiled: ${completed}/${total} tiles processed, ${stats.tilesSkipped}/${stats.tilesTotal} skipped (${Math.round(timingMs)}ms worker time)`,
+            );
+          };
+          const { result: rawTiledResult, stats: tileStats } = shape
+            ? await runTiledGeneration(
+              params,
+              generationSeed,
+              shape,
+              sphereRadius ?? msg.sphereRadius ?? 25,
+              bounds,
+              resolution,
+              onTileProgress,
+              () => cancelled,
+            )
+            : await runMeshTiledGeneration(
+              {
+                bvh: bvh!,
+                params,
+                fieldParams,
+                generationSeed,
+                keepOutTris: msg.keepOutTris || [],
+                keepInTris: msg.keepInTris || [],
+                bounds,
+                resolution,
+              },
+              onTileProgress,
+              () => cancelled,
+            );
           if (cancelled) throw new Error('Cancelled');
           // Tiles are extracted open along their seams and merged here, so the
           // whole-surface repair belongs after the merge rather than per tile.

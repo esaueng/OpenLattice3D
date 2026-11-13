@@ -1,13 +1,24 @@
 import { generationSampleCount, assertGenerationOutputBudget } from '../geometry/generation-limits';
 import type { MarchingCubesResult } from '../geometry/marching-cubes';
+import type { MeshBVH } from '../geometry/bvh';
+import {
+  canShareMemory,
+  clonePackedMeshBVH,
+  packSerializedMeshBVH,
+  type PackedMeshBVH,
+} from '../geometry/bvh-serialization';
 import { sampleShapeObjectSdf } from '../geometry/sample-shapes';
 import type { Vec3 } from '../geometry/vec3';
 import type { LatticeParams, SampleShape } from '../types/project';
+import { mergeMeshTilesInGridOrder, planMeshTiles } from './mesh-tiles';
 import type {
   LatticeTileJob,
   LatticeTileResponse,
   LatticeTileResult,
+  MeshTileInit,
+  MeshTileJob,
   TileSkipStats,
+  TileWorkerMessage,
 } from './tile-types';
 
 export const TILE_SIZE = 32;
@@ -18,13 +29,20 @@ export interface TileWorkerLike {
   onmessage: ((event: { data: unknown }) => void) | null;
   onerror: ((event: unknown) => void) | null;
   onmessageerror: ((event: unknown) => void) | null;
-  postMessage(message: LatticeTileJob): void;
+  postMessage(message: TileWorkerMessage, transfer?: Transferable[]): void;
   terminate(): void;
 }
 
 export interface TiledGenerationOptions {
   workerCount?: number;
   createWorker?: () => TileWorkerLike;
+}
+
+export interface MeshTiledGenerationOptions extends TiledGenerationOptions {
+  /** Force shared or transferred BVH buffers; defaults to shared when isolated. */
+  shareMemory?: boolean;
+  /** Override sparse skipping (defaults to ENABLE_SPARSE_TILE_SKIPPING). */
+  sparseSkipping?: boolean;
 }
 
 let activeTileWorkers: TileWorkerLike[] = [];
@@ -172,12 +190,99 @@ export function runTiledGeneration(
   options: TiledGenerationOptions = {},
 ): Promise<{ result: MarchingCubesResult; stats: TileSkipStats }> {
   const { jobs, stats } = buildTileJobs(params, generationSeed, shape, sphereRadius, bounds, resolution);
-  if (jobs.length === 0) {
+  return runTilePool(jobs, stats, onProgress, isCancelled, options, null)
+    .then((results) => ({ result: mergeTileResults(results), stats }));
+}
+
+export interface MeshTiledGenerationInput {
+  bvh: MeshBVH;
+  /** Requested parameters (escape holes are cut into the field from these). */
+  params: LatticeParams;
+  /** Parameters the field is built from, as on the single-worker path. */
+  fieldParams: LatticeParams;
+  generationSeed: number;
+  keepOutTris: readonly number[];
+  keepInTris: readonly number[];
+  bounds: { min: Vec3; max: Vec3 };
+  resolution: number;
+}
+
+export interface MeshTiledGenerationStats extends TileSkipStats {
+  /** Whether tiles could be skipped (closed, consistently oriented mesh). */
+  sparseSkipping: boolean;
+  bvhTransfer: 'shared' | 'transfer';
+}
+
+/**
+ * Imported-mesh generation over the tile pool. Output (before cleanup) is
+ * byte-identical to the single-worker extraction for any worker count; see
+ * mesh-tiles.ts.
+ */
+export function runMeshTiledGeneration(
+  input: MeshTiledGenerationInput,
+  onProgress: (completed: number, total: number, timingMs: number, stats: TileSkipStats) => void,
+  isCancelled: () => boolean,
+  options: MeshTiledGenerationOptions = {},
+): Promise<{ result: MarchingCubesResult; stats: MeshTiledGenerationStats }> {
+  const serialized = input.bvh.serialize();
+  const plan = planMeshTiles({
+    bvh: input.bvh,
+    serialized,
+    params: input.params,
+    bounds: input.bounds,
+    resolution: input.resolution,
+    tileSize: TILE_SIZE,
+    hasKeepOut: input.keepOutTris.length > 0,
+    hasKeepIn: input.keepInTris.length > 0,
+    enableSparseSkipping: options.sparseSkipping ?? ENABLE_SPARSE_TILE_SKIPPING,
+  });
+  const shared = options.shareMemory ?? canShareMemory();
+  const stats: MeshTiledGenerationStats = {
+    ...plan.stats,
+    sparseSkipping: plan.sparseSkipping,
+    bvhTransfer: shared ? 'shared' : 'transfer',
+  };
+  if (plan.jobs.length === 0) {
     return Promise.resolve({
       result: { positions: new Float32Array(0), normals: new Float32Array(0), triCount: 0 },
       stats,
     });
   }
+  // Shared memory: one packed copy posted to every worker. Otherwise each
+  // worker gets its own copy, transferred so the host never holds two.
+  const packed = packSerializedMeshBVH(serialized, shared);
+  const workerCount = Math.min(Math.max(1, options.workerCount ?? tileWorkerCount()), plan.jobs.length);
+  let workersInitialized = 0;
+  const initFor = (): { message: MeshTileInit; transfer: Transferable[] } => {
+    workersInitialized++;
+    let bvh: PackedMeshBVH = packed;
+    if (!shared && workersInitialized < workerCount) bvh = clonePackedMeshBVH(packed);
+    const message: MeshTileInit = {
+      type: 'mesh-init',
+      bvh,
+      fieldParams: input.fieldParams,
+      params: input.params,
+      generationSeed: input.generationSeed,
+      keepOutTris: [...input.keepOutTris],
+      keepInTris: [...input.keepInTris],
+      gridBounds: input.bounds,
+      gridCells: [input.resolution, input.resolution, input.resolution],
+    };
+    return { message, transfer: shared ? [] : [bvh.buffer as ArrayBuffer] };
+  };
+  return runTilePool(plan.jobs, plan.stats, onProgress, isCancelled, { ...options, workerCount }, initFor)
+    .then((results) => ({ result: mergeMeshTilesInGridOrder(plan, results, input.resolution), stats }));
+}
+
+function runTilePool(
+  jobs: readonly (LatticeTileJob | MeshTileJob)[],
+  stats: TileSkipStats,
+  onProgress: (completed: number, total: number, timingMs: number, stats: TileSkipStats) => void,
+  isCancelled: () => boolean,
+  options: TiledGenerationOptions,
+  initMessage: (() => { message: MeshTileInit; transfer: Transferable[] }) | null,
+): Promise<LatticeTileResult[]> {
+  if (jobs.length === 0) return Promise.resolve([]);
   const workerCount = Math.min(
     Math.max(1, options.workerCount ?? tileWorkerCount()),
     jobs.length,
@@ -191,7 +296,7 @@ export function runTiledGeneration(
   let retainedNormals = 0;
   let retainedBytes = 0;
 
-  return new Promise<{ result: MarchingCubesResult; stats: TileSkipStats }>((resolve, reject) => {
+  return new Promise<LatticeTileResult[]>((resolve, reject) => {
     let settled = false;
     const fail = (error: Error) => {
       if (settled) return;
@@ -203,7 +308,7 @@ export function runTiledGeneration(
       if (settled) return;
       settled = true;
       terminateTileWorkers();
-      resolve({ result: mergeTileResults(results), stats });
+      resolve(results);
     };
     const startWorker = () => {
       const worker = options.createWorker?.()
@@ -284,6 +389,16 @@ export function runTiledGeneration(
       };
       worker.onerror = () => fail(new Error('Tile worker failed'));
       worker.onmessageerror = () => fail(new Error('Tile worker returned an unreadable response'));
+      if (initMessage) {
+        try {
+          const { message, transfer } = initMessage();
+          worker.postMessage(message, transfer);
+        } catch (error) {
+          const detail = error instanceof Error && error.message ? `: ${error.message}` : '';
+          fail(new Error(`Could not initialize tile worker${detail}`));
+          return;
+        }
+      }
       postNext();
     };
     try {
