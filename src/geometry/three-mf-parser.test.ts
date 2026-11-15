@@ -127,6 +127,33 @@ function expectClose(actual: ArrayLike<number>, expected: ArrayLike<number>, tol
 }
 
 describe('3MF import round trip', () => {
+  it.each(['empty', 'sparse'])('bounds backing allocation for unused %s mesh resources', async (kind) => {
+    const sparse = '<vertices><vertex x="0" y="0" z="0"/><vertex x="1" y="0" z="0"/><vertex x="0" y="1" z="0"/></vertices>'
+      + '<triangles><triangle v1="0" v2="1" v3="2"/></triangles>';
+    const unused = Array.from({ length: 64 }, (_, i) => `<object id="${i + 2}"><mesh>${kind === 'sparse' ? sparse : ''}</mesh></object>`).join('');
+    const bytes = await pkg(model(`<resources>${cubeObject(1)}${unused}</resources><build><item objectid="1"/></build>`));
+    const originalF64 = globalThis.Float64Array;
+    const originalU32 = globalThis.Uint32Array;
+    let allocatedBytes = 0;
+    // Measure native backing allocations through the public parser, including
+    // temporary growth buffers, without relying on GC or a large OOM fixture.
+    globalThis.Float64Array = new Proxy(originalF64, {
+      construct(target, args) { const array = Reflect.construct(target, args) as Float64Array; allocatedBytes += array.byteLength; return array; },
+    });
+    globalThis.Uint32Array = new Proxy(originalU32, {
+      construct(target, args) { const array = Reflect.construct(target, args) as Uint32Array; allocatedBytes += array.byteLength; return array; },
+    });
+    try {
+      const parsed = await parse3MF(bytes);
+      expect(parsed.mesh.triCount).toBe(12);
+      expect(bounds(parsed.mesh)).toEqual({ min: [0, 0, 0], max: [1, 1, 1] });
+      expect(allocatedBytes).toBeLessThan(64 * 1024);
+    } finally {
+      globalThis.Float64Array = originalF64;
+      globalThis.Uint32Array = originalU32;
+    }
+  });
+
   it.each(['model', 'relationships'])('bounds ignored extension XML in the %s part', async (part) => {
     const goodModel = model(`<resources>${cubeObject(1)}</resources><build><item objectid="1"/></build>`);
     const deep = '<ignored>'.repeat(128) + '</ignored>'.repeat(128);

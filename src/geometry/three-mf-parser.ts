@@ -64,18 +64,19 @@ interface ModelPart {
 }
 
 class GrowableF64 {
-  data = new Float64Array(3 * 1024);
+  // Empty/unused mesh resources must not reserve geometry backing storage.
+  data = new Float64Array(0);
   length = 0;
   push3(a: number, b: number, c: number) {
-    if (this.length + 3 > this.data.length) { const next = new Float64Array(this.data.length * 2); next.set(this.data); this.data = next; }
+    if (this.length + 3 > this.data.length) { const next = new Float64Array(Math.max(3, this.data.length * 2)); next.set(this.data); this.data = next; }
     this.data[this.length++] = a; this.data[this.length++] = b; this.data[this.length++] = c;
   }
 }
 class GrowableU32 {
-  data = new Uint32Array(3 * 1024);
+  data = new Uint32Array(0);
   length = 0;
   push3(a: number, b: number, c: number) {
-    if (this.length + 3 > this.data.length) { const next = new Uint32Array(this.data.length * 2); next.set(this.data); this.data = next; }
+    if (this.length + 3 > this.data.length) { const next = new Uint32Array(Math.max(3, this.data.length * 2)); next.set(this.data); this.data = next; }
     this.data[this.length++] = a; this.data[this.length++] = b; this.data[this.length++] = c;
   }
 }
