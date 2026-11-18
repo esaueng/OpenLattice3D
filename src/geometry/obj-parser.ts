@@ -61,6 +61,9 @@ export function parseOBJ(input: ArrayBuffer | Uint8Array, limits: ImportLimits =
       const c = bytes[i];
       if (c === 0x0a) { i++; break; }
       if (c === 0x23 /* # */) { while (i < length && bytes[i] !== 0x0a) i++; continue; }
+      // Other C0 controls end a token but are not skipped as whitespace.
+      // Reject them so the lexer always advances, exits or reports an error.
+      if (c < 0x20) fail('unsupported control byte');
       if (c === 0x5c /* \ */) {
         let k = i + 1;
         while (k < length && (bytes[k] === 0x20 || bytes[k] === 0x09 || bytes[k] === 0x0d)) k++;
