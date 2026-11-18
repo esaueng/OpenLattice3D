@@ -8,7 +8,39 @@ import { DEFAULT_PARAMS } from '../types/project';
 const encode = (text: string) => new TextEncoder().encode(text);
 const limits = (overrides: Partial<ImportLimits>): ImportLimits => ({ ...DEFAULT_IMPORT_LIMITS, ...overrides });
 
+function parseWithTokenWorkBudget(input: Uint8Array) {
+  // Bound the original nonadvancing lexer without a runaway allocation or
+  // a hung test process. Restore the prototype before any test assertion.
+  const push = Array.prototype.push;
+  let calls = 0;
+  Array.prototype.push = function (this: unknown[], ...items: unknown[]): number {
+    if (++calls > 64) throw new Error('Test token work budget exhausted');
+    return push.apply(this, items);
+  };
+  try { return parseOBJ(input); }
+  finally { Array.prototype.push = push; }
+}
+
 describe('OBJ import', () => {
+  const triangle = 'v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n';
+  const unsupportedControls = Array.from({ length: 32 }, (_, byte) => byte)
+    .filter((byte) => ![0x09, 0x0a, 0x0d].includes(byte));
+
+  it.each(unsupportedControls)('rejects control byte %i without stalling tokenization', (byte) => {
+    const control = String.fromCharCode(byte);
+    for (const text of [control + triangle, `v 0${control} 0 0\n`, `g ignored${control}\n${triangle}`]) {
+      expect(() => parseWithTokenWorkBudget(encode(text))).toThrow(/OBJ parse failed at line \d+: unsupported control byte/);
+    }
+  });
+
+  it('preserves whitespace, comments and continued face lines', () => {
+    const comment = unsupportedControls.map((byte) => String.fromCharCode(byte)).join('');
+    const text = `# ignored ${comment}\r\nv\t0 0 0\r\nv 1 0 0\nv 0 1 0\nf 1 \\\r\n 2 3 # ${comment}\n`;
+    const parsed = parseWithTokenWorkBudget(encode(text));
+    expect(parsed.mesh.triCount).toBe(1);
+    expect(Array.from(parsed.mesh.positions)).toEqual([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+  });
+
   it('reads back the repo OBJ writer output with identical geometry', () => {
     for (const mesh of [generateCubeMesh(30), generateTorusMesh(20, 6, 24, 12)]) {
       const parsed = parseOBJ(buildObj(mesh, { meshFileName: 'part.stl', params: DEFAULT_PARAMS, generationSeed: 7 }));
