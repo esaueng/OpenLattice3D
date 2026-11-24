@@ -15,7 +15,7 @@ A browser-based tool for generating 3D-printable lattice structures inside arbit
 
 ## Requirements
 
-- Node.js 22 (the CI baseline uses Node 22)
+- Node.js 22.12 or later (CI uses the Node.js 22 line)
 - npm 10 or newer
 - A modern desktop browser with WebGL support
 
